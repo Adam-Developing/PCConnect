@@ -1,0 +1,25 @@
+<resources>
+    <string name="app_name">PCConnect</string>
+    <string name="Result"> </string>
+    <string name="select">Select PC</string>
+    <string name="title_activity_settings">SettingsActivity</string>
+
+    <!-- Preference Titles -->
+    <string name="fingerprint_header">Fingerprint</string>
+
+    <!-- Fingerprint Preferences -->
+    <string name="App">The main app</string>
+    <string name="Sleep">Sleep</string>
+    <string name="Hibernate">Hibernate</string>
+    <string name="Shutdown">Shutdown</string>
+    <string name="Lock">Lock</string>
+    <string name="Signout">Sign Out</string>
+    <string name="Restart">Restart</string>
+
+    <!-- Sync Preferences -->
+    <string name="sync_title">Sync email periodically</string>
+    <string name="attachment_title">Download incoming attachments</string>
+    <string name="attachment_summary_on">Automatically download attachments for incoming emails
+    </string>
+    <string name="attachment_summary_off">Only download attachments when manually requested</string>
+</resources>

@@ -1,0 +1,30 @@
+# Deprecated directories
+api_PHP_Deprecated/
+PCClient_Deprecated/
+
+# Node
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# IDEs and Editors
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Sensitive/Keys
+App/Key Store/
+*.jks
+*.keystore
+.env
+.env.*
+*.pem
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Databases with data
+DB/pcconnect.sql
+DB/pcconnect_new.sql

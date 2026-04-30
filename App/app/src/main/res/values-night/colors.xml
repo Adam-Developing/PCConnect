@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+    <color name="reminderText">@color/white</color>
+    <color name="colorPrimary">#4EABFF</color> <!-- Softer blue for dark backgrounds -->
+    <color name="colorPrimaryVariant">#3A8DD8</color>
+    <color name="colorOnPrimary">#FFFFFF</color>
+
+    <color name="background">#121212</color>
+    <color name="textPrimary">#FFFFFF</color>
+    <color name="textSecondary">#B3B3B3</color>
+
+    <color name="inputBackground">#1F1F1F</color>
+    <color name="inputBorder">#373737</color>
+
+</resources>
