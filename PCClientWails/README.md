@@ -1,10 +1,10 @@
  # PCClientWails
 
-Go + Wails v2 desktop implementation of PCClient using the project blueprint.
+Go + Wails v3 desktop implementation of PCClient using the project blueprint.
 
 ## What is implemented
 
-- Wails v2 app scaffold (`main.go`, `wails.json`, Go backend bindings)
+- Wails v3 app scaffold (`main.go`, `wails.json`, Go backend bindings)
 - React + TypeScript frontend with screens:
   - Login
   - Dashboard
@@ -29,7 +29,7 @@ Go + Wails v2 desktop implementation of PCClient using the project blueprint.
 
 - Go `1.22+`
 - Node.js `18+`
-- Wails CLI v2 (`go install github.com/wailsapp/wails/v2/cmd/wails@latest`)
+- Wails CLI v3 (`go install github.com/wailsapp/wails/v3/cmd/wails@latest`)
 
 ## Quick start
 

@@ -14,21 +14,39 @@ var assets embed.FS
 func main() {
 	var applicationInstance = app.NewApp()
 
-	app := application.New(application.Options{
+	appInstance := application.New(application.Options{
 		Name:   "PCConnect",
 		Assets: application.AssetOptions{Handler: application.AssetFileServerFS(assets)},
+		Services: []application.Service{
+			application.NewService(applicationInstance),
+		},
 		OnShutdown: func() {
 			applicationInstance.ClearSession()
 		},
 	})
 
-	mainWindow := app.NewWebviewWindowWithOptions(application.WebviewWindowOptions{
+	mainWindow := appInstance.Window.NewWithOptions(application.WebviewWindowOptions{
 		Title:     "PCConnect",
 		Width:     1320,
 		Height:    860,
 		MinWidth:  1024,
 		MinHeight: 720,
 	})
+
+	reminderWindow := appInstance.Window.NewWithOptions(application.WebviewWindowOptions{
+		Name:             "reminder",
+		Title:            "Reminder",
+		AlwaysOnTop:      true,
+		DisableResize:    true,
+		Frameless:        true,
+		StartState:       application.WindowStateFullscreen,
+		BackgroundType:   application.BackgroundTypeSolid,
+		BackgroundColour: application.NewRGBA(255, 0, 0, 179),
+		URL:              "/?window=reminder",
+		Hidden:           true,
+	})
+
+	applicationInstance.SetWindows(mainWindow, reminderWindow)
 
 	// Initialize Tray in a goroutine
 	trayManager := tray.NewTrayManager(
@@ -40,13 +58,12 @@ func main() {
 		},
 		func() {
 			applicationInstance.ClearSession()
-			application.Get().Event.Emit("logout", nil)
+			mainWindow.EmitEvent("logout")
 		},
 	)
 	go trayManager.Run()
-	applicationInstance.Startup(nil)
 
-	err2 := application.Get().Run()
+	err2 := appInstance.Run()
 	if err2 != nil {
 		println("Error:", err2.Error())
 	}

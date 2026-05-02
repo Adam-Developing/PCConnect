@@ -40,11 +40,11 @@ export default function FullscreenReminder({ reminder, session, onComplete }: Pr
     };
   }, [reminder, onComplete]);
 
-  const bgColor = session.fullscreenBgColor || '#ff0000cc';
+  const bgColor = session.fullscreenBgColor || '#ff0000';
   const textColor = session.fullscreenTextColor || '#ffffff';
 
   // Ensure background is translucent if it's a hex code from the picker
-  const displayBgColor = (bgColor.startsWith('#') && bgColor.length === 7) ? bgColor + 'cc' : bgColor;
+  const displayBgColor = (bgColor.startsWith('#') && bgColor.length === 7) ? bgColor + 'b3' : bgColor;
 
   return (
     <div 

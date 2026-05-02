@@ -11,7 +11,6 @@ import DashboardTab from './components/DashboardTab';
 import RemindersTab from './components/RemindersTab';
 import DevicesTab from './components/DevicesTab';
 import SettingsTab from './components/SettingsTab';
-import FullscreenReminder from './components/FullscreenReminder';
 
 type Tab = 'dashboard' | 'reminders' | 'devices' | 'settings';
 type Stage = 'login' | 'device' | 'app';
@@ -47,7 +46,6 @@ export default function AppNew() {
   const [queueSize, setQueueSize] = useState(loadQueue().length);
   const [busy, setBusy] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
-  const [reminderQueue, setReminderQueue] = useState<Reminder[]>([]);
   const fallbackTimerRef = useRef<number | null>(null);
   const fallbackIntervalRef = useRef<number>(5000);
 
@@ -88,13 +86,6 @@ export default function AppNew() {
       handleLogout();
     });
 
-    const unsubFullscreen = window.runtime.EventsOn('show_fullscreen_reminder', (r: Reminder) => {
-      setReminderQueue(prev => {
-        if (prev.some(p => p.ID === r.ID)) return prev;
-        return [...prev, r];
-      });
-    });
-
     // Check initial status
     const appBinding = window.go?.app?.App;
     if (appBinding) {
@@ -112,7 +103,6 @@ export default function AppNew() {
       unsubReminders();
       unsubStatus();
       unsubLogout();
-      unsubFullscreen();
     };
   }, [session]);
 
@@ -239,17 +229,6 @@ export default function AppNew() {
 
   return (
     <>
-      {reminderQueue.length > 0 && (
-        <FullscreenReminder 
-          key={reminderQueue[0].ID}
-          reminder={reminderQueue[0]} 
-          session={session}
-          onComplete={(r) => { 
-            handleToggleReminder(r); 
-            setReminderQueue(prev => prev.filter(p => p.ID !== r.ID));
-          }} 
-        />
-      )}
       <ToastContainer toasts={toasts} onRemove={removeToast} />
       <div className="app-shell">
         <aside className="sidebar">

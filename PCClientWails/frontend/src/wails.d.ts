@@ -6,6 +6,7 @@ declare global {
       EventsOn: (eventName: string, callback: (data?: any) => void) => () => void;
       EventsEmit: (eventName: string, ...args: any[]) => void;
       WindowShow: () => void;
+      WindowHide: () => void;
       WindowFullscreen: () => void;
       WindowUnfullscreen: () => void;
       WindowSetAlwaysOnTop: (b: boolean) => void;

@@ -11,6 +11,12 @@ type Props = {
   onSessionUpdate?: (newSession: Session) => void;
 };
 
+const normalizeColorValue = (value: string | undefined, fallback: string) => {
+  if (!value) return fallback;
+  if (value.startsWith('#') && value.length === 9) return value.slice(0, 7);
+  return value;
+};
+
 function AutoStartToggle({ addToast }: { addToast: Props['addToast'] }) {
   const [enabled, setEnabled] = useState(false);
 
@@ -57,8 +63,8 @@ export default function SettingsTab({ theme, session, addToast, onToggleTheme, o
   const [confirmPw, setConfirmPw] = useState('');
 
   const [notificationStyle, setNotificationStyle] = useState<'toast' | 'fullscreen'>(session.notificationStyle || 'toast');
-  const [bgColor, setBgColor] = useState(session.fullscreenBgColor || '#ff0000cc');
-  const [textColor, setTextColor] = useState(session.fullscreenTextColor || '#ffffff');
+  const [bgColor, setBgColor] = useState(normalizeColorValue(session.fullscreenBgColor, '#ff0000'));
+  const [textColor, setTextColor] = useState(normalizeColorValue(session.fullscreenTextColor, '#ffffff'));
 
   useEffect(() => {
     fetchProfile(session)

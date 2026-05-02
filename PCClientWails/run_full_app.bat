@@ -27,7 +27,7 @@ where wails >nul 2>nul
 if errorlevel 1 (
   echo [ERROR] Wails CLI not found in PATH.
   echo Install with:
-  echo   go install github.com/wailsapp/wails/v2/cmd/wails@latest
+  echo   go install github.com/wailsapp/wails/v3/cmd/wails@latest
   exit /b 1
 )
 

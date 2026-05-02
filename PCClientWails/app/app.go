@@ -15,15 +15,17 @@ import (
 	"github.com/Adam-Developing/PCConnect/PCClientWails/internal/commands"
 	"github.com/Adam-Developing/PCConnect/PCClientWails/internal/reminders"
 	"github.com/Adam-Developing/PCConnect/PCClientWails/internal/websocket"
-	"github.com/wailsapp/wails/v2/pkg/runtime"
+	"github.com/wailsapp/wails/v3/pkg/application"
 	"golang.org/x/sys/windows/registry"
 )
 
 type App struct {
-	ctx       context.Context
-	store     *SessionStore
-	wsManager *websocket.ClientManager
-	scheduler *reminders.Scheduler
+	ctx            context.Context
+	store          *SessionStore
+	wsManager      *websocket.ClientManager
+	scheduler      *reminders.Scheduler
+	mainWindow     *application.WebviewWindow
+	reminderWindow *application.WebviewWindow
 }
 
 func NewApp() *App {
@@ -35,7 +37,7 @@ func NewApp() *App {
 	return &App{store: store}
 }
 
-func (a *App) Startup(ctx context.Context) {
+func (a *App) ServiceStartup(ctx context.Context, _ application.ServiceOptions) error {
 	a.ctx = ctx
 
 	// Initialize Toast
@@ -53,6 +55,7 @@ func (a *App) Startup(ctx context.Context) {
 		}
 		// WebSocket will be started when the frontend signals it's ready via FrontendReady()
 	}
+	return nil
 }
 
 func (a *App) FrontendReady() {
@@ -66,8 +69,32 @@ func (a *App) FrontendReady() {
 	}
 }
 
+func (a *App) SetWindows(mainWindow *application.WebviewWindow, reminderWindow *application.WebviewWindow) {
+	a.mainWindow = mainWindow
+	a.reminderWindow = reminderWindow
+}
+
 func (a *App) GetContext() context.Context {
 	return a.ctx
+}
+
+func (a *App) emitToMain(name string, data ...any) {
+	if a.mainWindow != nil {
+		a.mainWindow.EmitEvent(name, data...)
+		return
+	}
+	application.Get().Event.Emit(name, data...)
+}
+
+func (a *App) showFullscreenReminder(reminder reminders.Reminder) {
+	if a.reminderWindow != nil {
+		a.reminderWindow.Show()
+		a.reminderWindow.SetAlwaysOnTop(true)
+		a.reminderWindow.Fullscreen()
+		a.reminderWindow.EmitEvent("show_fullscreen_reminder", reminder)
+		return
+	}
+	a.emitToMain("show_fullscreen_reminder", reminder)
 }
 
 func (a *App) startWebSocket(s Session) {
@@ -92,7 +119,7 @@ func (a *App) startWebSocket(s Session) {
 			if err := json.Unmarshal(dataJSON, &items); err == nil {
 				a.SyncReminders(items)
 				cache.Save(cache.CacheData{Reminders: items})
-				runtime.EventsEmit(a.ctx, "reminders_updated", items)
+				a.emitToMain("reminders_updated", items)
 			} else {
 				var wrapped struct {
 					Reminders []reminders.Reminder `json:"reminders"`
@@ -100,7 +127,7 @@ func (a *App) startWebSocket(s Session) {
 				if err := json.Unmarshal(dataJSON, &wrapped); err == nil {
 					a.SyncReminders(wrapped.Reminders)
 					cache.Save(cache.CacheData{Reminders: wrapped.Reminders})
-					runtime.EventsEmit(a.ctx, "reminders_updated", wrapped.Reminders)
+					a.emitToMain("reminders_updated", wrapped.Reminders)
 				}
 			}
 		},
@@ -119,10 +146,10 @@ func (a *App) startWebSocket(s Session) {
 				}
 				a.Notify(title, body)
 			}
-			runtime.EventsEmit(a.ctx, "reminder_notify", payload)
+			a.emitToMain("reminder_notify", payload)
 		},
 		func(connected bool, mode string) {
-			runtime.EventsEmit(a.ctx, "connection_status", map[string]interface{}{
+			a.emitToMain("connection_status", map[string]interface{}{
 				"connected": connected,
 				"mode":      mode,
 			})
@@ -134,11 +161,10 @@ func (a *App) startWebSocket(s Session) {
 			session, _ := a.store.Load()
 			if session.NotificationStyle == "fullscreen" {
 				log.Printf("[App] Showing fullscreen reminder: %d", r.ID)
-				runtime.WindowShow(a.ctx)
-				runtime.EventsEmit(a.ctx, "show_fullscreen_reminder", r)
+				a.showFullscreenReminder(r)
 			} else {
 				a.Notify(r.Reminder, fmt.Sprintf("Scheduled for: %s %s", r.Date, r.Time))
-				runtime.EventsEmit(a.ctx, "reminder_notify", r)
+				a.emitToMain("reminder_notify", r)
 			}
 		})
 		a.scheduler.Start()
