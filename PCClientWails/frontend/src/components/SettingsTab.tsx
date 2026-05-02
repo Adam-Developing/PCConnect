@@ -12,9 +12,12 @@ type Props = {
   onSessionUpdate?: (newSession: Session) => void;
 };
 
+const HEX_WITH_ALPHA_LENGTH = 9;
+const HEX_WITHOUT_ALPHA_LENGTH = 7;
+
 const normalizeColorValue = (value: string | undefined, fallback: string) => {
   if (!value) return fallback;
-  if (value.startsWith('#') && value.length === 9) return value.slice(0, 7);
+  if (value.startsWith('#') && value.length === HEX_WITH_ALPHA_LENGTH) return value.slice(0, HEX_WITHOUT_ALPHA_LENGTH);
   return value;
 };
 

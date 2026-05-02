@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import type { Reminder, Session } from '../types';
-import { DEFAULT_FULLSCREEN_BG, DEFAULT_FULLSCREEN_TEXT } from '../lib/reminderDefaults';
+import { DEFAULT_FULLSCREEN_ALPHA_HEX, DEFAULT_FULLSCREEN_BG, DEFAULT_FULLSCREEN_TEXT } from '../lib/reminderDefaults';
 
 type Props = {
   reminder: Reminder;
@@ -45,7 +45,7 @@ export default function FullscreenReminder({ reminder, session, onComplete }: Pr
   const textColor = session.fullscreenTextColor || DEFAULT_FULLSCREEN_TEXT;
 
   // Ensure background is translucent if it's a hex code from the picker
-  const displayBgColor = (bgColor.startsWith('#') && bgColor.length === 7) ? bgColor + 'b3' : bgColor;
+  const displayBgColor = (bgColor.startsWith('#') && bgColor.length === 7) ? bgColor + DEFAULT_FULLSCREEN_ALPHA_HEX : bgColor;
 
   return (
     <div 

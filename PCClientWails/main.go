@@ -11,7 +11,7 @@ import (
 //go:embed all:frontend/dist
 var assets embed.FS
 
-const reminderWindowAlpha70 = 179
+const reminderWindowAlpha = 179 // ~70% opacity
 
 func main() {
 	var backendApp = app.NewApp()
@@ -43,7 +43,7 @@ func main() {
 		Frameless:        true,
 		StartState:       application.WindowStateFullscreen,
 		BackgroundType:   application.BackgroundTypeSolid,
-		BackgroundColour: application.NewRGBA(255, 0, 0, reminderWindowAlpha70),
+		BackgroundColour: application.NewRGBA(255, 0, 0, reminderWindowAlpha),
 		URL:              "/?window=reminder",
 		Hidden:           true,
 	})

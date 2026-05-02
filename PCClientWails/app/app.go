@@ -37,7 +37,8 @@ func NewApp() *App {
 	return &App{store: store}
 }
 
-func (a *App) ServiceStartup(ctx context.Context, _ application.ServiceOptions) error {
+func (a *App) ServiceStartup(ctx context.Context, opts application.ServiceOptions) error {
+	_ = opts // reserved for future use
 	a.ctx = ctx
 
 	// Initialize Toast
