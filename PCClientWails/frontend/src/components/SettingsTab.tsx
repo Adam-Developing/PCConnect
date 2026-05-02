@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { Session, Theme, ToastType } from '../types';
 import { fetchProfile, updateProfile, sha256 } from '../lib/api';
+import { DEFAULT_FULLSCREEN_BG, DEFAULT_FULLSCREEN_TEXT } from '../lib/reminderDefaults';
 
 type Props = {
   theme: Theme;
@@ -63,8 +64,8 @@ export default function SettingsTab({ theme, session, addToast, onToggleTheme, o
   const [confirmPw, setConfirmPw] = useState('');
 
   const [notificationStyle, setNotificationStyle] = useState<'toast' | 'fullscreen'>(session.notificationStyle || 'toast');
-  const [bgColor, setBgColor] = useState(normalizeColorValue(session.fullscreenBgColor, '#ff0000'));
-  const [textColor, setTextColor] = useState(normalizeColorValue(session.fullscreenTextColor, '#ffffff'));
+  const [bgColor, setBgColor] = useState(normalizeColorValue(session.fullscreenBgColor, DEFAULT_FULLSCREEN_BG));
+  const [textColor, setTextColor] = useState(normalizeColorValue(session.fullscreenTextColor, DEFAULT_FULLSCREEN_TEXT));
 
   useEffect(() => {
     fetchProfile(session)

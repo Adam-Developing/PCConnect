@@ -83,6 +83,7 @@ func (a *App) emitToMain(name string, data ...any) {
 		a.mainWindow.EmitEvent(name, data...)
 		return
 	}
+	// Fallback for early startup before the main window is wired.
 	application.Get().Event.Emit(name, data...)
 }
 

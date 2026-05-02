@@ -2,14 +2,15 @@ import { useEffect, useMemo, useState } from 'react';
 import type { Reminder, Session } from './types';
 import FullscreenReminder from './components/FullscreenReminder';
 import { completeReminder } from './lib/api';
+import { DEFAULT_FULLSCREEN_BG, DEFAULT_FULLSCREEN_TEXT } from './lib/reminderDefaults';
 
 const fallbackSession: Session = {
   baseUrl: '',
   apiKey: '',
   pcName: '',
   notificationStyle: 'fullscreen',
-  fullscreenBgColor: '#ff0000',
-  fullscreenTextColor: '#ffffff'
+  fullscreenBgColor: DEFAULT_FULLSCREEN_BG,
+  fullscreenTextColor: DEFAULT_FULLSCREEN_TEXT
 };
 
 export default function ReminderWindow() {

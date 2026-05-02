@@ -11,21 +11,23 @@ import (
 //go:embed all:frontend/dist
 var assets embed.FS
 
-func main() {
-	var applicationInstance = app.NewApp()
+const reminderWindowAlpha70 = 179
 
-	appInstance := application.New(application.Options{
+func main() {
+	var backendApp = app.NewApp()
+
+	wailsApp := application.New(application.Options{
 		Name:   "PCConnect",
 		Assets: application.AssetOptions{Handler: application.AssetFileServerFS(assets)},
 		Services: []application.Service{
-			application.NewService(applicationInstance),
+			application.NewService(backendApp),
 		},
 		OnShutdown: func() {
-			applicationInstance.ClearSession()
+			backendApp.ClearSession()
 		},
 	})
 
-	mainWindow := appInstance.Window.NewWithOptions(application.WebviewWindowOptions{
+	mainWindow := wailsApp.Window.NewWithOptions(application.WebviewWindowOptions{
 		Title:     "PCConnect",
 		Width:     1320,
 		Height:    860,
@@ -33,7 +35,7 @@ func main() {
 		MinHeight: 720,
 	})
 
-	reminderWindow := appInstance.Window.NewWithOptions(application.WebviewWindowOptions{
+	reminderWindow := wailsApp.Window.NewWithOptions(application.WebviewWindowOptions{
 		Name:             "reminder",
 		Title:            "Reminder",
 		AlwaysOnTop:      true,
@@ -41,12 +43,12 @@ func main() {
 		Frameless:        true,
 		StartState:       application.WindowStateFullscreen,
 		BackgroundType:   application.BackgroundTypeSolid,
-		BackgroundColour: application.NewRGBA(255, 0, 0, 179),
+		BackgroundColour: application.NewRGBA(255, 0, 0, reminderWindowAlpha70),
 		URL:              "/?window=reminder",
 		Hidden:           true,
 	})
 
-	applicationInstance.SetWindows(mainWindow, reminderWindow)
+	backendApp.SetWindows(mainWindow, reminderWindow)
 
 	// Initialize Tray in a goroutine
 	trayManager := tray.NewTrayManager(
@@ -57,13 +59,13 @@ func main() {
 			application.Get().Quit()
 		},
 		func() {
-			applicationInstance.ClearSession()
+			backendApp.ClearSession()
 			mainWindow.EmitEvent("logout")
 		},
 	)
 	go trayManager.Run()
 
-	err2 := appInstance.Run()
+	err2 := wailsApp.Run()
 	if err2 != nil {
 		println("Error:", err2.Error())
 	}
