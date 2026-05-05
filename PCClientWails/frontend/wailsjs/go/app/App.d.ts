@@ -28,4 +28,6 @@ export function SaveSession(arg1:app.Session):Promise<app.Session>;
 
 export function SetAutoStart(arg1:boolean):Promise<void>;
 
+export function Startup(arg1:context.Context):Promise<void>;
+
 export function SyncReminders(arg1:Array<reminders.Reminder>):Promise<void>;

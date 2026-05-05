@@ -50,6 +50,10 @@ export function SetAutoStart(arg1) {
   return window['go']['app']['App']['SetAutoStart'](arg1);
 }
 
+export function Startup(arg1) {
+  return window['go']['app']['App']['Startup'](arg1);
+}
+
 export function SyncReminders(arg1) {
   return window['go']['app']['App']['SyncReminders'](arg1);
 }
