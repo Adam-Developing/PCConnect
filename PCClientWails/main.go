@@ -17,6 +17,9 @@ func main() {
 	wailsApp := application.New(application.Options{
 		Name:   "PCConnect",
 		Assets: application.AssetOptions{Handler: application.AssetFileServerFS(assets)},
+		Bindings: []any{
+			applicationInstance,
+		},
 		OnShutdown: func() {
 			applicationInstance.ClearSession()
 		},
