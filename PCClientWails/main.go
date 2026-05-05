@@ -14,7 +14,7 @@ var assets embed.FS
 func main() {
 	var applicationInstance = app.NewApp()
 
-	app := application.New(application.Options{
+	wailsApp := application.New(application.Options{
 		Name:   "PCConnect",
 		Assets: application.AssetOptions{Handler: application.AssetFileServerFS(assets)},
 		OnShutdown: func() {
@@ -22,12 +22,13 @@ func main() {
 		},
 	})
 
-	mainWindow := app.NewWebviewWindowWithOptions(application.WebviewWindowOptions{
+	mainWindow := wailsApp.Window.NewWithOptions(application.WebviewWindowOptions{
 		Title:     "PCConnect",
 		Width:     1320,
 		Height:    860,
 		MinWidth:  1024,
 		MinHeight: 720,
+		BackgroundColour: application.NewRGB(255, 255, 255),
 	})
 
 	// Initialize Tray in a goroutine
@@ -36,17 +37,17 @@ func main() {
 			mainWindow.Show()
 		},
 		func() {
-			application.Get().Quit()
+			wailsApp.Quit()
 		},
 		func() {
 			applicationInstance.ClearSession()
-			application.Get().Event.Emit("logout", nil)
+			wailsApp.Event.Emit("logout")
 		},
 	)
 	go trayManager.Run()
-	applicationInstance.Startup(nil)
+	applicationInstance.Startup(wailsApp)
 
-	err2 := application.Get().Run()
+	err2 := wailsApp.Run()
 	if err2 != nil {
 		println("Error:", err2.Error())
 	}
