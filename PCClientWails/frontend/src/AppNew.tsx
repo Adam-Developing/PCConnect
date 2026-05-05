@@ -62,6 +62,7 @@ export default function AppNew() {
     const binding = window.go?.app?.App;
     if (!binding) return;
     binding.GetSession().then((s: any) => {
+      console.log("Session:", s);
       if (s?.baseUrl && s?.apiKey && s?.pcName) { setSession(s); setStage('app'); }
     }).catch(() => { });
   }, []);
