@@ -1,5 +1,4 @@
 import { useEffect } from 'react';
-import { WindowFullscreen, WindowSetAlwaysOnTop, WindowUnfullscreen } from '../../wailsjs/runtime/runtime';
 import type { Reminder, Session } from '../types';
 
 type Props = {
@@ -17,8 +16,8 @@ export default function FullscreenReminder({ reminder, session, onComplete }: Pr
     // Try to go true fullscreen
     const wailsBridge = window.wails;
     if (wailsBridge) {
-      WindowFullscreen();
-      WindowSetAlwaysOnTop(true);
+      wailsBridge.Window.Fullscreen().catch(() => {});
+      wailsBridge.Window.SetAlwaysOnTop(true).catch(() => {});
     }
 
     const blockKeys = (e: KeyboardEvent) => {
@@ -36,8 +35,8 @@ export default function FullscreenReminder({ reminder, session, onComplete }: Pr
       window.removeEventListener('keydown', blockKeys, { capture: true });
       // Restore normal window
       if (wailsBridge) {
-        WindowUnfullscreen();
-        WindowSetAlwaysOnTop(false);
+        wailsBridge.Window.UnFullscreen().catch(() => {});
+        wailsBridge.Window.SetAlwaysOnTop(false).catch(() => {});
       }
     };
   }, [reminder, onComplete]);
