@@ -3,6 +3,7 @@ import { addReminder, clearCommand, completeReminder, fetchDevices, fetchReminde
 import { enqueue, loadQueue, removeById } from './lib/offlineQueue';
 import { useToasts } from './lib/useToasts';
 import { useTheme } from './lib/useTheme';
+import { clearSession, executeSystemCommand, frontendReady, getCachedReminders, getConnectionStatus, getSession, saveSession, syncReminders } from './lib/wails';
 import type { CommandLog, QueueItem, Reminder, Session } from './types';
 import ToastContainer from './components/ToastContainer';
 import LoginPage from './components/LoginPage';
@@ -11,7 +12,6 @@ import DashboardTab from './components/DashboardTab';
 import RemindersTab from './components/RemindersTab';
 import DevicesTab from './components/DevicesTab';
 import SettingsTab from './components/SettingsTab';
-import FullscreenReminder from './components/FullscreenReminder';
 
 type Tab = 'dashboard' | 'reminders' | 'devices' | 'settings';
 type Stage = 'login' | 'device' | 'app';
@@ -47,7 +47,6 @@ export default function AppNew() {
   const [queueSize, setQueueSize] = useState(loadQueue().length);
   const [busy, setBusy] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
-  const [reminderQueue, setReminderQueue] = useState<Reminder[]>([]);
   const fallbackTimerRef = useRef<number | null>(null);
   const fallbackIntervalRef = useRef<number>(5000);
 
@@ -59,9 +58,7 @@ export default function AppNew() {
 
   // Restore session
   useEffect(() => {
-    const binding = window.go?.app?.App;
-    if (!binding) return;
-    binding.GetSession().then((s: any) => {
+    getSession().then((s) => {
       if (s?.baseUrl && s?.apiKey && s?.pcName) { setSession(s); setStage('app'); }
     }).catch(() => { });
   }, []);
@@ -73,62 +70,48 @@ export default function AppNew() {
     bootstrap(session);
     
     // Listen for events from Go
-    const unsubReminders = window.runtime.EventsOn('reminders_updated', (data: any) => {
-      const items = normalizeSocketReminders(data);
-      if (items.length || Array.isArray(data)) setReminders(items);
-    });
+    const unsubReminders = window.wails?.Events?.On('reminders_updated', (event) => {
+      const items = normalizeSocketReminders(event?.data);
+      if (items.length || Array.isArray(event?.data)) setReminders(items);
+    }) ?? (() => {});
 
-    const unsubStatus = window.runtime.EventsOn('connection_status', (status: { connected: boolean, mode: 'realtime' | 'degraded' | 'offline' }) => {
+    const unsubStatus = window.wails?.Events?.On('connection_status', (event) => {
+      const status = event?.data as { connected: boolean; mode: 'realtime' | 'degraded' | 'offline' } | undefined;
+      if (!status) return;
       setSocketHealthy(status.connected);
       setMode(status.mode);
       setStatusText(status.connected ? 'Connected' : 'Reconnecting…');
-    });
+    }) ?? (() => {});
 
-    const unsubLogout = window.runtime.EventsOn('logout', () => {
+    const unsubLogout = window.wails?.Events?.On('logout', () => {
       handleLogout();
-    });
-
-    const unsubFullscreen = window.runtime.EventsOn('show_fullscreen_reminder', (r: Reminder) => {
-      setReminderQueue(prev => {
-        if (prev.some(p => p.ID === r.ID)) return prev;
-        return [...prev, r];
-      });
-    });
+    }) ?? (() => {});
 
     // Check initial status
-    const appBinding = window.go?.app?.App;
-    if (appBinding) {
-      appBinding.GetConnectionStatus().then((status: any) => {
-        setSocketHealthy(status.socketHealthy);
-        setMode(status.mode as any);
-        setStatusText(status.socketHealthy ? 'Connected' : 'Waiting…');
-      });
-      if (appBinding.FrontendReady) {
-        appBinding.FrontendReady();
-      }
-    }
+    getConnectionStatus().then((status) => {
+      if (!status) return;
+      setSocketHealthy(status.socketHealthy);
+      setMode(status.mode as any);
+      setStatusText(status.socketHealthy ? 'Connected' : 'Waiting…');
+    });
+    frontendReady();
 
     return () => {
       unsubReminders();
       unsubStatus();
       unsubLogout();
-      unsubFullscreen();
     };
   }, [session]);
 
   async function bootstrap(s: Session) {
     try {
       // Try to load from cache first for instant feedback
-      if (window.go?.app?.App?.GetCachedReminders) {
-        const cached = await window.go.app.App.GetCachedReminders();
-        if (cached) setReminders(normalizeSocketReminders(cached));
-      }
+      const cached = await getCachedReminders();
+      if (cached) setReminders(normalizeSocketReminders(cached));
 
       const data = await fetchReminders(s);
       setReminders(data);
-      if (window.go?.app?.App?.SyncReminders) {
-        await window.go.app.App.SyncReminders(data);
-      }
+      await syncReminders(data);
       await flushQueue(s);
     } catch (e) { 
       console.warn('Bootstrap fetch failed, using cache if available', e);
@@ -155,7 +138,7 @@ export default function AppNew() {
     const log: CommandLog = { id: makeId(), command, status: 'received', at: new Date().toISOString(), message: 'Received' };
     setCommandLog(prev => [log, ...prev].slice(0, 30));
     try {
-      if (window.go?.app?.App?.ExecuteSystemCommand) await window.go.app.App.ExecuteSystemCommand(command);
+      await executeSystemCommand(command);
       setCommandLog(prev => prev.map(e => e.id === log.id ? { ...e, status: 'executed', message: 'Done' } : e));
       addToast('info', `Command executed: ${command}`);
     } catch (err) {
@@ -183,14 +166,14 @@ export default function AppNew() {
     try {
       await registerDevice({ apiKey: authApiKey }, pcName.trim());
       const s: Session = { baseUrl: 'http://localhost:3000/api_node', apiKey: authApiKey, pcName: pcName.trim() };
-      if (window.go?.app?.App?.SaveSession) await window.go.app.App.SaveSession(s);
+      await saveSession(s);
       setSession(s);
     } catch (e) { setErrorMessage((e as Error).message || 'Failed to connect'); }
     finally { setBusy(false); }
   }
 
   async function handleLogout() {
-    if (window.go?.app?.App?.ClearSession) await window.go.app.App.ClearSession();
+    await clearSession();
     setSession(null); setStage('login'); setReminders([]); setCommandLog([]); setDevices([]);
     addToast('info', 'Signed out');
   }
@@ -239,17 +222,6 @@ export default function AppNew() {
 
   return (
     <>
-      {reminderQueue.length > 0 && (
-        <FullscreenReminder 
-          key={reminderQueue[0].ID}
-          reminder={reminderQueue[0]} 
-          session={session}
-          onComplete={(r) => { 
-            handleToggleReminder(r); 
-            setReminderQueue(prev => prev.filter(p => p.ID !== r.ID));
-          }} 
-        />
-      )}
       <ToastContainer toasts={toasts} onRemove={removeToast} />
       <div className="app-shell">
         <aside className="sidebar">

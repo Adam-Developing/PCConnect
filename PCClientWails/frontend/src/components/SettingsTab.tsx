@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { Session, Theme, ToastType } from '../types';
 import { fetchProfile, updateProfile, sha256 } from '../lib/api';
+import { isAutoStartEnabled, saveNotificationStyle, setAutoStart } from '../lib/wails';
 
 type Props = {
   theme: Theme;
@@ -15,17 +16,16 @@ function AutoStartToggle({ addToast }: { addToast: Props['addToast'] }) {
   const [enabled, setEnabled] = useState(false);
 
   useEffect(() => {
-    if (window.go?.app?.App?.IsAutoStartEnabled) {
-      window.go.app.App.IsAutoStartEnabled().then(setEnabled);
-    }
+    isAutoStartEnabled().then((value) => {
+      if (value === null) return;
+      setEnabled(value);
+    });
   }, []);
 
   const toggle = async () => {
     const next = !enabled;
-    const appBinding = window.go?.app?.App;
-    if (!appBinding) return;
     try {
-      await appBinding.SetAutoStart(next);
+      await setAutoStart(next);
       setEnabled(next);
       addToast('success', next ? 'Auto-start enabled' : 'Auto-start disabled');
     } catch (err) {
@@ -57,7 +57,7 @@ export default function SettingsTab({ theme, session, addToast, onToggleTheme, o
   const [confirmPw, setConfirmPw] = useState('');
 
   const [notificationStyle, setNotificationStyle] = useState<'toast' | 'fullscreen'>(session.notificationStyle || 'toast');
-  const [bgColor, setBgColor] = useState(session.fullscreenBgColor || '#ff0000cc');
+  const [bgColor, setBgColor] = useState(session.fullscreenBgColor || '#ff0000b3');
   const [textColor, setTextColor] = useState(session.fullscreenTextColor || '#ffffff');
 
   useEffect(() => {
@@ -120,14 +120,12 @@ export default function SettingsTab({ theme, session, addToast, onToggleTheme, o
 
   const handleNotificationStyleChange = async (style: 'toast' | 'fullscreen') => {
     try {
-      if (window.go?.app?.App?.SaveNotificationStyle) {
-        await window.go.app.App.SaveNotificationStyle(style, bgColor, textColor);
-        setNotificationStyle(style);
-        if (onSessionUpdate) {
-          onSessionUpdate({ ...session, notificationStyle: style, fullscreenBgColor: bgColor, fullscreenTextColor: textColor });
-        }
-        addToast('success', 'Notification style updated');
+      await saveNotificationStyle(style, bgColor, textColor);
+      setNotificationStyle(style);
+      if (onSessionUpdate) {
+        onSessionUpdate({ ...session, notificationStyle: style, fullscreenBgColor: bgColor, fullscreenTextColor: textColor });
       }
+      addToast('success', 'Notification style updated');
     } catch (err) {
       addToast('error', `Failed to update style: ${(err as Error).message}`);
     }
@@ -140,11 +138,9 @@ export default function SettingsTab({ theme, session, addToast, onToggleTheme, o
     else setTextColor(value);
 
     try {
-      if (window.go?.app?.App?.SaveNotificationStyle) {
-        await window.go.app.App.SaveNotificationStyle(notificationStyle, newBg, newText);
-        if (onSessionUpdate) {
-          onSessionUpdate({ ...session, notificationStyle, fullscreenBgColor: newBg, fullscreenTextColor: newText });
-        }
+      await saveNotificationStyle(notificationStyle, newBg, newText);
+      if (onSessionUpdate) {
+        onSessionUpdate({ ...session, notificationStyle, fullscreenBgColor: newBg, fullscreenTextColor: newText });
       }
     } catch (err) {
       // Background save, silently fail or toast
