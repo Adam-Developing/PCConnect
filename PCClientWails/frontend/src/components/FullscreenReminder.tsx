@@ -15,8 +15,8 @@ export default function FullscreenReminder({ reminder, session, onComplete }: Pr
     audio.play().catch(() => {});
 
     // Try to go true fullscreen
-    const runtime = (window as Window & { runtime?: unknown }).runtime;
-    if (runtime) {
+    const wailsBridge = window.wails;
+    if (wailsBridge) {
       WindowFullscreen();
       WindowSetAlwaysOnTop(true);
     }
@@ -35,7 +35,7 @@ export default function FullscreenReminder({ reminder, session, onComplete }: Pr
     return () => {
       window.removeEventListener('keydown', blockKeys, { capture: true });
       // Restore normal window
-      if (runtime) {
+      if (wailsBridge) {
         WindowUnfullscreen();
         WindowSetAlwaysOnTop(false);
       }
