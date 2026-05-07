@@ -1,10 +1,10 @@
  # PCClientWails
 
-Go + Wails v2 desktop implementation of PCClient using the project blueprint.
+Go + Wails v3 desktop implementation of PCClient using the project blueprint.
 
 ## What is implemented
 
-- Wails v2 app scaffold (`main.go`, `wails.json`, Go backend bindings)
+- Wails v3 app scaffold (`main.go`, `wails.json`, Go backend bindings)
 - React + TypeScript frontend with screens:
   - Login
   - Dashboard
@@ -29,7 +29,7 @@ Go + Wails v2 desktop implementation of PCClient using the project blueprint.
 
 - Go `1.22+`
 - Node.js `18+`
-- Wails CLI v2 (`go install github.com/wailsapp/wails/v2/cmd/wails@latest`)
+- Wails CLI v2 (`go install github.com/wailsapp/wails/v3/cmd/wails3@latest`)
 
 ## Quick start
 
@@ -44,7 +44,7 @@ This script will:
 - run `api_node\health_check.js` (DB + config checks)
 - start `api_node\server.js` in a new terminal window
 - wait for `http://localhost:3000/ping`
-- launch `wails dev`
+- launch `wails3 dev`
 
 ### 1) Install frontend dependencies
 
@@ -64,14 +64,14 @@ npm run dev
 
 ```powershell
 Set-Location "c:\Users\Adam\Documents\Filen\Projects\PCConnect\PCClientWails"
-wails dev
+wails3 dev
 ```
 
 ### 4) Build desktop executable
 
 ```powershell
 Set-Location "c:\Users\Adam\Documents\Filen\Projects\PCConnect\PCClientWails"
-wails build
+wails3 build
 ```
 
 ## Configure API base URL
@@ -93,4 +93,4 @@ npm run build
 
 - Current session store is file-based (`%AppData%/PCClient/wails/session.json`) to keep the scaffold straightforward.
 - You can upgrade to Windows Credential Manager storage in the next hardening pass.
-- If `wails dev` fails due to Application Control policy, run the script from an elevated shell or allow required binaries in your endpoint policy.
+- If `wails3 dev` fails due to Application Control policy, run the script from an elevated shell or allow required binaries in your endpoint policy.

@@ -14,6 +14,7 @@
     "socket.io-client": "^4.8.1"
   },
   "devDependencies": {
+    "@types/node": "^18.19.130",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.3",

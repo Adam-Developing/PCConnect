@@ -1,7 +1,6 @@
 package app
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -15,12 +14,12 @@ import (
 	"github.com/Adam-Developing/PCConnect/PCClientWails/internal/commands"
 	"github.com/Adam-Developing/PCConnect/PCClientWails/internal/reminders"
 	"github.com/Adam-Developing/PCConnect/PCClientWails/internal/websocket"
-	"github.com/wailsapp/wails/v2/pkg/runtime"
+	"github.com/wailsapp/wails/v3/pkg/application"
 	"golang.org/x/sys/windows/registry"
 )
 
 type App struct {
-	ctx       context.Context
+	wailsApp  *application.App
 	store     *SessionStore
 	wsManager *websocket.ClientManager
 	scheduler *reminders.Scheduler
@@ -35,8 +34,8 @@ func NewApp() *App {
 	return &App{store: store}
 }
 
-func (a *App) Startup(ctx context.Context) {
-	a.ctx = ctx
+func (a *App) Startup(wailsApp *application.App) {
+	a.wailsApp = wailsApp
 
 	// Initialize Toast
 	_ = toast.SetAppData(toast.AppData{
@@ -66,10 +65,6 @@ func (a *App) FrontendReady() {
 	}
 }
 
-func (a *App) GetContext() context.Context {
-	return a.ctx
-}
-
 func (a *App) startWebSocket(s Session) {
 	if a.wsManager != nil {
 		a.wsManager.Stop()
@@ -92,7 +87,9 @@ func (a *App) startWebSocket(s Session) {
 			if err := json.Unmarshal(dataJSON, &items); err == nil {
 				a.SyncReminders(items)
 				cache.Save(cache.CacheData{Reminders: items})
-				runtime.EventsEmit(a.ctx, "reminders_updated", items)
+				if a.wailsApp != nil {
+					a.wailsApp.Event.Emit("reminders_updated", items)
+				}
 			} else {
 				var wrapped struct {
 					Reminders []reminders.Reminder `json:"reminders"`
@@ -100,7 +97,9 @@ func (a *App) startWebSocket(s Session) {
 				if err := json.Unmarshal(dataJSON, &wrapped); err == nil {
 					a.SyncReminders(wrapped.Reminders)
 					cache.Save(cache.CacheData{Reminders: wrapped.Reminders})
-					runtime.EventsEmit(a.ctx, "reminders_updated", wrapped.Reminders)
+					if a.wailsApp != nil {
+						a.wailsApp.Event.Emit("reminders_updated", wrapped.Reminders)
+					}
 				}
 			}
 		},
@@ -119,13 +118,17 @@ func (a *App) startWebSocket(s Session) {
 				}
 				a.Notify(title, body)
 			}
-			runtime.EventsEmit(a.ctx, "reminder_notify", payload)
+			if a.wailsApp != nil {
+				a.wailsApp.Event.Emit("reminder_notify", payload)
+			}
 		},
 		func(connected bool, mode string) {
-			runtime.EventsEmit(a.ctx, "connection_status", map[string]interface{}{
-				"connected": connected,
-				"mode":      mode,
-			})
+			if a.wailsApp != nil {
+				a.wailsApp.Event.Emit("connection_status", map[string]interface{}{
+					"connected": connected,
+					"mode":      mode,
+				})
+			}
 		},
 	)
 
@@ -134,11 +137,38 @@ func (a *App) startWebSocket(s Session) {
 			session, _ := a.store.Load()
 			if session.NotificationStyle == "fullscreen" {
 				log.Printf("[App] Showing fullscreen reminder: %d", r.ID)
-				runtime.WindowShow(a.ctx)
-				runtime.EventsEmit(a.ctx, "show_fullscreen_reminder", r)
+				if a.wailsApp != nil {
+					a.wailsApp.Show()
+
+					// Create transparent fullscreen window for reminder
+					reminderWindow := application.NewWindow(application.WebviewWindowOptions{
+						Title: "Reminder",
+						URL:   "/reminder.html?id=" + fmt.Sprintf("%d", r.ID),
+						BackgroundColour: application.NewRGBA(0, 0, 0, 178), // ~70% black (255 * 0.7)
+						AlwaysOnTop: true,
+						Frameless: true,
+						StartState: application.WindowStateFullscreen,
+						BackgroundType: application.BackgroundTypeTransparent,
+					})
+
+										// Register event listener to close the reminder window from frontend
+					var unregister func()
+					unregister = a.wailsApp.Event.On("close_reminder_window", func(e *application.CustomEvent) {
+						if reminderWindow != nil {
+							reminderWindow.Close()
+						}
+						if unregister != nil {
+							unregister()
+						}
+					})
+
+					a.wailsApp.Event.Emit("show_fullscreen_reminder", r)
+				}
 			} else {
 				a.Notify(r.Reminder, fmt.Sprintf("Scheduled for: %s %s", r.Date, r.Time))
-				runtime.EventsEmit(a.ctx, "reminder_notify", r)
+				if a.wailsApp != nil {
+					a.wailsApp.Event.Emit("reminder_notify", r)
+				}
 			}
 		})
 		a.scheduler.Start()

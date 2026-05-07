@@ -59,9 +59,8 @@ export default function AppNew() {
 
   // Restore session
   useEffect(() => {
-    const binding = window.go?.app?.App;
-    if (!binding) return;
-    binding.GetSession().then((s: any) => {
+    if (!(window as any).wails || !(window as any).wails.Call) return;
+    (window as any).wails.Call("app.App.GetSession").then((s: any) => {
       if (s?.baseUrl && s?.apiKey && s?.pcName) { setSession(s); setStage('app'); }
     }).catch(() => { });
   }, []);
@@ -73,22 +72,22 @@ export default function AppNew() {
     bootstrap(session);
     
     // Listen for events from Go
-    const unsubReminders = window.runtime.EventsOn('reminders_updated', (data: any) => {
+    const unsubReminders = (window as any).wails.Events.On('reminders_updated', (data: any) => {
       const items = normalizeSocketReminders(data);
       if (items.length || Array.isArray(data)) setReminders(items);
     });
 
-    const unsubStatus = window.runtime.EventsOn('connection_status', (status: { connected: boolean, mode: 'realtime' | 'degraded' | 'offline' }) => {
+    const unsubStatus = (window as any).wails.Events.On('connection_status', (status: { connected: boolean, mode: 'realtime' | 'degraded' | 'offline' }) => {
       setSocketHealthy(status.connected);
       setMode(status.mode);
       setStatusText(status.connected ? 'Connected' : 'Reconnecting…');
     });
 
-    const unsubLogout = window.runtime.EventsOn('logout', () => {
+    const unsubLogout = (window as any).wails.Events.On('logout', () => {
       handleLogout();
     });
 
-    const unsubFullscreen = window.runtime.EventsOn('show_fullscreen_reminder', (r: Reminder) => {
+    const unsubFullscreen = (window as any).wails.Events.On('show_fullscreen_reminder', (r: Reminder) => {
       setReminderQueue(prev => {
         if (prev.some(p => p.ID === r.ID)) return prev;
         return [...prev, r];
@@ -96,16 +95,13 @@ export default function AppNew() {
     });
 
     // Check initial status
-    const appBinding = window.go?.app?.App;
-    if (appBinding) {
-      appBinding.GetConnectionStatus().then((status: any) => {
+    if ((window as any).wails && (window as any).wails.Call) {
+      (window as any).wails.Call("app.App.GetConnectionStatus").then((status: any) => {
         setSocketHealthy(status.socketHealthy);
         setMode(status.mode as any);
         setStatusText(status.socketHealthy ? 'Connected' : 'Waiting…');
       });
-      if (appBinding.FrontendReady) {
-        appBinding.FrontendReady();
-      }
+      (window as any).wails.Call("app.App.FrontendReady");
     }
 
     return () => {
@@ -119,15 +115,15 @@ export default function AppNew() {
   async function bootstrap(s: Session) {
     try {
       // Try to load from cache first for instant feedback
-      if (window.go?.app?.App?.GetCachedReminders) {
-        const cached = await window.go.app.App.GetCachedReminders();
+      {
+        const cached = await (window as any).wails?.Call("app.App.GetCachedReminders")();
         if (cached) setReminders(normalizeSocketReminders(cached));
       }
 
       const data = await fetchReminders(s);
       setReminders(data);
-      if (window.go?.app?.App?.SyncReminders) {
-        await window.go.app.App.SyncReminders(data);
+      {
+        await (window as any).wails?.Call("app.App.SyncReminders", data);
       }
       await flushQueue(s);
     } catch (e) { 
@@ -155,7 +151,7 @@ export default function AppNew() {
     const log: CommandLog = { id: makeId(), command, status: 'received', at: new Date().toISOString(), message: 'Received' };
     setCommandLog(prev => [log, ...prev].slice(0, 30));
     try {
-      if (window.go?.app?.App?.ExecuteSystemCommand) await window.go.app.App.ExecuteSystemCommand(command);
+      await (window as any).wails?.Call("app.App.ExecuteSystemCommand", command);
       setCommandLog(prev => prev.map(e => e.id === log.id ? { ...e, status: 'executed', message: 'Done' } : e));
       addToast('info', `Command executed: ${command}`);
     } catch (err) {
@@ -183,14 +179,14 @@ export default function AppNew() {
     try {
       await registerDevice({ apiKey: authApiKey }, pcName.trim());
       const s: Session = { baseUrl: 'http://localhost:3000/api_node', apiKey: authApiKey, pcName: pcName.trim() };
-      if (window.go?.app?.App?.SaveSession) await window.go.app.App.SaveSession(s);
+      await (window as any).wails?.Call("app.App.SaveSession", s);
       setSession(s);
     } catch (e) { setErrorMessage((e as Error).message || 'Failed to connect'); }
     finally { setBusy(false); }
   }
 
   async function handleLogout() {
-    if (window.go?.app?.App?.ClearSession) await window.go.app.App.ClearSession();
+    await (window as any).wails?.Call("app.App.ClearSession");
     setSession(null); setStage('login'); setReminders([]); setCommandLog([]); setDevices([]);
     addToast('info', 'Signed out');
   }
