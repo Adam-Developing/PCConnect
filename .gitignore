@@ -28,3 +28,13 @@ Thumbs.db
 # Databases with data
 DB/pcconnect.sql
 DB/pcconnect_new.sql
+
+# Wails / Build Artifacts
+temp_wails/
+.task/
+PCClientWails/.task/
+*.tsbuildinfo
+frontend/dist/
+frontend/node_modules/
+bin/
+build/
