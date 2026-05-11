@@ -2,10 +2,10 @@ import pymysql
 import os
 
 connection = pymysql.connect(
-    host='130.162.164.140',
-    user='pcconnect_new',
-    password='HjhLKyhDpT4L8Fmi',
-    db='pcconnect_new',
+    host='##',
+    user='##',
+    password='##',
+    db='##',
     charset='utf8mb4',
     client_flag=pymysql.constants.CLIENT.MULTI_STATEMENTS
 )
