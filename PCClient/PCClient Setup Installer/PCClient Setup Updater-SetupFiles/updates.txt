@@ -1,0 +1,14 @@
+;aiu;
+
+[Update]
+Name = PCClient
+ProductVersion = 6.1.1.0
+URL = http://pcconnect.adamkhattab.co.uk/downloads/PCClient Setup.exe
+Size = 7985920
+SHA256 = 8E53030268AF6707583FE95C49AE155E3C2681A3193FEC40B5D6E404C5844554
+MD5 = 6fc73e832fb3818b1046592a0d129330
+ServerFileName = PCClient Setup.exe
+RegistryKey = HKUD\Software\Adam Khattab\PCClient\Version
+Version = 6.1.1.0
+Description = Has bug fixes and
+BugFix = Auto run on startup and better installation experience.

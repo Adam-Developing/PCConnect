@@ -1,0 +1,77 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="PCConnect v2"
+           Manufacturer="PCConnect"
+           Version="2.0.0"
+           UpgradeCode="2f7cf281-d5b8-48ca-b818-da347208a799"
+           Scope="perMachine">
+    <SummaryInformation Description="Secure PCConnect Windows agent and interactive companion" />
+    <MajorUpgrade DowngradeErrorMessage="A newer version of PCConnect is already installed." />
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <StandardDirectory Id="ProgramFiles6432Folder">
+      <Directory Id="INSTALLFOLDER" Name="PCConnect">
+        <Directory Id="AGENTDIR" Name="Agent" />
+        <Directory Id="COMPANIONDIR" Name="Companion" />
+      </Directory>
+    </StandardDirectory>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="PROGRAMMENUDIR" Name="PCConnect" />
+    </StandardDirectory>
+
+    <DirectoryRef Id="AGENTDIR">
+      <Component Id="AgentService" Bitness="always64">
+        <File Id="AgentExe" Source="$(var.AgentPublishDir)\PCConnect.Windows.Agent.exe" KeyPath="yes">
+          <Shortcut Id="EnrollShortcut"
+                    Directory="PROGRAMMENUDIR"
+                    Name="Enroll PCConnect device"
+                    Description="Securely enroll this computer with PCConnect"
+                    Arguments="enroll"
+                    WorkingDirectory="AGENTDIR" />
+        </File>
+        <ServiceInstall Id="AgentServiceInstall"
+                        Name="PCConnectAgentV2"
+                        DisplayName="PCConnect Agent v2"
+                        Description="Receives authenticated PCConnect v2 commands and reminder deliveries."
+                        Type="ownProcess"
+                        Start="auto"
+                        ErrorControl="normal"
+                        Account="LocalSystem" />
+        <ServiceControl Id="AgentServiceControl"
+                        Name="PCConnectAgentV2"
+                        Start="install"
+                        Stop="both"
+                        Remove="uninstall"
+                        Wait="yes" />
+      </Component>
+      <Component Id="AgentConfiguration" Bitness="always64">
+        <File Id="AgentSettings" Source="$(var.AgentPublishDir)\appsettings.json" KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <DirectoryRef Id="COMPANIONDIR">
+      <Component Id="CompanionApplication" Bitness="always64">
+        <File Id="CompanionExe" Source="$(var.CompanionPublishDir)\PCConnect.Windows.Companion.exe" KeyPath="yes" />
+        <RegistryValue Root="HKLM"
+                       Key="Software\Microsoft\Windows\CurrentVersion\Run"
+                       Name="PCConnect Companion v2"
+                       Value="&quot;[#CompanionExe]&quot;"
+                       Type="string" />
+      </Component>
+    </DirectoryRef>
+
+    <DirectoryRef Id="PROGRAMMENUDIR">
+      <Component Id="ProgramMenuCleanup" Bitness="always64">
+        <RemoveFolder Id="RemoveProgramMenuFolder" On="uninstall" />
+        <RegistryValue Root="HKLM" Key="Software\PCConnect" Name="InstallerMenu" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <Feature Id="Complete" Title="PCConnect v2" Level="1">
+      <ComponentRef Id="AgentService" />
+      <ComponentRef Id="AgentConfiguration" />
+      <ComponentRef Id="CompanionApplication" />
+      <ComponentRef Id="ProgramMenuCleanup" />
+    </Feature>
+  </Package>
+</Wix>

@@ -1,0 +1,25 @@
+[
+  {
+    "eventId": "018f47a2-218c-7d55-8ae5-678619836b6c",
+    "eventType": "CommandAvailable",
+    "entityId": "018f47a1-8792-73f3-9a9f-86b75be9226c",
+    "entityVersion": 1,
+    "occurredAt": "2026-08-26T14:30:00Z",
+    "payload": {
+      "commandId": "018f47a1-8792-73f3-9a9f-86b75be9226c",
+      "expiresAt": "2026-08-26T14:32:00Z"
+    }
+  },
+  {
+    "eventId": "018f47a2-5da9-739d-8dc3-c554a70e3c1d",
+    "eventType": "DevicePresenceChanged",
+    "entityId": "018f479e-0e31-721d-80fd-a1d69f939294",
+    "entityVersion": 8,
+    "occurredAt": "2026-08-26T14:30:02Z",
+    "payload": {
+      "deviceId": "018f479e-0e31-721d-80fd-a1d69f939294",
+      "status": "online",
+      "lastSeenAt": "2026-08-26T14:30:02Z"
+    }
+  }
+]

@@ -1,0 +1,15 @@
+<Window x:Class="PCConnect.Windows.Companion.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="PCConnect" Height="260" Width="460" WindowStartupLocation="CenterScreen">
+  <Grid Margin="24">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="*" />
+      <RowDefinition Height="Auto" />
+    </Grid.RowDefinitions>
+    <TextBlock FontSize="24" FontWeight="SemiBold" Text="PCConnect companion" />
+    <TextBlock Grid.Row="1" Margin="0,20,0,20" TextWrapping="Wrap" Text="{Binding Status}" />
+    <Button Grid.Row="2" Width="110" Height="36" HorizontalAlignment="Right" Content="Dismiss" Click="DismissClick" />
+  </Grid>
+</Window>

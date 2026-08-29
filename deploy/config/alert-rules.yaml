@@ -1,0 +1,61 @@
+groups:
+  - name: pcconnect-release-blockers
+    rules:
+      - alert: PCConnectApiNotReady
+        expr: (min(pcconnect_api_readiness) < 1) or absent(pcconnect_api_readiness)
+        for: 2m
+        labels: { severity: critical }
+        annotations: { summary: "A PCConnect API slot is not ready" }
+      - alert: PCConnectElevated5xx
+        expr: sum(rate(http_server_request_duration_seconds_count{http_response_status_code=~"5.."}[5m])) / clamp_min(sum(rate(http_server_request_duration_seconds_count[5m])), 0.001) > 0.05
+        for: 5m
+        labels: { severity: critical }
+        annotations: { summary: "PCConnect HTTP 5xx rate exceeds five percent" }
+      - alert: PCConnectAuthenticationAbuse
+        expr: sum(rate(pcconnect_authentication_outcomes_total{outcome="denied"}[5m])) > 1
+        for: 5m
+        labels: { severity: warning }
+        annotations: { summary: "PCConnect authentication denials exceed one per second" }
+      - alert: PCConnectOutboxBacklog
+        expr: pcconnect_outbox_oldest_age_seconds > 60
+        for: 2m
+        labels: { severity: critical }
+        annotations: { summary: "PCConnect outbox oldest message exceeds 60 seconds" }
+      - alert: PCConnectReminderDeliveryLag
+        expr: pcconnect_reminders_delivery_lag_seconds > 300
+        for: 5m
+        labels: { severity: critical }
+        annotations: { summary: "PCConnect reminder delivery lag exceeds five minutes" }
+      - alert: PCConnectRefreshTokenReuse
+        expr: increase(pcconnect_token_family_reuse_total[5m]) > 0
+        labels: { severity: critical }
+        annotations: { summary: "PCConnect detected refresh-token family reuse" }
+      - alert: PCConnectCommandBacklog
+        expr: pcconnect_commands_oldest_age_seconds > 120
+        for: 2m
+        labels: { severity: warning }
+        annotations: { summary: "PCConnect command backlog exceeds two minutes" }
+      - alert: PCConnectOverdueCommandClaims
+        expr: pcconnect_commands_overdue_claims > 0
+        for: 1m
+        labels: { severity: warning }
+        annotations: { summary: "PCConnect has command claims beyond their lease" }
+      - alert: PCConnectCommandExpirySpike
+        expr: pcconnect_commands_expired_last_five_minutes > 20
+        labels: { severity: warning }
+        annotations: { summary: "PCConnect command expiry spike detected" }
+      - alert: PCConnectVpsDiskPressure
+        expr: min(node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay|squashfs"}) < 0.20
+        for: 10m
+        labels: { severity: critical }
+        annotations: { summary: "PCConnect VPS filesystem has less than twenty percent free" }
+      - alert: PCConnectBaseBackupStale
+        expr: time() - pcconnect_backup_last_success_timestamp_seconds > 86400
+        for: 15m
+        labels: { severity: critical }
+        annotations: { summary: "PCConnect encrypted base backup is older than 24 hours" }
+      - alert: PCConnectWalArchiveStale
+        expr: time() - pcconnect_wal_archive_last_success_timestamp_seconds > 900
+        for: 5m
+        labels: { severity: critical }
+        annotations: { summary: "PCConnect WAL archive upload is older than 15 minutes" }

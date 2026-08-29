@@ -1,0 +1,419 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "PCConnect API",
+    "version": "2.0.0",
+    "description": "Authoritative REST contract for PCConnect controllers and agents. SignalR notifications are advisory; REST resources are authoritative."
+  },
+  "servers": [
+    { "url": "https://api.pcconnect.adamdeveloping.co.uk/api/v2", "description": "Production" }
+  ],
+  "tags": [
+    { "name": "Operations" },
+    { "name": "Identity" },
+    { "name": "Account" },
+    { "name": "Enrollment" },
+    { "name": "Devices" },
+    { "name": "Commands" },
+    { "name": "Agent" },
+    { "name": "Reminders" }
+  ],
+  "paths": {
+    "/health/live": {
+      "get": {
+        "tags": ["Operations"], "operationId": "getLiveness", "security": [],
+        "responses": { "200": { "description": "Process is alive", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Health" } } } } }
+      }
+    },
+    "/health/ready": {
+      "get": {
+        "tags": ["Operations"], "operationId": "getReadiness", "security": [],
+        "responses": { "200": { "description": "Required dependencies are ready", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Health" } } } }, "503": { "$ref": "#/components/responses/Problem" } }
+      }
+    },
+    "/version": {
+      "get": {
+        "tags": ["Operations"], "operationId": "getVersion", "security": [],
+        "responses": { "200": { "description": "Public release versions", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Version" } } } } }
+      }
+    },
+    "/auth/password/login": {
+      "post": {
+        "tags": ["Identity"], "operationId": "passwordLogin", "security": [],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PasswordLoginRequest" } } } },
+        "responses": { "200": { "$ref": "#/components/responses/TokenPair" }, "400": { "$ref": "#/components/responses/Problem" }, "401": { "$ref": "#/components/responses/Problem" }, "429": { "$ref": "#/components/responses/Problem" } }
+      }
+    },
+    "/auth/register": {
+      "post": {
+        "tags": ["Identity"], "operationId": "registerAccount", "security": [],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RegistrationRequest" } } } },
+        "responses": { "202": { "description": "Account created; email verification required" }, "400": { "$ref": "#/components/responses/Problem" }, "409": { "$ref": "#/components/responses/Problem" }, "429": { "$ref": "#/components/responses/Problem" } }
+      }
+    },
+    "/auth/refresh": {
+      "post": {
+        "tags": ["Identity"], "operationId": "refreshSession", "security": [],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RefreshRequest" } } } },
+        "responses": { "200": { "$ref": "#/components/responses/TokenPair" }, "401": { "$ref": "#/components/responses/Problem" }, "409": { "$ref": "#/components/responses/Problem" } }
+      }
+    },
+    "/auth/logout": {
+      "post": {
+        "tags": ["Identity"], "operationId": "logout", "responses": { "204": { "description": "Session revoked" }, "401": { "$ref": "#/components/responses/Problem" } }
+      }
+    },
+    "/auth/password/change": {
+      "post": {
+        "tags": ["Identity"], "operationId": "changePassword", "parameters": [{ "$ref": "#/components/parameters/StepUpGrant" }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PasswordChangeRequest" } } } },
+        "responses": { "204": { "description": "Password changed and other sessions revoked" }, "400": { "$ref": "#/components/responses/Problem" }, "401": { "$ref": "#/components/responses/Problem" }, "403": { "$ref": "#/components/responses/Problem" } }
+      }
+    },
+    "/auth/password/forgot": {
+      "post": {
+        "tags": ["Identity"], "operationId": "requestPasswordReset", "security": [],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EmailRequest" } } } },
+        "responses": { "202": { "description": "Request accepted whether or not the account exists" }, "429": { "$ref": "#/components/responses/Problem" } }
+      }
+    },
+    "/auth/password/reset": {
+      "post": {
+        "tags": ["Identity"], "operationId": "resetPassword", "security": [],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PasswordResetRequest" } } } },
+        "responses": { "204": { "description": "Password changed and all sessions revoked" }, "400": { "$ref": "#/components/responses/Problem" }, "410": { "$ref": "#/components/responses/Problem" } }
+      }
+    },
+    "/auth/email/verify": {
+      "post": {
+        "tags": ["Identity"], "operationId": "verifyEmail", "security": [],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/TokenRequest" } } } },
+        "responses": { "204": { "description": "Email verified" }, "400": { "$ref": "#/components/responses/Problem" }, "410": { "$ref": "#/components/responses/Problem" } }
+      }
+    },
+    "/auth/passkeys/registration/options": {
+      "post": {
+        "tags": ["Identity"], "operationId": "createPasskeyRegistrationOptions",
+        "responses": { "200": { "description": "WebAuthn creation options", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WebAuthnOptions" } } } }, "401": { "$ref": "#/components/responses/Problem" } }
+      }
+    },
+    "/auth/passkeys/registration/complete": {
+      "post": {
+        "tags": ["Identity"], "operationId": "completePasskeyRegistration", "parameters": [{ "$ref": "#/components/parameters/StepUpGrant" }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WebAuthnCredential" } } } },
+        "responses": { "201": { "description": "Passkey registered", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Passkey" } } } }, "400": { "$ref": "#/components/responses/Problem" }, "409": { "$ref": "#/components/responses/Problem" } }
+      }
+    },
+    "/passkeys": {
+      "get": {
+        "tags": ["Account"], "operationId": "listPasskeys",
+        "responses": { "200": { "description": "Registered passkeys", "content": { "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/Passkey" } } } } } }
+      }
+    },
+    "/passkeys/{passkeyId}": {
+      "delete": {
+        "tags": ["Account"], "operationId": "removePasskey", "parameters": [{ "$ref": "#/components/parameters/PasskeyId" }, { "$ref": "#/components/parameters/StepUpGrant" }],
+        "responses": { "204": { "description": "Passkey revoked" }, "403": { "$ref": "#/components/responses/Problem" }, "404": { "$ref": "#/components/responses/Problem" }, "409": { "$ref": "#/components/responses/Problem" } }
+      }
+    },
+    "/auth/passkeys/authentication/options": {
+      "post": {
+        "tags": ["Identity"], "operationId": "createPasskeyAuthenticationOptions", "security": [],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PasskeyAuthenticationOptionsRequest" } } } },
+        "responses": { "200": { "description": "WebAuthn request options", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WebAuthnOptions" } } } }, "429": { "$ref": "#/components/responses/Problem" } }
+      }
+    },
+    "/auth/passkeys/authentication/complete": {
+      "post": {
+        "tags": ["Identity"], "operationId": "completePasskeyAuthentication", "security": [],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WebAuthnCredential" } } } },
+        "responses": { "200": { "$ref": "#/components/responses/TokenPair" }, "400": { "$ref": "#/components/responses/Problem" }, "401": { "$ref": "#/components/responses/Problem" } }
+      }
+    },
+    "/auth/step-up/options": {
+      "post": {
+        "tags": ["Identity"], "operationId": "createStepUpOptions",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/StepUpIntent" } } } },
+        "responses": { "200": { "description": "Allowed authentication methods and WebAuthn options", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/StepUpOptions" } } } }, "400": { "$ref": "#/components/responses/Problem" } }
+      }
+    },
+    "/auth/step-up/complete": {
+      "post": {
+        "tags": ["Identity"], "operationId": "completeStepUp",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/StepUpCompletion" } } } },
+        "responses": { "200": { "description": "Intent-bound step-up grant", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/StepUpGrant" } } } }, "400": { "$ref": "#/components/responses/Problem" }, "401": { "$ref": "#/components/responses/Problem" } }
+      }
+    },
+    "/me": {
+      "get": { "tags": ["Account"], "operationId": "getProfile", "responses": { "200": { "description": "Current profile", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Profile" } } } }, "401": { "$ref": "#/components/responses/Problem" } } },
+      "patch": {
+        "tags": ["Account"], "operationId": "updateProfile", "parameters": [{ "$ref": "#/components/parameters/StepUpGrant" }],
+        "requestBody": { "required": true, "content": { "application/merge-patch+json": { "schema": { "$ref": "#/components/schemas/ProfileUpdate" } } } },
+        "responses": { "200": { "description": "Updated profile", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Profile" } } } }, "400": { "$ref": "#/components/responses/Problem" }, "409": { "$ref": "#/components/responses/Problem" } }
+      },
+      "delete": {
+        "tags": ["Account"], "operationId": "deleteAccount", "parameters": [{ "$ref": "#/components/parameters/StepUpGrant" }],
+        "responses": { "202": { "description": "Deletion accepted; sessions and devices revoked" }, "401": { "$ref": "#/components/responses/Problem" }, "403": { "$ref": "#/components/responses/Problem" } }
+      }
+    },
+    "/me/export": {
+      "post": {
+        "tags": ["Account"], "operationId": "requestDataExport", "parameters": [{ "$ref": "#/components/parameters/StepUpGrant" }],
+        "responses": { "202": { "description": "Export job created", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ExportJob" } } } }, "403": { "$ref": "#/components/responses/Problem" } }
+      }
+    },
+    "/me/export/{exportId}": {
+      "get": {
+        "tags": ["Account"], "operationId": "getDataExport", "parameters": [{ "$ref": "#/components/parameters/ExportId" }],
+        "responses": { "200": { "description": "Export status and short-lived URL when ready", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ExportJob" } } } }, "404": { "$ref": "#/components/responses/Problem" }, "410": { "$ref": "#/components/responses/Problem" } }
+      }
+    },
+    "/me/export/{exportId}/download": {
+      "get": {
+        "tags": ["Account"], "operationId": "downloadDataExport", "parameters": [{ "$ref": "#/components/parameters/ExportId" }],
+        "responses": { "200": { "description": "Decrypted short-lived user export", "content": { "application/json": { "schema": { "type": "object", "additionalProperties": true } } } }, "404": { "$ref": "#/components/responses/Problem" }, "410": { "$ref": "#/components/responses/Problem" } }
+      }
+    },
+    "/sessions": {
+      "get": {
+        "tags": ["Account"], "operationId": "listSessions", "parameters": [{ "$ref": "#/components/parameters/Cursor" }, { "$ref": "#/components/parameters/Limit" }],
+        "responses": { "200": { "description": "Sessions", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SessionPage" } } } } }
+      }
+    },
+    "/sessions/{sessionId}": {
+      "delete": {
+        "tags": ["Account"], "operationId": "revokeSession", "parameters": [{ "$ref": "#/components/parameters/SessionId" }],
+        "responses": { "204": { "description": "Session revoked" }, "404": { "$ref": "#/components/responses/Problem" } }
+      }
+    },
+    "/device-enrollments": {
+      "post": {
+        "tags": ["Enrollment"], "operationId": "createDeviceEnrollment", "security": [],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DeviceEnrollmentRequest" } } } },
+        "responses": { "201": { "description": "Pending enrollment", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DeviceEnrollment" } } } }, "400": { "$ref": "#/components/responses/Problem" }, "429": { "$ref": "#/components/responses/Problem" } }
+      }
+    },
+    "/device-enrollments/{userCode}/approve": {
+      "post": {
+        "tags": ["Enrollment"], "operationId": "approveDeviceEnrollment", "parameters": [{ "$ref": "#/components/parameters/UserCode" }],
+        "responses": { "204": { "description": "Enrollment approved" }, "404": { "$ref": "#/components/responses/Problem" }, "409": { "$ref": "#/components/responses/Problem" }, "410": { "$ref": "#/components/responses/Problem" } }
+      }
+    },
+    "/device-enrollments/token": {
+      "post": {
+        "tags": ["Enrollment"], "operationId": "exchangeDeviceCode", "security": [],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DeviceCodeRequest" } } } },
+        "responses": { "200": { "description": "Approved device credential", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DeviceTokenPair" } } } }, "400": { "$ref": "#/components/responses/Problem" }, "410": { "$ref": "#/components/responses/Problem" }, "429": { "$ref": "#/components/responses/Problem" } }
+      }
+    },
+    "/agent/auth/refresh": {
+      "post": {
+        "tags": ["Agent"], "operationId": "refreshDeviceCredential", "security": [],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RefreshRequest" } } } },
+        "responses": { "200": { "description": "Rotated device credentials", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DeviceTokenPair" } } } }, "401": { "$ref": "#/components/responses/Problem" }, "409": { "$ref": "#/components/responses/Problem" } }
+      }
+    },
+    "/devices": {
+      "get": {
+        "tags": ["Devices"], "operationId": "listDevices", "parameters": [{ "$ref": "#/components/parameters/Cursor" }, { "$ref": "#/components/parameters/Limit" }],
+        "responses": { "200": { "description": "Owned devices", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DevicePage" } } } } }
+      }
+    },
+    "/devices/{deviceId}": {
+      "get": { "tags": ["Devices"], "operationId": "getDevice", "parameters": [{ "$ref": "#/components/parameters/DeviceId" }], "responses": { "200": { "description": "Device", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Device" } } } }, "404": { "$ref": "#/components/responses/Problem" } } },
+      "patch": {
+        "tags": ["Devices"], "operationId": "updateDevice", "parameters": [{ "$ref": "#/components/parameters/DeviceId" }],
+        "requestBody": { "required": true, "content": { "application/merge-patch+json": { "schema": { "$ref": "#/components/schemas/DeviceUpdate" } } } },
+        "responses": { "200": { "description": "Updated device", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Device" } } } }, "404": { "$ref": "#/components/responses/Problem" }, "409": { "$ref": "#/components/responses/Problem" } }
+      },
+      "delete": { "tags": ["Devices"], "operationId": "revokeDevice", "parameters": [{ "$ref": "#/components/parameters/DeviceId" }, { "$ref": "#/components/parameters/StepUpGrant" }], "responses": { "204": { "description": "Device and credentials revoked" }, "403": { "$ref": "#/components/responses/Problem" }, "404": { "$ref": "#/components/responses/Problem" } } }
+    },
+    "/devices/{deviceId}/windows-sids": {
+      "get": {
+        "tags": ["Devices"], "operationId": "listDeviceWindowsSids", "parameters": [{ "$ref": "#/components/parameters/DeviceId" }],
+        "responses": { "200": { "description": "Authorized and pending interactive Windows identities", "content": { "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/WindowsSidStatus" } } } } }, "404": { "$ref": "#/components/responses/Problem" } }
+      }
+    },
+    "/devices/{deviceId}/windows-sids/{windowsSid}/authorize": {
+      "post": {
+        "tags": ["Devices"], "operationId": "authorizeDeviceWindowsSid", "parameters": [{ "$ref": "#/components/parameters/DeviceId" }, { "$ref": "#/components/parameters/WindowsSid" }, { "$ref": "#/components/parameters/StepUpGrant" }],
+        "responses": { "204": { "description": "Windows identity authorized" }, "403": { "$ref": "#/components/responses/Problem" }, "404": { "$ref": "#/components/responses/Problem" }, "410": { "$ref": "#/components/responses/Problem" } }
+      }
+    },
+    "/devices/{deviceId}/windows-sids/{windowsSid}": {
+      "delete": {
+        "tags": ["Devices"], "operationId": "revokeDeviceWindowsSid", "parameters": [{ "$ref": "#/components/parameters/DeviceId" }, { "$ref": "#/components/parameters/WindowsSid" }, { "$ref": "#/components/parameters/StepUpGrant" }],
+        "responses": { "204": { "description": "Windows identity authorization revoked" }, "403": { "$ref": "#/components/responses/Problem" }, "404": { "$ref": "#/components/responses/Problem" } }
+      }
+    },
+    "/devices/{deviceId}/commands": {
+      "post": {
+        "tags": ["Commands"], "operationId": "createCommand", "parameters": [{ "$ref": "#/components/parameters/DeviceId" }, { "$ref": "#/components/parameters/IdempotencyKey" }, { "$ref": "#/components/parameters/StepUpGrantOptional" }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CommandCreate" } } } },
+        "responses": { "202": { "description": "Durably queued command", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Command" } } } }, "400": { "$ref": "#/components/responses/Problem" }, "403": { "$ref": "#/components/responses/Problem" }, "409": { "$ref": "#/components/responses/Problem" }, "422": { "$ref": "#/components/responses/Problem" } }
+      }
+    },
+    "/commands": {
+      "get": {
+        "tags": ["Commands"], "operationId": "listCommands", "parameters": [{ "$ref": "#/components/parameters/Cursor" }, { "$ref": "#/components/parameters/Limit" }],
+        "responses": { "200": { "description": "Owned command projections ordered by latest change", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CommandPage" } } } } }
+      }
+    },
+    "/commands/{commandId}": {
+      "get": { "tags": ["Commands"], "operationId": "getCommand", "parameters": [{ "$ref": "#/components/parameters/CommandId" }], "responses": { "200": { "description": "Command status", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Command" } } } }, "404": { "$ref": "#/components/responses/Problem" } } }
+    },
+    "/commands/{commandId}/cancel": {
+      "post": { "tags": ["Commands"], "operationId": "cancelCommand", "parameters": [{ "$ref": "#/components/parameters/CommandId" }], "responses": { "200": { "description": "Cancelled command", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Command" } } } }, "404": { "$ref": "#/components/responses/Problem" }, "409": { "$ref": "#/components/responses/Problem" } } }
+    },
+    "/agent/heartbeat": {
+      "post": {
+        "tags": ["Agent"], "operationId": "heartbeat", "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Heartbeat" } } } },
+        "responses": { "204": { "description": "Presence updated" }, "401": { "$ref": "#/components/responses/Problem" } }
+      }
+    },
+    "/agent/windows-sid-candidates": {
+      "post": {
+        "tags": ["Agent"], "operationId": "registerWindowsSidCandidate",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WindowsSidCandidateRequest" } } } },
+        "responses": { "200": { "description": "Current candidate or authorization state", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WindowsSidStatus" } } } }, "400": { "$ref": "#/components/responses/Problem" }, "401": { "$ref": "#/components/responses/Problem" } }
+      }
+    },
+    "/agent/commands": {
+      "get": {
+        "tags": ["Agent"], "operationId": "listPendingCommands", "parameters": [{ "$ref": "#/components/parameters/Cursor" }, { "$ref": "#/components/parameters/Limit" }],
+        "responses": { "200": { "description": "Unexpired commands for the authenticated device", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CommandPage" } } } } }
+      }
+    },
+    "/agent/commands/{commandId}/claim": {
+      "post": {
+        "tags": ["Agent"], "operationId": "claimCommand", "parameters": [{ "$ref": "#/components/parameters/CommandId" }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CommandClaim" } } } },
+        "responses": { "200": { "description": "Claimed command with 30-second lease", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Command" } } } }, "404": { "$ref": "#/components/responses/Problem" }, "409": { "$ref": "#/components/responses/Problem" }, "410": { "$ref": "#/components/responses/Problem" } }
+      }
+    },
+    "/agent/commands/{commandId}/acknowledgements": {
+      "post": {
+        "tags": ["Agent"], "operationId": "acknowledgeCommand", "parameters": [{ "$ref": "#/components/parameters/CommandId" }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CommandAcknowledgement" } } } },
+        "responses": { "200": { "description": "Updated command", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Command" } } } }, "400": { "$ref": "#/components/responses/Problem" }, "409": { "$ref": "#/components/responses/Problem" } }
+      }
+    },
+    "/reminders": {
+      "get": {
+        "tags": ["Reminders"], "operationId": "listReminders", "parameters": [{ "$ref": "#/components/parameters/Cursor" }, { "$ref": "#/components/parameters/Limit" }],
+        "responses": { "200": { "description": "Reminders", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ReminderPage" } } } } }
+      },
+      "post": {
+        "tags": ["Reminders"], "operationId": "createReminder", "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ReminderWrite" } } } },
+        "responses": { "201": { "description": "Reminder created", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Reminder" } } } }, "400": { "$ref": "#/components/responses/Problem" }, "409": { "$ref": "#/components/responses/Problem" } }
+      }
+    },
+    "/reminders/{reminderId}": {
+      "get": { "tags": ["Reminders"], "operationId": "getReminder", "parameters": [{ "$ref": "#/components/parameters/ReminderId" }], "responses": { "200": { "description": "Reminder", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Reminder" } } } }, "404": { "$ref": "#/components/responses/Problem" } } },
+      "patch": {
+        "tags": ["Reminders"], "operationId": "updateReminder", "parameters": [{ "$ref": "#/components/parameters/ReminderId" }],
+        "requestBody": { "required": true, "content": { "application/merge-patch+json": { "schema": { "$ref": "#/components/schemas/ReminderWrite" } } } },
+        "responses": { "200": { "description": "Updated reminder", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Reminder" } } } }, "400": { "$ref": "#/components/responses/Problem" }, "404": { "$ref": "#/components/responses/Problem" }, "409": { "$ref": "#/components/responses/Problem" } }
+      },
+      "delete": { "tags": ["Reminders"], "operationId": "deleteReminder", "parameters": [{ "$ref": "#/components/parameters/ReminderId" }], "responses": { "204": { "description": "Reminder cancelled and deleted" }, "404": { "$ref": "#/components/responses/Problem" } } }
+    },
+    "/agent/reminder-deliveries": {
+      "get": {
+        "tags": ["Agent"], "operationId": "listAvailableReminderDeliveries", "parameters": [{ "$ref": "#/components/parameters/Cursor" }, { "$ref": "#/components/parameters/Limit" }],
+        "responses": { "200": { "description": "Available reminder deliveries for the authenticated device", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ReminderDeliveryPage" } } } }, "401": { "$ref": "#/components/responses/Problem" } }
+      }
+    },
+    "/reminder-deliveries/{deliveryId}/acknowledgements": {
+      "post": {
+        "tags": ["Agent"], "operationId": "acknowledgeReminderDelivery", "parameters": [{ "$ref": "#/components/parameters/DeliveryId" }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ReminderAcknowledgement" } } } },
+        "responses": { "204": { "description": "Delivery acknowledged" }, "404": { "$ref": "#/components/responses/Problem" }, "409": { "$ref": "#/components/responses/Problem" } }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": { "type": "http", "scheme": "bearer", "bearerFormat": "opaque" }
+    },
+    "parameters": {
+      "Cursor": { "name": "cursor", "in": "query", "required": false, "schema": { "type": "string", "maxLength": 512 } },
+      "Limit": { "name": "limit", "in": "query", "required": false, "schema": { "type": "integer", "minimum": 1, "maximum": 100, "default": 50 } },
+      "DeviceId": { "name": "deviceId", "in": "path", "required": true, "schema": { "$ref": "#/components/schemas/Uuid" } },
+      "WindowsSid": { "name": "windowsSid", "in": "path", "required": true, "schema": { "type": "string", "minLength": 5, "maxLength": 184, "pattern": "^S-1-(?:[0-9]+-){1,14}[0-9]+$" } },
+      "SessionId": { "name": "sessionId", "in": "path", "required": true, "schema": { "$ref": "#/components/schemas/Uuid" } },
+      "CommandId": { "name": "commandId", "in": "path", "required": true, "schema": { "$ref": "#/components/schemas/Uuid" } },
+      "ReminderId": { "name": "reminderId", "in": "path", "required": true, "schema": { "$ref": "#/components/schemas/Uuid" } },
+      "DeliveryId": { "name": "deliveryId", "in": "path", "required": true, "schema": { "$ref": "#/components/schemas/Uuid" } },
+      "PasskeyId": { "name": "passkeyId", "in": "path", "required": true, "schema": { "$ref": "#/components/schemas/Uuid" } },
+      "ExportId": { "name": "exportId", "in": "path", "required": true, "schema": { "$ref": "#/components/schemas/Uuid" } },
+      "UserCode": { "name": "userCode", "in": "path", "required": true, "schema": { "type": "string", "pattern": "^[A-HJ-NP-Z2-9]{8}$" } },
+      "IdempotencyKey": { "name": "Idempotency-Key", "in": "header", "required": true, "schema": { "$ref": "#/components/schemas/Uuid" } },
+      "StepUpGrant": { "name": "X-Step-Up-Grant", "in": "header", "required": true, "schema": { "type": "string", "minLength": 32, "maxLength": 512 } },
+      "StepUpGrantOptional": { "name": "X-Step-Up-Grant", "in": "header", "required": false, "schema": { "type": "string", "minLength": 32, "maxLength": 512 }, "description": "Required by policy for every command except lock." }
+    },
+    "responses": {
+      "Problem": { "description": "RFC 9457 problem details", "headers": { "X-Correlation-ID": { "schema": { "type": "string" } }, "Retry-After": { "schema": { "type": "integer" } } }, "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } } } },
+      "TokenPair": { "description": "Rotated user session credentials", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/TokenPair" } } } }
+    },
+    "schemas": {
+      "Uuid": { "type": "string", "format": "uuid" },
+      "Instant": { "type": "string", "format": "date-time" },
+      "Health": { "type": "object", "additionalProperties": false, "required": ["status"], "properties": { "status": { "type": "string", "enum": ["ok"] } } },
+      "Version": { "type": "object", "additionalProperties": false, "required": ["release", "apiContract", "realtimeContract"], "properties": { "release": { "type": "string" }, "apiContract": { "const": "2.0.0" }, "realtimeContract": { "const": "2.0.0" } } },
+      "Problem": { "type": "object", "additionalProperties": true, "required": ["type", "title", "status", "code", "correlationId"], "properties": { "type": { "type": "string", "format": "uri-reference" }, "title": { "type": "string" }, "status": { "type": "integer", "minimum": 400, "maximum": 599 }, "detail": { "type": "string" }, "instance": { "type": "string", "format": "uri-reference" }, "code": { "type": "string", "pattern": "^[a-z0-9_]+$" }, "correlationId": { "type": "string" }, "errors": { "type": "array", "items": { "type": "object", "required": ["pointer", "code"], "properties": { "pointer": { "type": "string" }, "code": { "type": "string" } } } } } },
+      "PasswordLoginRequest": { "type": "object", "additionalProperties": false, "required": ["login", "password", "client"], "properties": { "login": { "type": "string", "minLength": 1, "maxLength": 320 }, "password": { "type": "string", "minLength": 1, "maxLength": 1024, "format": "password" }, "client": { "$ref": "#/components/schemas/ClientDescriptor" } } },
+      "RegistrationRequest": { "type": "object", "additionalProperties": false, "required": ["username", "email", "displayName", "password", "timezone", "marketingOptIn", "client"], "properties": { "username": { "type": "string", "minLength": 3, "maxLength": 100 }, "email": { "type": "string", "format": "email", "maxLength": 320 }, "displayName": { "type": "string", "minLength": 1, "maxLength": 100 }, "password": { "type": "string", "minLength": 12, "maxLength": 1024, "format": "password" }, "timezone": { "type": "string", "minLength": 1, "maxLength": 100 }, "dateOfBirth": { "type": ["string", "null"], "format": "date" }, "marketingOptIn": { "type": "boolean" }, "client": { "$ref": "#/components/schemas/ClientDescriptor" } } },
+      "ClientDescriptor": { "type": "object", "additionalProperties": false, "required": ["platform", "name", "version"], "properties": { "platform": { "$ref": "#/components/schemas/Platform" }, "name": { "type": "string", "minLength": 1, "maxLength": 100 }, "version": { "type": "string", "minLength": 1, "maxLength": 40 } } },
+      "RefreshRequest": { "type": "object", "additionalProperties": false, "required": ["refreshToken"], "properties": { "refreshToken": { "type": "string", "minLength": 43, "maxLength": 512, "format": "password" } } },
+      "TokenPair": { "type": "object", "additionalProperties": false, "required": ["accessToken", "accessTokenExpiresAt", "refreshToken", "refreshTokenExpiresAt", "sessionId"], "properties": { "accessToken": { "type": "string", "format": "password" }, "accessTokenExpiresAt": { "$ref": "#/components/schemas/Instant" }, "refreshToken": { "type": "string", "format": "password" }, "refreshTokenExpiresAt": { "$ref": "#/components/schemas/Instant" }, "sessionId": { "$ref": "#/components/schemas/Uuid" } } },
+      "EmailRequest": { "type": "object", "additionalProperties": false, "required": ["email"], "properties": { "email": { "type": "string", "format": "email", "maxLength": 320 } } },
+      "TokenRequest": { "type": "object", "additionalProperties": false, "required": ["token"], "properties": { "token": { "type": "string", "minLength": 32, "maxLength": 512, "format": "password" } } },
+      "PasswordResetRequest": { "type": "object", "additionalProperties": false, "required": ["token", "newPassword"], "properties": { "token": { "type": "string", "minLength": 32, "maxLength": 512, "format": "password" }, "newPassword": { "type": "string", "minLength": 12, "maxLength": 1024, "format": "password" } } },
+      "PasswordChangeRequest": { "type": "object", "additionalProperties": false, "required": ["currentPassword", "newPassword"], "properties": { "currentPassword": { "type": "string", "minLength": 1, "maxLength": 1024, "format": "password" }, "newPassword": { "type": "string", "minLength": 12, "maxLength": 1024, "format": "password" } } },
+      "WebAuthnOptions": { "type": "object", "description": "JSON-serialized PublicKeyCredential creation or request options plus a server challenge ID.", "additionalProperties": true, "required": ["challengeId", "publicKey"], "properties": { "challengeId": { "$ref": "#/components/schemas/Uuid" }, "publicKey": { "type": "object" } } },
+      "WebAuthnCredential": { "type": "object", "additionalProperties": false, "required": ["challengeId", "credential"], "properties": { "challengeId": { "$ref": "#/components/schemas/Uuid" }, "credential": { "type": "object", "additionalProperties": true } } },
+      "PasskeyAuthenticationOptionsRequest": { "type": "object", "additionalProperties": false, "required": ["client"], "properties": { "loginHint": { "type": "string", "maxLength": 320 }, "client": { "$ref": "#/components/schemas/ClientDescriptor" } } },
+      "Passkey": { "type": "object", "additionalProperties": false, "required": ["id", "displayName", "createdAt"], "properties": { "id": { "$ref": "#/components/schemas/Uuid" }, "displayName": { "type": "string", "minLength": 1, "maxLength": 100 }, "createdAt": { "$ref": "#/components/schemas/Instant" }, "lastUsedAt": { "oneOf": [{ "$ref": "#/components/schemas/Instant" }, { "type": "null" }] } } },
+      "StepUpIntent": { "type": "object", "additionalProperties": false, "required": ["intent", "idempotencyKey"], "properties": { "intent": { "$ref": "#/components/schemas/StepUpIntentType" }, "deviceId": { "oneOf": [{ "$ref": "#/components/schemas/Uuid" }, { "type": "null" }] }, "commandType": { "oneOf": [{ "$ref": "#/components/schemas/CommandType" }, { "type": "null" }] }, "idempotencyKey": { "$ref": "#/components/schemas/Uuid" } } },
+      "StepUpIntentType": { "type": "string", "enum": ["command", "account_delete", "data_export", "device_revoke", "security_change"] },
+      "StepUpOptions": { "type": "object", "additionalProperties": false, "required": ["intentId", "expiresAt", "methods"], "properties": { "intentId": { "$ref": "#/components/schemas/Uuid" }, "expiresAt": { "$ref": "#/components/schemas/Instant" }, "methods": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "enum": ["passkey", "password"] } }, "passkeyOptions": { "oneOf": [{ "$ref": "#/components/schemas/WebAuthnOptions" }, { "type": "null" }] } } },
+      "StepUpCompletion": { "type": "object", "additionalProperties": false, "required": ["intentId", "method", "proof"], "properties": { "intentId": { "$ref": "#/components/schemas/Uuid" }, "method": { "type": "string", "enum": ["passkey", "password"] }, "proof": { "type": "object", "additionalProperties": true } } },
+      "StepUpGrant": { "type": "object", "additionalProperties": false, "required": ["grant", "expiresAt"], "properties": { "grant": { "type": "string", "format": "password" }, "expiresAt": { "$ref": "#/components/schemas/Instant" } } },
+      "Profile": { "type": "object", "additionalProperties": false, "required": ["id", "username", "email", "emailVerified", "displayName", "timezone", "marketingOptIn", "createdAt", "version"], "properties": { "id": { "$ref": "#/components/schemas/Uuid" }, "username": { "type": "string" }, "email": { "type": "string", "format": "email" }, "emailVerified": { "type": "boolean" }, "displayName": { "type": "string" }, "dateOfBirth": { "type": ["string", "null"], "format": "date" }, "marketingOptIn": { "type": "boolean" }, "timezone": { "type": "string", "example": "Europe/London" }, "timezoneAssumed": { "type": "boolean" }, "createdAt": { "$ref": "#/components/schemas/Instant" }, "version": { "type": "integer", "minimum": 1 } } },
+      "ProfileUpdate": { "type": "object", "additionalProperties": false, "minProperties": 1, "properties": { "displayName": { "type": "string", "minLength": 1, "maxLength": 100 }, "email": { "type": "string", "format": "email", "maxLength": 320 }, "dateOfBirth": { "type": ["string", "null"], "format": "date" }, "marketingOptIn": { "type": "boolean" }, "timezone": { "type": "string", "minLength": 1, "maxLength": 100 }, "expectedVersion": { "type": "integer", "minimum": 1 } } },
+      "ExportJob": { "type": "object", "additionalProperties": false, "required": ["id", "status", "createdAt", "expiresAt"], "properties": { "id": { "$ref": "#/components/schemas/Uuid" }, "status": { "type": "string", "enum": ["queued", "processing", "ready", "failed", "expired"] }, "createdAt": { "$ref": "#/components/schemas/Instant" }, "expiresAt": { "$ref": "#/components/schemas/Instant" }, "downloadUrl": { "type": ["string", "null"], "format": "uri-reference" } } },
+      "Session": { "type": "object", "additionalProperties": false, "required": ["id", "platform", "clientName", "createdAt", "lastUsedAt", "expiresAt", "current"], "properties": { "id": { "$ref": "#/components/schemas/Uuid" }, "platform": { "$ref": "#/components/schemas/Platform" }, "clientName": { "type": "string" }, "createdAt": { "$ref": "#/components/schemas/Instant" }, "lastUsedAt": { "$ref": "#/components/schemas/Instant" }, "expiresAt": { "$ref": "#/components/schemas/Instant" }, "current": { "type": "boolean" } } },
+      "SessionPage": { "allOf": [{ "$ref": "#/components/schemas/Page" }, { "type": "object", "required": ["items"], "properties": { "items": { "type": "array", "items": { "$ref": "#/components/schemas/Session" } } } }] },
+      "Platform": { "type": "string", "enum": ["windows", "android", "ios", "macos", "linux", "web", "unknown"] },
+      "DeviceCapability": { "type": "string", "enum": ["lock", "sleep", "hibernate", "sign_out", "restart", "shutdown", "reminders"] },
+      "DeviceEnrollmentRequest": { "type": "object", "additionalProperties": false, "required": ["platform", "displayName", "agentVersion", "protocolVersion", "capabilities"], "properties": { "platform": { "$ref": "#/components/schemas/Platform" }, "displayName": { "type": "string", "minLength": 1, "maxLength": 100 }, "agentVersion": { "type": "string", "maxLength": 40 }, "protocolVersion": { "type": "integer", "minimum": 2 }, "timezone": { "type": "string", "maxLength": 100 }, "capabilities": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/components/schemas/DeviceCapability" } } } },
+      "DeviceEnrollment": { "type": "object", "additionalProperties": false, "required": ["deviceCode", "userCode", "verificationUri", "expiresAt", "pollIntervalSeconds"], "properties": { "deviceCode": { "type": "string", "format": "password" }, "userCode": { "type": "string" }, "verificationUri": { "type": "string", "format": "uri" }, "expiresAt": { "$ref": "#/components/schemas/Instant" }, "pollIntervalSeconds": { "type": "integer", "minimum": 5 } } },
+      "DeviceCodeRequest": { "type": "object", "additionalProperties": false, "required": ["deviceCode"], "properties": { "deviceCode": { "type": "string", "format": "password" } } },
+      "DeviceTokenPair": { "type": "object", "additionalProperties": false, "required": ["deviceId", "accessToken", "accessTokenExpiresAt", "refreshToken", "refreshTokenExpiresAt"], "properties": { "deviceId": { "$ref": "#/components/schemas/Uuid" }, "accessToken": { "type": "string", "format": "password" }, "accessTokenExpiresAt": { "$ref": "#/components/schemas/Instant" }, "refreshToken": { "type": "string", "format": "password" }, "refreshTokenExpiresAt": { "$ref": "#/components/schemas/Instant" } } },
+      "Device": { "type": "object", "additionalProperties": false, "required": ["id", "platform", "displayName", "agentVersion", "protocolVersion", "capabilities", "status", "lastSeenAt", "createdAt", "version"], "properties": { "id": { "$ref": "#/components/schemas/Uuid" }, "platform": { "$ref": "#/components/schemas/Platform" }, "displayName": { "type": "string" }, "agentVersion": { "type": "string" }, "protocolVersion": { "type": "integer" }, "timezone": { "type": ["string", "null"] }, "capabilities": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/components/schemas/DeviceCapability" } }, "status": { "type": "string", "enum": ["online", "offline", "revoked"] }, "lastSeenAt": { "oneOf": [{ "$ref": "#/components/schemas/Instant" }, { "type": "null" }] }, "createdAt": { "$ref": "#/components/schemas/Instant" }, "version": { "type": "integer", "minimum": 1 } } },
+      "DeviceUpdate": { "type": "object", "additionalProperties": false, "minProperties": 1, "properties": { "displayName": { "type": "string", "minLength": 1, "maxLength": 100 }, "expectedVersion": { "type": "integer", "minimum": 1 } } },
+      "WindowsSidCandidateRequest": { "type": "object", "additionalProperties": false, "required": ["windowsSid"], "properties": { "windowsSid": { "type": "string", "minLength": 5, "maxLength": 184, "pattern": "^S-1-(?:[0-9]+-){1,14}[0-9]+$" }, "displayLabel": { "type": ["string", "null"], "maxLength": 100 } } },
+      "WindowsSidStatus": { "type": "object", "additionalProperties": false, "required": ["windowsSid", "status"], "properties": { "windowsSid": { "type": "string", "minLength": 5, "maxLength": 184 }, "displayLabel": { "type": ["string", "null"] }, "status": { "type": "string", "enum": ["pending", "authorized"] }, "observedAt": { "oneOf": [{ "$ref": "#/components/schemas/Instant" }, { "type": "null" }] }, "authorizedAt": { "oneOf": [{ "$ref": "#/components/schemas/Instant" }, { "type": "null" }] } } },
+      "DevicePage": { "allOf": [{ "$ref": "#/components/schemas/Page" }, { "type": "object", "required": ["items"], "properties": { "items": { "type": "array", "items": { "$ref": "#/components/schemas/Device" } } } }] },
+      "CommandType": { "type": "string", "enum": ["lock", "sleep", "hibernate", "sign_out", "restart", "shutdown"] },
+      "CommandStatus": { "type": "string", "enum": ["queued", "claimed", "accepted", "succeeded", "failed", "expired", "cancelled"] },
+      "CommandFailureCode": { "type": "string", "enum": ["no_interactive_session", "unsupported", "permission_denied", "expired", "local_replay", "execution_failed"] },
+      "CommandCreate": { "type": "object", "additionalProperties": false, "required": ["type"], "properties": { "type": { "$ref": "#/components/schemas/CommandType" }, "expiresInSeconds": { "type": "integer", "minimum": 1, "maximum": 300, "default": 120 }, "explicitlyConfirmed": { "type": "boolean", "default": false } } },
+      "Command": { "type": "object", "additionalProperties": false, "required": ["id", "deviceId", "type", "status", "issuedAt", "expiresAt", "version"], "properties": { "id": { "$ref": "#/components/schemas/Uuid" }, "deviceId": { "$ref": "#/components/schemas/Uuid" }, "type": { "$ref": "#/components/schemas/CommandType" }, "status": { "$ref": "#/components/schemas/CommandStatus" }, "issuedAt": { "$ref": "#/components/schemas/Instant" }, "expiresAt": { "$ref": "#/components/schemas/Instant" }, "claimedUntil": { "oneOf": [{ "$ref": "#/components/schemas/Instant" }, { "type": "null" }] }, "acceptedAt": { "oneOf": [{ "$ref": "#/components/schemas/Instant" }, { "type": "null" }] }, "finishedAt": { "oneOf": [{ "$ref": "#/components/schemas/Instant" }, { "type": "null" }] }, "failureCode": { "oneOf": [{ "$ref": "#/components/schemas/CommandFailureCode" }, { "type": "null" }] }, "version": { "type": "integer", "minimum": 1 } } },
+      "CommandClaim": { "type": "object", "additionalProperties": false, "required": ["agentInstanceId"], "properties": { "agentInstanceId": { "$ref": "#/components/schemas/Uuid" } } },
+      "CommandAcknowledgement": { "type": "object", "additionalProperties": false, "required": ["state", "agentInstanceId", "localReplayKey"], "properties": { "state": { "type": "string", "enum": ["accepted", "succeeded", "failed"] }, "failureCode": { "oneOf": [{ "$ref": "#/components/schemas/CommandFailureCode" }, { "type": "null" }] }, "agentInstanceId": { "$ref": "#/components/schemas/Uuid" }, "localReplayKey": { "$ref": "#/components/schemas/Uuid" } } },
+      "CommandPage": { "allOf": [{ "$ref": "#/components/schemas/Page" }, { "type": "object", "required": ["items"], "properties": { "items": { "type": "array", "items": { "$ref": "#/components/schemas/Command" } } } }] },
+      "Heartbeat": { "type": "object", "additionalProperties": false, "required": ["agentInstanceId", "agentVersion", "protocolVersion", "capabilities", "sentAt"], "properties": { "agentInstanceId": { "$ref": "#/components/schemas/Uuid" }, "agentVersion": { "type": "string" }, "protocolVersion": { "type": "integer", "minimum": 2 }, "capabilities": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/components/schemas/DeviceCapability" } }, "sentAt": { "$ref": "#/components/schemas/Instant" } } },
+      "ReminderTargetMode": { "type": "string", "enum": ["all_devices", "selected_devices"] },
+      "ReminderWrite": { "type": "object", "additionalProperties": false, "required": ["text", "targetMode", "timezone", "localStart"], "properties": { "text": { "type": "string", "minLength": 1, "maxLength": 2000 }, "targetMode": { "$ref": "#/components/schemas/ReminderTargetMode" }, "targetDeviceIds": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/components/schemas/Uuid" } }, "timezone": { "type": "string", "minLength": 1, "maxLength": 100 }, "localStart": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]+)?$", "description": "Local date-time without offset interpreted in timezone." }, "recurrenceRule": { "type": ["string", "null"], "maxLength": 1000, "description": "RFC 5545 RRULE without DTSTART." }, "expectedVersion": { "type": "integer", "minimum": 1 } }, "allOf": [{ "if": { "properties": { "targetMode": { "const": "selected_devices" } }, "required": ["targetMode"] }, "then": { "required": ["targetDeviceIds"], "properties": { "targetDeviceIds": { "minItems": 1 } } } }] },
+      "Reminder": { "type": "object", "additionalProperties": false, "required": ["id", "text", "targetMode", "targetDeviceIds", "timezone", "localStart", "createdAt", "version"], "properties": { "id": { "$ref": "#/components/schemas/Uuid" }, "text": { "type": "string" }, "targetMode": { "$ref": "#/components/schemas/ReminderTargetMode" }, "targetDeviceIds": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/components/schemas/Uuid" } }, "timezone": { "type": "string" }, "timezoneAssumed": { "type": "boolean" }, "localStart": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]+)?$" }, "recurrenceRule": { "type": ["string", "null"] }, "nextOccurrenceAt": { "oneOf": [{ "$ref": "#/components/schemas/Instant" }, { "type": "null" }] }, "createdAt": { "$ref": "#/components/schemas/Instant" }, "version": { "type": "integer", "minimum": 1 } } },
+      "ReminderPage": { "allOf": [{ "$ref": "#/components/schemas/Page" }, { "type": "object", "required": ["items"], "properties": { "items": { "type": "array", "items": { "$ref": "#/components/schemas/Reminder" } } } }] },
+      "ReminderDelivery": { "type": "object", "additionalProperties": false, "required": ["id", "reminderId", "occurrenceAt", "text", "status", "version"], "properties": { "id": { "$ref": "#/components/schemas/Uuid" }, "reminderId": { "$ref": "#/components/schemas/Uuid" }, "occurrenceAt": { "$ref": "#/components/schemas/Instant" }, "text": { "type": "string", "minLength": 1, "maxLength": 2000 }, "status": { "type": "string", "enum": ["available", "displayed"] }, "version": { "type": "integer", "minimum": 1 } } },
+      "ReminderDeliveryPage": { "allOf": [{ "$ref": "#/components/schemas/Page" }, { "type": "object", "required": ["items"], "properties": { "items": { "type": "array", "items": { "$ref": "#/components/schemas/ReminderDelivery" } } } }] },
+      "ReminderAcknowledgement": { "type": "object", "additionalProperties": false, "required": ["state", "acknowledgedAt"], "properties": { "state": { "type": "string", "enum": ["displayed", "dismissed", "completed"] }, "acknowledgedAt": { "$ref": "#/components/schemas/Instant" } } },
+      "Page": { "type": "object", "additionalProperties": false, "required": ["items", "nextCursor"], "properties": { "items": { "type": "array", "items": true }, "nextCursor": { "type": ["string", "null"] } } }
+    }
+  },
+  "security": [{ "bearerAuth": [] }]
+}

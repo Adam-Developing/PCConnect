@@ -1,0 +1,30 @@
+{
+  "idempotencyKey": "018f47a1-7b42-7cc7-a6e5-6f21483d0df1",
+  "create": {
+    "type": "restart",
+    "expiresInSeconds": 120,
+    "explicitlyConfirmed": true
+  },
+  "queued": {
+    "id": "018f47a1-8792-73f3-9a9f-86b75be9226c",
+    "deviceId": "018f479e-0e31-721d-80fd-a1d69f939294",
+    "type": "restart",
+    "status": "queued",
+    "issuedAt": "2026-08-26T14:30:00Z",
+    "expiresAt": "2026-08-26T14:32:00Z",
+    "claimedUntil": null,
+    "acceptedAt": null,
+    "finishedAt": null,
+    "failureCode": null,
+    "version": 1
+  },
+  "claim": {
+    "agentInstanceId": "018f47a0-a600-70bd-a9a3-8022b2a49977"
+  },
+  "acknowledgement": {
+    "state": "accepted",
+    "failureCode": null,
+    "agentInstanceId": "018f47a0-a600-70bd-a9a3-8022b2a49977",
+    "localReplayKey": "018f47a1-8792-73f3-9a9f-86b75be9226c"
+  }
+}

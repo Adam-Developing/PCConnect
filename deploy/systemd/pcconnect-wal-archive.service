@@ -1,0 +1,10 @@
+[Unit]
+Description=PCConnect encrypt and upload archived WAL
+
+[Service]
+Type=oneshot
+ExecStart=/srv/pcconnect-v2/current/deploy/archive-wal.sh /etc/pcconnect-v2/staging.env
+User=root
+Group=root
+PrivateTmp=true
+NoNewPrivileges=true

@@ -1,0 +1,24 @@
+{
+  "manifestVersion": 1,
+  "runId": "018f47bc-0336-7aa4-bf4e-c554f625270c",
+  "mode": "dry_run",
+  "sourceSnapshotId": "sanitized-rehearsal-2026-08-26",
+  "sourceSchemaChecksum": "ac9c9929b672a90e18bac60c7971f751d2c99819d0e54c7be615849e49f43a92",
+  "startedAt": "2026-08-26T13:00:00Z",
+  "finishedAt": "2026-08-26T13:04:12Z",
+  "entities": [
+    {
+      "entity": "users",
+      "sourceCount": 120,
+      "importedCount": 120,
+      "updatedCount": 0,
+      "skippedCount": 0,
+      "targetCount": 120,
+      "mappingChecksum": "bef57ec7f53a6d40beb640a780a639c83bc29ac8a9816f1c5c6d5cd93c4721f9"
+    }
+  ],
+  "quarantines": {},
+  "collisions": {},
+  "result": "passed",
+  "approvedExceptionIds": []
+}

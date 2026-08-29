@@ -1,0 +1,23 @@
+{
+  "write": {
+    "text": "Submit the weekly report",
+    "targetMode": "selected_devices",
+    "targetDeviceIds": ["018f479e-0e31-721d-80fd-a1d69f939294"],
+    "timezone": "Europe/London",
+    "localStart": "2026-09-01T09:00:00",
+    "recurrenceRule": "FREQ=WEEKLY;BYDAY=TU"
+  },
+  "resource": {
+    "id": "018f4800-eaf4-7844-88cf-f75cc745a691",
+    "text": "Submit the weekly report",
+    "targetMode": "selected_devices",
+    "targetDeviceIds": ["018f479e-0e31-721d-80fd-a1d69f939294"],
+    "timezone": "Europe/London",
+    "timezoneAssumed": false,
+    "localStart": "2026-09-01T09:00:00",
+    "recurrenceRule": "FREQ=WEEKLY;BYDAY=TU",
+    "nextOccurrenceAt": "2026-09-01T08:00:00Z",
+    "createdAt": "2026-08-26T14:30:00Z",
+    "version": 1
+  }
+}

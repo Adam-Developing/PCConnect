@@ -10,6 +10,7 @@ yarn-error.log
 # IDEs and Editors
 .idea/
 .vscode/
+.vs/
 *.swp
 *.swo
 
@@ -20,16 +21,23 @@ App/Key Store/
 .env
 .env.*
 *.pem
+*.pfx
+*.p12
+*.legacy-snapshot.json
+migration-manifest-*.json
 
 # OS generated files
 .DS_Store
 Thumbs.db
+.github.zip
 
 # Databases with data
 DB/pcconnect.sql
 DB/pcconnect_new.sql
 
 # Wails / Build Artifacts
+.gradle/
+.kotlin/
 temp_wails/
 .task/
 PCClientWails/.task/
@@ -37,4 +45,17 @@ PCClientWails/.task/
 frontend/dist/
 frontend/node_modules/
 bin/
+obj/
+deploy/*.env
+!deploy/config.example.env
+deploy/secrets/
+deploy/state/
 build/
+artifacts/
+packages/
+*.apk
+*.aab
+*.msi
+*.exe
+*.dll
+*.pdb

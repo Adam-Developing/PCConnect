@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<DOCUMENT Type="Advanced Installer" CreateVersion="22.0" version="22.0" Modules="update" RootPath="." Language="en_GB" Id="{2025D03E-CE86-46DF-97F1-9EC98521EA47}">
+  <COMPONENT cid="caphyon.advinst.msicomp.DictionaryComponent">
+    <ROW Path="&lt;AI_DICTS&gt;aiu-ue.ail"/>
+    <ROW Path="&lt;AI_DICTS&gt;aiu-ue_en.ail"/>
+  </COMPONENT>
+  <COMPONENT cid="caphyon.advinst.msicomp.UpdaterEditorComponent">
+    <ROW Section="Update" Key="Name" Value="PCClient"/>
+    <ROW Section="Update" Key="ProductVersion" Value="6.1.1.0" ValueLocId="-"/>
+    <ROW Section="Update" Key="URL" Value="http://pcconnect.adamkhattab.co.uk/downloads/PCClient Setup.exe" ValueLocId="-"/>
+    <ROW Section="Update" Key="Size" Value="PCClient Setup.exe" ValueLocId="-"/>
+    <ROW Section="Update" Key="SHA256" Value="PCClient Setup.exe" ValueLocId="-"/>
+    <ROW Section="Update" Key="MD5" Value="PCClient Setup.exe" ValueLocId="-"/>
+    <ROW Section="Update" Key="ServerFileName" Value="PCClient Setup.exe" ValueLocId="-"/>
+    <ROW Section="Update" Key="RegistryKey" Value="HKUD\Software\Adam Khattab\PCClient\Version" ValueLocId="-"/>
+    <ROW Section="Update" Key="Version" Value="6.1.1.0" ValueLocId="-"/>
+    <ROW Section="Update" Key="Description" Value="Has bug fixes and"/>
+    <ROW Section="Update" Key="BugFix" Value="Auto run on startup and better installation experience."/>
+    <ATTRIBUTE name="OutputFileName" value=".txt"/>
+  </COMPONENT>
+</DOCUMENT>

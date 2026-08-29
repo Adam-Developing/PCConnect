@@ -1,0 +1,42 @@
+{
+  "sourceSnapshotId": "synthetic-ci-snapshot",
+  "sourceSchemaChecksum": "0000000000000000000000000000000000000000000000000000000000000000",
+  "users": [
+    {
+      "id": "legacy-user-1",
+      "username": "Ada",
+      "email": "ada@example.invalid",
+      "displayName": "Ada Example",
+      "dateOfBirth": "2000-01-02",
+      "marketingOptIn": false,
+      "marketingConsentAt": null,
+      "passwordSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "apiKey": null,
+      "enabled": true,
+      "createdAt": "2026-01-01T12:00:00.0000000+00:00"
+    }
+  ],
+  "devices": [
+    {
+      "id": "legacy-device-1",
+      "userId": "legacy-user-1",
+      "displayName": "Home PC",
+      "platform": "windows",
+      "agentVersion": "legacy",
+      "timezone": "Europe/London",
+      "capabilities": ["lock", "restart", "shutdown", "reminders"],
+      "lastSeenAt": "2026-08-01T12:00:00.0000000+00:00"
+    }
+  ],
+  "reminders": [
+    {
+      "id": "legacy-reminder-1",
+      "userId": "legacy-user-1",
+      "text": "Synthetic rehearsal reminder",
+      "localStart": "2026-09-01T09:00:00",
+      "timezone": null,
+      "recurrenceRule": null,
+      "targetDeviceIds": ["legacy-device-1"]
+    }
+  ]
+}

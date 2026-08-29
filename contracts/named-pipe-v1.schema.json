@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pcconnect.adamdeveloping.co.uk/contracts/named-pipe-v1.schema.json",
+  "title": "PCConnect Windows service/companion named-pipe protocol",
+  "description": "Length-prefixed UTF-8 JSON frames, maximum 65536 bytes. Pipe ACL and caller token/SID/PID validation are mandatory outside this payload schema.",
+  "oneOf": [
+    { "$ref": "#/$defs/hello" },
+    { "$ref": "#/$defs/challengeResponse" },
+    { "$ref": "#/$defs/executeRequest" },
+    { "$ref": "#/$defs/executeResult" },
+    { "$ref": "#/$defs/reminderDelivery" },
+    { "$ref": "#/$defs/reminderAcknowledgement" }
+  ],
+  "$defs": {
+    "uuid": { "type": "string", "format": "uuid" },
+    "instant": { "type": "string", "format": "date-time" },
+    "commandType": { "type": "string", "enum": ["lock", "sleep", "hibernate", "sign_out", "restart", "shutdown"] },
+    "base": {
+      "type": "object",
+      "required": ["protocolVersion", "messageType", "requestId", "sentAt"],
+      "properties": {
+        "protocolVersion": { "const": 1 },
+        "messageType": { "type": "string" },
+        "requestId": { "$ref": "#/$defs/uuid" },
+        "sentAt": { "$ref": "#/$defs/instant" }
+      }
+    },
+    "hello": {
+      "allOf": [
+        { "$ref": "#/$defs/base" },
+        { "type": "object", "additionalProperties": false, "required": ["protocolVersion", "messageType", "requestId", "sentAt", "processId", "userSid", "nonce"], "properties": { "protocolVersion": { "const": 1 }, "messageType": { "const": "hello" }, "requestId": { "$ref": "#/$defs/uuid" }, "sentAt": { "$ref": "#/$defs/instant" }, "processId": { "type": "integer", "minimum": 1 }, "userSid": { "type": "string", "pattern": "^S-1-" }, "nonce": { "type": "string", "minLength": 43, "maxLength": 128 } } }
+      ]
+    },
+    "challengeResponse": {
+      "allOf": [
+        { "$ref": "#/$defs/base" },
+        { "type": "object", "additionalProperties": false, "required": ["protocolVersion", "messageType", "requestId", "sentAt", "nonce", "proof"], "properties": { "protocolVersion": { "const": 1 }, "messageType": { "const": "challenge_response" }, "requestId": { "$ref": "#/$defs/uuid" }, "sentAt": { "$ref": "#/$defs/instant" }, "nonce": { "type": "string", "minLength": 43, "maxLength": 128 }, "proof": { "type": "string", "minLength": 43, "maxLength": 256 } } }
+      ]
+    },
+    "executeRequest": {
+      "allOf": [
+        { "$ref": "#/$defs/base" },
+        { "type": "object", "additionalProperties": false, "required": ["protocolVersion", "messageType", "requestId", "sentAt", "commandId", "commandType", "expiresAt", "localReplayKey"], "properties": { "protocolVersion": { "const": 1 }, "messageType": { "const": "execute_request" }, "requestId": { "$ref": "#/$defs/uuid" }, "sentAt": { "$ref": "#/$defs/instant" }, "commandId": { "$ref": "#/$defs/uuid" }, "commandType": { "$ref": "#/$defs/commandType" }, "expiresAt": { "$ref": "#/$defs/instant" }, "localReplayKey": { "$ref": "#/$defs/uuid" } } }
+      ]
+    },
+    "executeResult": {
+      "allOf": [
+        { "$ref": "#/$defs/base" },
+        { "type": "object", "additionalProperties": false, "required": ["protocolVersion", "messageType", "requestId", "sentAt", "commandId", "state"], "properties": { "protocolVersion": { "const": 1 }, "messageType": { "const": "execute_result" }, "requestId": { "$ref": "#/$defs/uuid" }, "sentAt": { "$ref": "#/$defs/instant" }, "commandId": { "$ref": "#/$defs/uuid" }, "state": { "type": "string", "enum": ["accepted", "succeeded", "failed"] }, "failureCode": { "type": ["string", "null"], "enum": ["no_interactive_session", "unsupported", "permission_denied", "expired", "local_replay", "execution_failed", null] } } }
+      ]
+    },
+    "reminderDelivery": {
+      "allOf": [
+        { "$ref": "#/$defs/base" },
+        { "type": "object", "additionalProperties": false, "required": ["protocolVersion", "messageType", "requestId", "sentAt", "deliveryId", "occurrenceAt", "text"], "properties": { "protocolVersion": { "const": 1 }, "messageType": { "const": "reminder_delivery" }, "requestId": { "$ref": "#/$defs/uuid" }, "sentAt": { "$ref": "#/$defs/instant" }, "deliveryId": { "$ref": "#/$defs/uuid" }, "occurrenceAt": { "$ref": "#/$defs/instant" }, "text": { "type": "string", "minLength": 1, "maxLength": 2000 } } }
+      ]
+    },
+    "reminderAcknowledgement": {
+      "allOf": [
+        { "$ref": "#/$defs/base" },
+        { "type": "object", "additionalProperties": false, "required": ["protocolVersion", "messageType", "requestId", "sentAt", "deliveryId", "state"], "properties": { "protocolVersion": { "const": 1 }, "messageType": { "const": "reminder_acknowledgement" }, "requestId": { "$ref": "#/$defs/uuid" }, "sentAt": { "$ref": "#/$defs/instant" }, "deliveryId": { "$ref": "#/$defs/uuid" }, "state": { "type": "string", "enum": ["displayed", "dismissed", "completed"] } } }
+      ]
+    }
+  }
+}

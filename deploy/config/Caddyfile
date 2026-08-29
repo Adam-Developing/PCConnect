@@ -1,0 +1,39 @@
+{
+    email {$PCCONNECT_ACME_EMAIL}
+    admin off
+}
+
+{$PCCONNECT_API_HOST} {
+    encode zstd gzip
+    reverse_proxy {$PCCONNECT_ACTIVE_UPSTREAM} {
+        health_uri /api/v2/health/ready
+        health_interval 10s
+        health_timeout 3s
+        health_fails 2
+        health_passes 2
+        lb_try_duration 5s
+        flush_interval -1
+    }
+    log {
+        output stdout
+        format json
+    }
+}
+
+{$PCCONNECT_WEBAUTHN_RP_ID} {
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "no-referrer"
+        Content-Security-Policy "default-src 'none'; frame-ancestors 'none'; base-uri 'none'"
+    }
+    @assetlinks path /.well-known/assetlinks.json
+    header @assetlinks Content-Type application/json
+    header @assetlinks Cache-Control "public, max-age=3600"
+    respond @assetlinks `[{"relation":["delegate_permission/common.handle_all_urls","delegate_permission/common.get_login_creds"],"target":{"namespace":"android_app","package_name":"{$PCCONNECT_ANDROID_PACKAGE_NAME}","sha256_cert_fingerprints":["{$PCCONNECT_ANDROID_CERT_SHA256}"]}}]` 200
+    @accountlink path /verify-email /reset-password /device
+    header @accountlink Content-Type "text/html; charset=utf-8"
+    respond @accountlink `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Open PCConnect</title><body><h1>Open PCConnect</h1><p>Install or open the signed PCConnect Android app to complete this account action.</p></body></html>` 200
+    respond 404
+}

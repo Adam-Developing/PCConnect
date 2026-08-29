@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="../PCConnect.Contracts/PCConnect.Contracts.csproj" />
+    <ProjectReference Include="../PCConnect.Domain/PCConnect.Domain.csproj" />
+    <PackageReference Include="Konscious.Security.Cryptography.Argon2" />
+    <PackageReference Include="Fido2" />
+    <PackageReference Include="Fido2.AspNet" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Npgsql" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="../../DB/v2-canonical-schema.sql" LogicalName="PCConnect.Database.v2-canonical-schema.sql" />
+  </ItemGroup>
+</Project>

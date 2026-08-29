@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="../PCConnect.Contracts/PCConnect.Contracts.csproj" />
+  </ItemGroup>
+</Project>

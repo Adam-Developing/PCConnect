@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk.Worker">
+  <ItemGroup>
+    <ProjectReference Include="../PCConnect.Contracts/PCConnect.Contracts.csproj" />
+    <ProjectReference Include="../PCConnect.Domain/PCConnect.Domain.csproj" />
+    <ProjectReference Include="../PCConnect.Infrastructure/PCConnect.Infrastructure.csproj" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.KeyPerFile" />
+    <PackageReference Include="StackExchange.Redis" />
+    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" />
+    <PackageReference Include="OpenTelemetry.Extensions.Hosting" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.Http" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.Runtime" />
+  </ItemGroup>
+</Project>

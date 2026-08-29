@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/PCConnect.Contracts/PCConnect.Contracts.csproj" />
+    <ProjectReference Include="../../src/PCConnect.Domain/PCConnect.Domain.csproj" />
+    <ProjectReference Include="../../src/PCConnect.Infrastructure/PCConnect.Infrastructure.csproj" />
+    <PackageReference Include="Npgsql" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,137 @@
+{
+  "asyncapi": "3.0.0",
+  "info": {
+    "title": "PCConnect realtime notifications",
+    "version": "2.0.0",
+    "description": "Advisory SignalR notifications. Consumers must recover authoritative state through REST cursors after connect or reconnect."
+  },
+  "servers": {
+    "production": {
+      "host": "api.pcconnect.adamdeveloping.co.uk",
+      "pathname": "/api/v2/hubs/{hub}",
+      "protocol": "wss",
+      "description": "SignalR over TLS",
+      "variables": {
+        "hub": { "enum": ["controller", "device"], "default": "controller" }
+      },
+      "security": [{ "$ref": "#/components/securitySchemes/bearerAuth" }]
+    }
+  },
+  "defaultContentType": "application/json",
+  "channels": {
+    "controllerEvents": {
+      "address": "controller-events",
+      "messages": {
+        "CommandStatusChanged": { "$ref": "#/components/messages/CommandStatusChanged" },
+        "DevicePresenceChanged": { "$ref": "#/components/messages/DevicePresenceChanged" },
+        "ReminderChanged": { "$ref": "#/components/messages/ReminderChanged" },
+        "SessionRevoked": { "$ref": "#/components/messages/SessionRevoked" }
+      }
+    },
+    "deviceEvents": {
+      "address": "device-events",
+      "messages": {
+        "CommandAvailable": { "$ref": "#/components/messages/CommandAvailable" },
+        "ReminderChanged": { "$ref": "#/components/messages/ReminderChanged" },
+        "SessionRevoked": { "$ref": "#/components/messages/SessionRevoked" }
+      }
+    }
+  },
+  "operations": {
+    "receiveControllerEvents": {
+      "action": "receive",
+      "channel": { "$ref": "#/channels/controllerEvents" },
+      "summary": "Authenticated controller receives account-scoped hints."
+    },
+    "receiveDeviceEvents": {
+      "action": "receive",
+      "channel": { "$ref": "#/channels/deviceEvents" },
+      "summary": "Authenticated agent receives hints for its device only."
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": { "type": "http", "scheme": "bearer", "bearerFormat": "opaque" }
+    },
+    "messages": {
+      "CommandAvailable": {
+        "name": "CommandAvailable",
+        "title": "A durable command may be claimed",
+        "payload": { "$ref": "#/components/schemas/CommandAvailableEnvelope" }
+      },
+      "CommandStatusChanged": {
+        "name": "CommandStatusChanged",
+        "title": "A command projection changed",
+        "payload": { "$ref": "#/components/schemas/CommandStatusChangedEnvelope" }
+      },
+      "DevicePresenceChanged": {
+        "name": "DevicePresenceChanged",
+        "title": "Device presence changed",
+        "payload": { "$ref": "#/components/schemas/DevicePresenceChangedEnvelope" }
+      },
+      "ReminderChanged": {
+        "name": "ReminderChanged",
+        "title": "Reminder or delivery state changed",
+        "payload": { "$ref": "#/components/schemas/ReminderChangedEnvelope" }
+      },
+      "SessionRevoked": {
+        "name": "SessionRevoked",
+        "title": "The current credential family was revoked",
+        "payload": { "$ref": "#/components/schemas/SessionRevokedEnvelope" }
+      }
+    },
+    "schemas": {
+      "Uuid": { "type": "string", "format": "uuid" },
+      "Instant": { "type": "string", "format": "date-time" },
+      "CommandStatus": { "type": "string", "enum": ["queued", "claimed", "accepted", "succeeded", "failed", "expired", "cancelled"] },
+      "Envelope": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["eventId", "eventType", "entityId", "entityVersion", "occurredAt", "payload"],
+        "properties": {
+          "eventId": { "$ref": "#/components/schemas/Uuid" },
+          "eventType": { "type": "string" },
+          "entityId": { "$ref": "#/components/schemas/Uuid" },
+          "entityVersion": { "type": "integer", "minimum": 1 },
+          "occurredAt": { "$ref": "#/components/schemas/Instant" },
+          "payload": { "type": "object" }
+        }
+      },
+      "CommandAvailableEnvelope": {
+        "allOf": [
+          { "$ref": "#/components/schemas/Envelope" },
+          { "type": "object", "properties": { "eventType": { "const": "CommandAvailable" }, "payload": { "$ref": "#/components/schemas/CommandAvailablePayload" } } }
+        ]
+      },
+      "CommandAvailablePayload": { "type": "object", "additionalProperties": false, "required": ["commandId", "expiresAt"], "properties": { "commandId": { "$ref": "#/components/schemas/Uuid" }, "expiresAt": { "$ref": "#/components/schemas/Instant" } } },
+      "CommandStatusChangedEnvelope": {
+        "allOf": [
+          { "$ref": "#/components/schemas/Envelope" },
+          { "type": "object", "properties": { "eventType": { "const": "CommandStatusChanged" }, "payload": { "$ref": "#/components/schemas/CommandStatusChangedPayload" } } }
+        ]
+      },
+      "CommandStatusChangedPayload": { "type": "object", "additionalProperties": false, "required": ["commandId", "deviceId", "status"], "properties": { "commandId": { "$ref": "#/components/schemas/Uuid" }, "deviceId": { "$ref": "#/components/schemas/Uuid" }, "status": { "$ref": "#/components/schemas/CommandStatus" }, "failureCode": { "type": ["string", "null"] } } },
+      "DevicePresenceChangedEnvelope": {
+        "allOf": [
+          { "$ref": "#/components/schemas/Envelope" },
+          { "type": "object", "properties": { "eventType": { "const": "DevicePresenceChanged" }, "payload": { "$ref": "#/components/schemas/DevicePresenceChangedPayload" } } }
+        ]
+      },
+      "DevicePresenceChangedPayload": { "type": "object", "additionalProperties": false, "required": ["deviceId", "status", "lastSeenAt"], "properties": { "deviceId": { "$ref": "#/components/schemas/Uuid" }, "status": { "type": "string", "enum": ["online", "offline", "revoked"] }, "lastSeenAt": { "$ref": "#/components/schemas/Instant" } } },
+      "ReminderChangedEnvelope": {
+        "allOf": [
+          { "$ref": "#/components/schemas/Envelope" },
+          { "type": "object", "properties": { "eventType": { "const": "ReminderChanged" }, "payload": { "$ref": "#/components/schemas/ReminderChangedPayload" } } }
+        ]
+      },
+      "ReminderChangedPayload": { "type": "object", "additionalProperties": false, "required": ["reminderId", "change"], "properties": { "reminderId": { "$ref": "#/components/schemas/Uuid" }, "deliveryId": { "oneOf": [{ "$ref": "#/components/schemas/Uuid" }, { "type": "null" }] }, "change": { "type": "string", "enum": ["created", "updated", "deleted", "delivery_available", "delivery_acknowledged"] } } },
+      "SessionRevokedEnvelope": {
+        "allOf": [
+          { "$ref": "#/components/schemas/Envelope" },
+          { "type": "object", "properties": { "eventType": { "const": "SessionRevoked" }, "payload": { "$ref": "#/components/schemas/SessionRevokedPayload" } } }
+        ]
+      },
+      "SessionRevokedPayload": { "type": "object", "additionalProperties": false, "required": ["sessionId", "reason"], "properties": { "sessionId": { "$ref": "#/components/schemas/Uuid" }, "reason": { "type": "string", "enum": ["logout", "user_revoked", "token_reuse", "password_reset", "security_change", "device_revoked", "expired"] } } }
+    }
+  }
+}

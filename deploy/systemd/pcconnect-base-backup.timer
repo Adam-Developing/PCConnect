@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily PCConnect encrypted PostgreSQL base backup
+
+[Timer]
+OnCalendar=*-*-* 02:15:00 UTC
+RandomizedDelaySec=900
+Persistent=true
+
+[Install]
+WantedBy=timers.target

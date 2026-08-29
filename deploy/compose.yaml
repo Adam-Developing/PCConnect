@@ -1,0 +1,283 @@
+name: pcconnect-v2
+
+x-service-defaults: &service-defaults
+  restart: unless-stopped
+  read_only: true
+  init: true
+  security_opt: ["no-new-privileges:true"]
+  cap_drop: ["ALL"]
+  networks: [backend]
+  mem_limit: 512m
+  cpus: 1.0
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "5" }
+
+x-app-environment: &app-environment
+  DOTNET_ENVIRONMENT: ${PCCONNECT_ENVIRONMENT:?set PCCONNECT_ENVIRONMENT}
+  Release: ${PCCONNECT_RELEASE:?set PCCONNECT_RELEASE}
+  ASPNETCORE_URLS: http://+:8080
+  Realtime__ValkeyConnection: valkey:6379,abortConnect=false
+  Exports__Directory: /var/lib/pcconnect/exports
+  Email__PublicBaseUrl: ${PCCONNECT_WEB_ORIGIN:?set PCCONNECT_WEB_ORIGIN}
+  Enrollment__VerificationUri: ${PCCONNECT_WEB_ORIGIN}/device
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+  OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+
+x-app-secrets: &app-secrets
+  - source: postgres_connection
+    target: ConnectionStrings__Postgres
+  - source: token_hashing_key
+    target: Security__TokenHashingKey
+  - source: legacy_credential_hashing_key
+    target: Security__LegacyCredentialHashingKey
+  - source: reminder_key_id
+    target: Security__ActiveReminderKeyId
+  - source: reminder_key
+    target: Security__ReminderWrappingKeys__v1
+  - source: email_key_id
+    target: Security__ActiveEmailKeyId
+  - source: email_key
+    target: Security__EmailEncryptionKeys__v1
+  - source: deletion_tombstone_key
+    target: Security__DeletionTombstoneKey
+  - source: export_encryption_key
+    target: Security__ExportEncryptionKey
+  - source: data_protection_password
+    target: DataProtection__CertificatePassword
+  - source: data_protection_certificate
+    target: /run/certificates/data-protection.pfx
+  - source: smtp_host
+    target: Email__Smtp__Host
+  - source: smtp_username
+    target: Email__Smtp__Username
+  - source: smtp_password
+    target: Email__Smtp__Password
+  - source: smtp_from
+    target: Email__Smtp__FromAddress
+
+services:
+  caddy:
+    image: ${PCCONNECT_CADDY_IMAGE:?set digest-pinned PCCONNECT_CADDY_IMAGE}
+    restart: unless-stopped
+    read_only: true
+    init: true
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    cap_add: ["NET_BIND_SERVICE"]
+    ports: ["80:80", "443:443", "443:443/udp"]
+    environment:
+      PCCONNECT_API_HOST: ${PCCONNECT_API_HOST:?set PCCONNECT_API_HOST}
+      PCCONNECT_WEBAUTHN_RP_ID: ${PCCONNECT_WEBAUTHN_RP_ID:?set PCCONNECT_WEBAUTHN_RP_ID}
+      PCCONNECT_ANDROID_PACKAGE_NAME: ${PCCONNECT_ANDROID_PACKAGE_NAME:?set PCCONNECT_ANDROID_PACKAGE_NAME}
+      PCCONNECT_ANDROID_CERT_SHA256: ${PCCONNECT_ANDROID_CERT_SHA256:?set PCCONNECT_ANDROID_CERT_SHA256}
+      PCCONNECT_ACTIVE_UPSTREAM: ${PCCONNECT_ACTIVE_UPSTREAM:-api-blue:8080}
+      PCCONNECT_ACME_EMAIL: ${PCCONNECT_ACME_EMAIL:?set PCCONNECT_ACME_EMAIL}
+    volumes:
+      - ./config/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ${PCCONNECT_STATE_ROOT:?set PCCONNECT_STATE_ROOT}/caddy-data:/data
+      - ${PCCONNECT_STATE_ROOT:?set PCCONNECT_STATE_ROOT}/caddy-config:/config
+    tmpfs: [/tmp]
+    networks: [frontend, backend]
+    depends_on: [api-blue, api-green]
+    mem_limit: 256m
+    cpus: 0.5
+
+  api-blue:
+    <<: *service-defaults
+    image: ${PCCONNECT_API_IMAGE:?set digest-pinned PCCONNECT_API_IMAGE}
+    environment:
+      <<: *app-environment
+      AllowedHosts: "${PCCONNECT_API_HOST:?set PCCONNECT_API_HOST};api-blue;api-green"
+      Http__TrustedProxyNetwork: 172.30.0.0/24
+      Http__AllowedOrigins__0: ${PCCONNECT_WEB_ORIGIN:?set PCCONNECT_WEB_ORIGIN}
+      Security__WebAuthnRpId: ${PCCONNECT_WEBAUTHN_RP_ID:?set PCCONNECT_WEBAUTHN_RP_ID}
+      Security__WebAuthnRpName: PCConnect
+      Security__WebAuthnOrigins__0: ${PCCONNECT_WEB_ORIGIN:?set PCCONNECT_WEB_ORIGIN}
+      Security__WebAuthnOrigins__1: ${PCCONNECT_ANDROID_WEBAUTHN_ORIGIN:?set PCCONNECT_ANDROID_WEBAUTHN_ORIGIN}
+      DataProtection__KeyRingPath: /var/lib/pcconnect/data-protection
+      DataProtection__CertificatePath: /run/certificates/data-protection.pfx
+    secrets: *app-secrets
+    volumes:
+      - ${PCCONNECT_STATE_ROOT}/exports:/var/lib/pcconnect/exports
+      - ${PCCONNECT_STATE_ROOT}/data-protection:/var/lib/pcconnect/data-protection
+    tmpfs: [/tmp]
+    depends_on: [postgres, valkey]
+
+  api-green:
+    <<: *service-defaults
+    image: ${PCCONNECT_API_IMAGE}
+    environment:
+      <<: *app-environment
+      AllowedHosts: "${PCCONNECT_API_HOST};api-blue;api-green"
+      Http__TrustedProxyNetwork: 172.30.0.0/24
+      Http__AllowedOrigins__0: ${PCCONNECT_WEB_ORIGIN}
+      Security__WebAuthnRpId: ${PCCONNECT_WEBAUTHN_RP_ID}
+      Security__WebAuthnRpName: PCConnect
+      Security__WebAuthnOrigins__0: ${PCCONNECT_WEB_ORIGIN}
+      Security__WebAuthnOrigins__1: ${PCCONNECT_ANDROID_WEBAUTHN_ORIGIN}
+      DataProtection__KeyRingPath: /var/lib/pcconnect/data-protection
+      DataProtection__CertificatePath: /run/certificates/data-protection.pfx
+    secrets: *app-secrets
+    volumes:
+      - ${PCCONNECT_STATE_ROOT}/exports:/var/lib/pcconnect/exports
+      - ${PCCONNECT_STATE_ROOT}/data-protection:/var/lib/pcconnect/data-protection
+    tmpfs: [/tmp]
+    depends_on: [postgres, valkey]
+
+  worker:
+    <<: *service-defaults
+    image: ${PCCONNECT_WORKER_IMAGE:?set digest-pinned PCCONNECT_WORKER_IMAGE}
+    environment: *app-environment
+    secrets: *app-secrets
+    volumes:
+      - ${PCCONNECT_STATE_ROOT}/exports:/var/lib/pcconnect/exports
+    tmpfs: [/tmp]
+    depends_on: [postgres, valkey]
+
+  migrator:
+    <<: *service-defaults
+    profiles: ["migration"]
+    restart: "no"
+    image: ${PCCONNECT_MIGRATOR_IMAGE:?set digest-pinned PCCONNECT_MIGRATOR_IMAGE}
+    environment:
+      PCCONNECT_ENVIRONMENT: ${PCCONNECT_ENVIRONMENT}
+      PCCONNECT_PRODUCTION_CHANGE_TICKET: ${PCCONNECT_PRODUCTION_CHANGE_TICKET:-}
+    secrets:
+      - source: postgres_connection
+        target: ConnectionStrings__Postgres
+    depends_on: [postgres]
+
+  postgres:
+    image: ${PCCONNECT_POSTGRES_IMAGE:?set digest-pinned PCCONNECT_POSTGRES_IMAGE}
+    restart: unless-stopped
+    security_opt: ["no-new-privileges:true"]
+    environment:
+      POSTGRES_DB: pcconnect
+      POSTGRES_USER: pcconnect
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      PGDATA: /var/lib/postgresql/18/docker
+    secrets: [postgres_password]
+    volumes:
+      - ${PCCONNECT_STATE_ROOT}/postgres:/var/lib/postgresql
+      - ${PCCONNECT_STATE_ROOT}/wal-archive:/var/lib/postgresql/wal-archive
+    command:
+      - postgres
+      - -c
+      - wal_level=replica
+      - -c
+      - archive_mode=on
+      - -c
+      - archive_timeout=300s
+      - -c
+      - archive_command=test ! -f /var/lib/postgresql/wal-archive/%f && cp %p /var/lib/postgresql/wal-archive/%f
+    networks: [backend]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pcconnect -d pcconnect"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    mem_limit: 1g
+    cpus: 2.0
+
+  valkey:
+    image: ${PCCONNECT_VALKEY_IMAGE:?set digest-pinned PCCONNECT_VALKEY_IMAGE}
+    restart: unless-stopped
+    read_only: true
+    init: true
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    command: ["valkey-server", "--save", "", "--appendonly", "no", "--protected-mode", "yes"]
+    tmpfs: [/data]
+    networks: [backend]
+    mem_limit: 256m
+    cpus: 0.5
+
+  otel-collector:
+    image: ${PCCONNECT_OTEL_IMAGE:?set digest-pinned PCCONNECT_OTEL_IMAGE}
+    restart: unless-stopped
+    read_only: true
+    init: true
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    volumes:
+      - ./config/otel-collector.yaml:/etc/otelcol-contrib/config.yaml:ro
+    tmpfs: [/tmp]
+    networks: [backend]
+    mem_limit: 256m
+    cpus: 0.5
+
+  prometheus:
+    image: ${PCCONNECT_PROMETHEUS_IMAGE:?set digest-pinned PCCONNECT_PROMETHEUS_IMAGE}
+    restart: unless-stopped
+    read_only: true
+    init: true
+    user: "65532:65532"
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    command:
+      - --config.file=/etc/prometheus/prometheus.yaml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=30d
+    volumes:
+      - ./config/prometheus.yaml:/etc/prometheus/prometheus.yaml:ro
+      - ./config/alert-rules.yaml:/etc/prometheus/alert-rules.yaml:ro
+      - ${PCCONNECT_STATE_ROOT}/prometheus:/prometheus
+    tmpfs: [/tmp]
+    networks: [backend]
+    mem_limit: 512m
+    cpus: 0.5
+
+  pushgateway:
+    image: ${PCCONNECT_PUSHGATEWAY_IMAGE:?set digest-pinned PCCONNECT_PUSHGATEWAY_IMAGE}
+    restart: unless-stopped
+    read_only: true
+    init: true
+    user: "65532:65532"
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    ports: ["127.0.0.1:9091:9091"]
+    tmpfs: [/tmp]
+    networks: [backend]
+    mem_limit: 128m
+    cpus: 0.25
+
+  node-exporter:
+    image: ${PCCONNECT_NODE_EXPORTER_IMAGE:?set digest-pinned PCCONNECT_NODE_EXPORTER_IMAGE}
+    restart: unless-stopped
+    read_only: true
+    init: true
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    command: ["--path.rootfs=/host"]
+    volumes: ["/:/host:ro,rslave"]
+    networks: [backend]
+    mem_limit: 128m
+    cpus: 0.25
+
+networks:
+  frontend: {}
+  backend:
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
+
+secrets:
+  postgres_password: { file: "${PCCONNECT_SECRET_ROOT:?set PCCONNECT_SECRET_ROOT}/postgres_password" }
+  postgres_connection: { file: "${PCCONNECT_SECRET_ROOT}/postgres_connection" }
+  token_hashing_key: { file: "${PCCONNECT_SECRET_ROOT}/token_hashing_key" }
+  legacy_credential_hashing_key: { file: "${PCCONNECT_SECRET_ROOT}/legacy_credential_hashing_key" }
+  reminder_key_id: { file: "${PCCONNECT_SECRET_ROOT}/reminder_key_id" }
+  reminder_key: { file: "${PCCONNECT_SECRET_ROOT}/reminder_key" }
+  email_key_id: { file: "${PCCONNECT_SECRET_ROOT}/email_key_id" }
+  email_key: { file: "${PCCONNECT_SECRET_ROOT}/email_key" }
+  deletion_tombstone_key: { file: "${PCCONNECT_SECRET_ROOT}/deletion_tombstone_key" }
+  export_encryption_key: { file: "${PCCONNECT_SECRET_ROOT}/export_encryption_key" }
+  data_protection_password: { file: "${PCCONNECT_SECRET_ROOT}/data_protection_password" }
+  data_protection_certificate: { file: "${PCCONNECT_SECRET_ROOT}/data_protection.pfx" }
+  smtp_host: { file: "${PCCONNECT_SECRET_ROOT}/smtp_host" }
+  smtp_username: { file: "${PCCONNECT_SECRET_ROOT}/smtp_username" }
+  smtp_password: { file: "${PCCONNECT_SECRET_ROOT}/smtp_password" }
+  smtp_from: { file: "${PCCONNECT_SECRET_ROOT}/smtp_from" }

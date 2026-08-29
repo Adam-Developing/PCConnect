@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pcconnect.adamdeveloping.co.uk/contracts/migration-manifest.schema.json",
+  "title": "PCConnect legacy import reconciliation manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["manifestVersion", "runId", "mode", "sourceSnapshotId", "startedAt", "finishedAt", "entities", "quarantines", "collisions", "result"],
+  "properties": {
+    "manifestVersion": { "const": 1 },
+    "runId": { "type": "string", "format": "uuid" },
+    "mode": { "type": "string", "enum": ["dry_run", "full", "delta"] },
+    "sourceSnapshotId": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "sourceSchemaChecksum": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "startedAt": { "type": "string", "format": "date-time" },
+    "finishedAt": { "type": "string", "format": "date-time" },
+    "entities": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["entity", "sourceCount", "importedCount", "updatedCount", "skippedCount", "targetCount", "mappingChecksum"],
+        "properties": {
+          "entity": { "type": "string", "enum": ["users", "password_credentials", "legacy_compat_credentials", "devices", "reminders", "reminder_targets"] },
+          "sourceCount": { "type": "integer", "minimum": 0 },
+          "importedCount": { "type": "integer", "minimum": 0 },
+          "updatedCount": { "type": "integer", "minimum": 0 },
+          "skippedCount": { "type": "integer", "minimum": 0 },
+          "targetCount": { "type": "integer", "minimum": 0 },
+          "mappingChecksum": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+        }
+      }
+    },
+    "quarantines": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 0 }, "description": "Counts by non-PII reason code." },
+    "collisions": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 0 }, "description": "Counts by non-PII collision type." },
+    "result": { "type": "string", "enum": ["passed", "passed_with_approved_exceptions", "failed"] },
+    "approvedExceptionIds": { "type": "array", "uniqueItems": true, "items": { "type": "string", "pattern": "^MIG-[0-9]{4}$" } },
+    "signature": { "type": "string", "description": "Detached-signature reference; never credential material." }
+  }
+}

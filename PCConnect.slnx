@@ -1,0 +1,19 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/PCConnect.Contracts/PCConnect.Contracts.csproj" />
+    <Project Path="src/PCConnect.Domain/PCConnect.Domain.csproj" />
+    <Project Path="src/PCConnect.Infrastructure/PCConnect.Infrastructure.csproj" />
+    <Project Path="src/PCConnect.Api/PCConnect.Api.csproj" />
+    <Project Path="src/PCConnect.Worker/PCConnect.Worker.csproj" />
+    <Project Path="tools/PCConnect.Migration/PCConnect.Migration.csproj" />
+    <Project Path="tools/PCConnect.DatabaseMigrator/PCConnect.DatabaseMigrator.csproj" />
+    <Project Path="src/PCConnect.Windows.Protocol/PCConnect.Windows.Protocol.csproj" />
+    <Project Path="src/PCConnect.Windows.Agent/PCConnect.Windows.Agent.csproj" />
+    <Project Path="src/PCConnect.Windows.Companion/PCConnect.Windows.Companion.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/PCConnect.UnitTests/PCConnect.UnitTests.csproj" />
+    <Project Path="tests/PCConnect.IntegrationTests/PCConnect.IntegrationTests.csproj" />
+    <Project Path="tests/PCConnect.WindowsTests/PCConnect.WindowsTests.csproj" />
+  </Folder>
+</Solution>

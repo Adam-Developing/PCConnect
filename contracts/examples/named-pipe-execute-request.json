@@ -1,0 +1,10 @@
+{
+  "protocolVersion": 1,
+  "messageType": "execute_request",
+  "requestId": "018f47b2-5606-7e32-80f8-8fc0cfca87f2",
+  "sentAt": "2026-08-26T14:31:00Z",
+  "commandId": "018f47a1-8792-73f3-9a9f-86b75be9226c",
+  "commandType": "lock",
+  "expiresAt": "2026-08-26T14:32:00Z",
+  "localReplayKey": "018f47a1-8792-73f3-9a9f-86b75be9226c"
+}

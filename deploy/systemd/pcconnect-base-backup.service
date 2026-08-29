@@ -1,0 +1,15 @@
+[Unit]
+Description=PCConnect encrypted PostgreSQL base backup
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/srv/pcconnect-v2/current/deploy/backup-base.sh /etc/pcconnect-v2/staging.env
+User=root
+Group=root
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+PrivateTmp=true
+NoNewPrivileges=true

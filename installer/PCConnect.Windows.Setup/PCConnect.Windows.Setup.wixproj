@@ -1,0 +1,16 @@
+<Project Sdk="WixToolset.Sdk/4.0.6">
+  <PropertyGroup>
+    <OutputType>Package</OutputType>
+    <Platform>x64</Platform>
+    <InstallerPlatform>x64</InstallerPlatform>
+    <OutputName>PCConnect-v2-win-x64</OutputName>
+    <AgentPublishDir Condition="'$(AgentPublishDir)' == ''">$(MSBuildThisFileDirectory)..\..\artifacts\windows\agent</AgentPublishDir>
+    <CompanionPublishDir Condition="'$(CompanionPublishDir)' == ''">$(MSBuildThisFileDirectory)..\..\artifacts\windows\companion</CompanionPublishDir>
+    <DefineConstants>AgentPublishDir=$(AgentPublishDir);CompanionPublishDir=$(CompanionPublishDir)</DefineConstants>
+  </PropertyGroup>
+  <Target Name="VerifyPublishInputs" BeforeTargets="BeforeBuild">
+    <Error Condition="!Exists('$(AgentPublishDir)\PCConnect.Windows.Agent.exe')" Text="Publish the Windows agent to $(AgentPublishDir) before building the MSI." />
+    <Error Condition="!Exists('$(AgentPublishDir)\appsettings.json')" Text="The agent appsettings.json publish input is missing." />
+    <Error Condition="!Exists('$(CompanionPublishDir)\PCConnect.Windows.Companion.exe')" Text="Publish the Windows companion to $(CompanionPublishDir) before building the MSI." />
+  </Target>
+</Project>
