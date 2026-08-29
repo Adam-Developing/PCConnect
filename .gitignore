@@ -11,6 +11,7 @@ yarn-error.log
 .idea/
 .vscode/
 .vs/
+local.properties
 *.swp
 *.swo
 

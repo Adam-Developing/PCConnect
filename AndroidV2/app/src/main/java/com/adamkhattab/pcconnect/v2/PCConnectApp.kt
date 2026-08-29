@@ -4,12 +4,8 @@ import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import android.os.Build
 import android.text.format.DateFormat
-import android.util.Patterns
 import androidx.activity.compose.LocalActivity
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -25,7 +21,6 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -42,9 +37,9 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -59,7 +54,10 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.adamkhattab.pcconnect.v2.data.DeviceEntity
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
+import androidx.navigation.compose.rememberNavController
 import com.adamkhattab.pcconnect.v2.data.PlatformCapabilities
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -70,6 +68,7 @@ import java.time.format.FormatStyle
 @Composable
 fun PCConnectApp(viewModel: MainViewModel) {
     val session by viewModel.session.collectAsStateWithLifecycle()
+    val resetToken by viewModel.passwordResetToken.collectAsStateWithLifecycle()
     val message by viewModel.message.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     LaunchedEffect(message) {
@@ -78,271 +77,104 @@ fun PCConnectApp(viewModel: MainViewModel) {
     MaterialTheme {
         Scaffold(snackbarHost = { SnackbarHost(snackbar) }) { padding ->
             Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
-                when (session) {
-                    SessionState.CHECKING -> CircularProgressIndicator(
+                when {
+                    session == SessionState.CHECKING && resetToken == null -> CircularProgressIndicator(
                         Modifier.semantics { contentDescription = "Restoring your PCConnect session" },
                     )
-                    SessionState.SIGNED_OUT -> LoginScreen(viewModel)
-                    SessionState.SIGNED_IN -> ControllerScreen(viewModel)
+                    resetToken != null || session == SessionState.SIGNED_OUT -> AuthNavigation(viewModel)
+                    else -> ControllerScreen(viewModel)
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun LoginScreen(viewModel: MainViewModel) {
-    val resetToken by viewModel.passwordResetToken.collectAsStateWithLifecycle()
-    if (resetToken != null) {
-        PasswordResetScreen(viewModel)
-        return
-    }
-    var mode by remember { mutableStateOf(LoginMode.SignIn) }
-    var login by remember { mutableStateOf("") }
-    var password by remember { mutableStateOf("") }
-    var email by remember { mutableStateOf("") }
-    var username by remember { mutableStateOf("") }
-    var displayName by remember { mutableStateOf("") }
-    var marketingOptIn by remember { mutableStateOf(false) }
-    val busy by viewModel.busy.collectAsStateWithLifecycle()
-    val activity = LocalActivity.current
-    val focusManager = LocalFocusManager.current
-    val usernameLength = username.trim().length
-    val usernameError = username.isNotEmpty() && usernameLength !in 3..50
-    val emailValid = email.trim().let { it.length in 3..254 && Patterns.EMAIL_ADDRESS.matcher(it).matches() }
-    val emailError = email.isNotEmpty() && !emailValid
-    val displayNameLength = displayName.trim().length
-    val displayNameError = displayName.isNotEmpty() && displayNameLength !in 1..100
-    val passwordValid = password.length in 12..1024 && password.none(Char::isISOControl)
-    val passwordError = password.isNotEmpty() && !passwordValid
-    fun switchMode(next: LoginMode) {
-        login = ""
-        password = ""
-        email = ""
-        username = ""
-        displayName = ""
-        marketingOptIn = false
-        mode = next
-    }
-    Column(Modifier.padding(28.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("PCConnect", style = MaterialTheme.typography.headlineLarge)
-        when (mode) {
-            LoginMode.SignIn -> {
-                Text("Securely control your enrolled computers.")
-                OutlinedTextField(
-                    login,
-                    { login = it.take(254) },
-                    label = { Text("Email or username") },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email, imeAction = ImeAction.Next),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                OutlinedTextField(
-                    password,
-                    { password = it.take(1024) },
-                    label = { Text("Password") },
-                    visualTransformation = PasswordVisualTransformation(),
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
-                    keyboardActions = KeyboardActions(onDone = {
-                        focusManager.clearFocus()
-                        if (!busy && login.isNotBlank() && password.isNotBlank()) {
-                            viewModel.login(login, password)
-                        }
-                    }),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Button({ viewModel.login(login, password) }, enabled = !busy && login.isNotBlank() && password.isNotBlank(), modifier = Modifier.fillMaxWidth()) {
-                    Text("Sign in")
-                }
-                if (PlatformCapabilities.supportsPasskeys(Build.VERSION.SDK_INT)) {
-                    OutlinedButton(
-                        { viewModel.loginWithPasskey(checkNotNull(activity), login) },
-                        enabled = !busy && activity != null,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) { Text("Sign in with a passkey") }
-                }
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    TextButton({ switchMode(LoginMode.Register) }) { Text("Create account") }
-                    TextButton({ switchMode(LoginMode.Forgot) }) { Text("Forgot password?") }
-                }
-            }
-            LoginMode.Register -> {
-                Text("Create an account", style = MaterialTheme.typography.titleLarge)
-                OutlinedTextField(
-                    username,
-                    { username = it.take(50) },
-                    label = { Text("Username") },
-                    supportingText = if (usernameError) { { Text("Use 3–50 characters.") } } else null,
-                    isError = usernameError,
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(
-                        capitalization = KeyboardCapitalization.None,
-                        keyboardType = KeyboardType.Text,
-                        imeAction = ImeAction.Next,
-                    ),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                OutlinedTextField(
-                    email,
-                    { email = it.take(254) },
-                    label = { Text("Email") },
-                    supportingText = if (emailError) { { Text("Enter a valid email address.") } } else null,
-                    isError = emailError,
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email, imeAction = ImeAction.Next),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                OutlinedTextField(
-                    displayName,
-                    { displayName = it.take(100) },
-                    label = { Text("Display name") },
-                    supportingText = if (displayNameError) { { Text("Use 1–100 characters.") } } else null,
-                    isError = displayNameError,
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(
-                        capitalization = KeyboardCapitalization.Words,
-                        imeAction = ImeAction.Next,
-                    ),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                OutlinedTextField(
-                    password,
-                    { password = it.take(1024) },
-                    label = { Text("Password") },
-                    supportingText = if (passwordError) { { Text("Use at least 12 characters.") } } else null,
-                    isError = passwordError,
-                    visualTransformation = PasswordVisualTransformation(),
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
-                    keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Row(
-                    Modifier.fillMaxWidth().clickable { marketingOptIn = !marketingOptIn },
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Checkbox(marketingOptIn, { marketingOptIn = it })
-                    Text("Send me optional PCConnect product updates")
-                }
-                Button(
-                    { viewModel.register(username, email, displayName, password, marketingOptIn) },
-                    enabled = !busy && usernameLength in 3..50 && emailValid && displayNameLength in 1..100 && passwordValid,
-                    modifier = Modifier.fillMaxWidth(),
-                ) { Text("Create account") }
-                TextButton({ switchMode(LoginMode.SignIn) }) { Text("Back to sign in") }
-            }
-            LoginMode.Forgot -> {
-                Text("Reset password", style = MaterialTheme.typography.titleLarge)
-                Text("Enter your email address. The response is the same whether or not an account exists.")
-                OutlinedTextField(
-                    email,
-                    { email = it.take(254) },
-                    label = { Text("Email") },
-                    supportingText = if (emailError) { { Text("Enter a valid email address.") } } else null,
-                    isError = emailError,
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email, imeAction = ImeAction.Done),
-                    keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Button(
-                    { viewModel.requestPasswordReset(email) },
-                    enabled = !busy && emailValid,
-                    modifier = Modifier.fillMaxWidth(),
-                ) { Text("Send reset link") }
-                TextButton({ switchMode(LoginMode.SignIn) }) { Text("Back to sign in") }
-            }
-        }
-    }
-}
-
-private enum class LoginMode { SignIn, Register, Forgot }
-
-@Composable
-private fun PasswordResetScreen(viewModel: MainViewModel) {
-    var password by remember { mutableStateOf("") }
-    var confirmation by remember { mutableStateOf("") }
-    val busy by viewModel.busy.collectAsStateWithLifecycle()
-    Column(Modifier.padding(28.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("Choose a new password", style = MaterialTheme.typography.headlineMedium)
-        Text("This will revoke every existing PCConnect session.")
-        OutlinedTextField(
-            password,
-            { password = it.take(1024) },
-            label = { Text("New password") },
-            supportingText = if (password.isNotEmpty() && password.length < 12) { { Text("Use at least 12 characters.") } } else null,
-            isError = password.isNotEmpty() && password.length < 12,
-            visualTransformation = PasswordVisualTransformation(),
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Next),
-            modifier = Modifier.fillMaxWidth(),
-        )
-        OutlinedTextField(
-            confirmation,
-            { confirmation = it.take(1024) },
-            label = { Text("Confirm password") },
-            supportingText = if (confirmation.isNotEmpty() && confirmation != password) { { Text("Passwords do not match.") } } else null,
-            isError = confirmation.isNotEmpty() && confirmation != password,
-            visualTransformation = PasswordVisualTransformation(),
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Button(
-            { viewModel.completePasswordReset(password) },
-            enabled = !busy && password.length >= 12 && password == confirmation,
-            modifier = Modifier.fillMaxWidth(),
-        ) { Text("Change password") }
-        TextButton(viewModel::cancelPasswordReset) { Text("Cancel") }
     }
 }
 
 @Composable
 private fun ControllerScreen(viewModel: MainViewModel) {
-    var selected by remember { mutableIntStateOf(0) }
+    val navController = rememberNavController()
+    val currentRoute = navController.currentBackStackEntryAsState().value?.destination?.route
     val destinations = listOf(
-        Triple("Devices", R.drawable.ic_devices, "Enrolled devices"),
-        Triple("Commands", R.drawable.ic_history, "Command history"),
-        Triple("Reminders", R.drawable.ic_reminders, "Reminders"),
-        Triple("Settings", R.drawable.ic_settings, "Settings"),
+        ControllerDestination(ControllerRoute.DEVICES, "Devices", R.drawable.ic_devices, "Enrolled devices"),
+        ControllerDestination(ControllerRoute.COMMANDS, "Commands", R.drawable.ic_history, "Command history"),
+        ControllerDestination(ControllerRoute.REMINDERS, "Reminders", R.drawable.ic_reminders, "Reminders"),
+        ControllerDestination(ControllerRoute.SETTINGS, "Settings", R.drawable.ic_settings, "Settings"),
     )
     Scaffold(
         bottomBar = {
             NavigationBar {
-                destinations.forEachIndexed { index, (label, iconResource, description) ->
+                destinations.forEach { destination ->
                     NavigationBarItem(
-                        selected = selected == index,
-                        onClick = { selected = index },
-                        icon = { Icon(painterResource(iconResource), contentDescription = description) },
-                        label = { Text(label) },
+                        selected = currentRoute == destination.route,
+                        onClick = {
+                            navController.navigate(destination.route) {
+                                popUpTo(ControllerRoute.DEVICES) { saveState = true }
+                                launchSingleTop = true
+                                restoreState = true
+                            }
+                        },
+                        icon = { Icon(painterResource(destination.iconResource), contentDescription = destination.description) },
+                        label = { Text(destination.label) },
                     )
                 }
             }
         },
     ) { padding ->
-        Box(Modifier.fillMaxSize().padding(padding)) {
-            when (selected) {
-                0 -> DevicesScreen(viewModel)
-                1 -> CommandsScreen(viewModel)
-                2 -> RemindersScreen(viewModel)
-                else -> SettingsScreen(viewModel)
-            }
+        NavHost(
+            navController = navController,
+            startDestination = ControllerRoute.DEVICES,
+            modifier = Modifier.fillMaxSize().padding(padding),
+        ) {
+            composable(ControllerRoute.DEVICES) { DevicesScreen(viewModel) }
+            composable(ControllerRoute.COMMANDS) { CommandsScreen(viewModel) }
+            composable(ControllerRoute.REMINDERS) { RemindersScreen(viewModel) }
+            composable(ControllerRoute.SETTINGS) { SettingsScreen(viewModel) }
         }
     }
 }
+
+private object ControllerRoute {
+    const val DEVICES = "controller/devices"
+    const val COMMANDS = "controller/commands"
+    const val REMINDERS = "controller/reminders"
+    const val SETTINGS = "controller/settings"
+}
+
+private data class ControllerDestination(
+    val route: String,
+    val label: String,
+    val iconResource: Int,
+    val description: String,
+)
 
 @Composable
 private fun DevicesScreen(viewModel: MainViewModel) {
     val devices by viewModel.devices.collectAsStateWithLifecycle()
     val windowsSids by viewModel.windowsSids.collectAsStateWithLifecycle()
-    var pending by remember { mutableStateOf<Pair<DeviceEntity, String>?>(null) }
-    var pendingSid by remember { mutableStateOf<Triple<String, String, String>?>(null) }
-    var pendingSidRevoke by remember { mutableStateOf<Triple<String, String, String>?>(null) }
-    var pendingDeviceRevoke by remember { mutableStateOf<Pair<String, String>?>(null) }
-    var enrollmentCode by remember { mutableStateOf("") }
+    val sensitive by viewModel.sensitiveUi.collectAsStateWithLifecycle()
+    var pendingKind by rememberSaveable { mutableStateOf<String?>(null) }
+    var pendingDeviceId by rememberSaveable { mutableStateOf<String?>(null) }
+    var pendingSecondaryId by rememberSaveable { mutableStateOf<String?>(null) }
+    var pendingLabel by rememberSaveable { mutableStateOf<String?>(null) }
+    var pendingCommandType by rememberSaveable { mutableStateOf<String?>(null) }
+    var enrollmentCode by rememberSaveable { mutableStateOf("") }
     val focusManager = LocalFocusManager.current
     val enrollmentCodeError = enrollmentCode.isNotEmpty() && enrollmentCode.length != 8
+    fun openPending(kind: String, deviceId: String, secondaryId: String? = null, label: String, commandType: String? = null) {
+        viewModel.clearDialogPassword()
+        pendingKind = kind
+        pendingDeviceId = deviceId
+        pendingSecondaryId = secondaryId
+        pendingLabel = label
+        pendingCommandType = commandType
+    }
+    fun clearPending() {
+        viewModel.clearDialogPassword()
+        pendingKind = null
+        pendingDeviceId = null
+        pendingSecondaryId = null
+        pendingLabel = null
+        pendingCommandType = null
+    }
     Column(Modifier.fillMaxSize().padding(16.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Text("Devices", style = MaterialTheme.typography.headlineMedium)
@@ -391,62 +223,107 @@ private fun DevicesScreen(viewModel: MainViewModel) {
                             .forEach { type ->
                                 item(key = type) {
                                     OutlinedButton({
-                                        if (type == "lock") viewModel.command(device.id, type, null) else pending = device to type
+                                        if (type == "lock") {
+                                            viewModel.command(device.id, type, null)
+                                        } else {
+                                            openPending("command", device.id, label = device.displayName, commandType = type)
+                                        }
                                     }) { Text(commandLabel(type)) }
                                 }
                             }
                     }
                     windowsSids[device.id].orEmpty().filter { it.status == "pending" }.forEach { sid ->
-                        OutlinedButton({ pendingSid = Triple(device.id, sid.windowsSid, sid.displayLabel ?: "Windows account") }) {
+                        OutlinedButton({
+                            openPending(
+                                "authorize_sid",
+                                device.id,
+                                sid.windowsSid,
+                                sid.displayLabel ?: "Windows account",
+                            )
+                        }) {
                             Text("Approve ${sid.displayLabel ?: "Windows account"}")
                         }
                     }
                     windowsSids[device.id].orEmpty().filter { it.status == "authorized" }.forEach { sid ->
-                        TextButton({ pendingSidRevoke = Triple(device.id, sid.windowsSid, sid.displayLabel ?: "Windows account") }) {
+                        TextButton({
+                            openPending(
+                                "revoke_sid",
+                                device.id,
+                                sid.windowsSid,
+                                sid.displayLabel ?: "Windows account",
+                            )
+                        }) {
                             Text("Revoke ${sid.displayLabel ?: "Windows account"}")
                         }
                     }
                     if (device.status != "revoked") {
-                        TextButton({ pendingDeviceRevoke = device.id to device.displayName }) { Text("Revoke device") }
+                        TextButton({ openPending("revoke_device", device.id, label = device.displayName) }) {
+                            Text("Revoke device")
+                        }
                     }
                 }
                 HorizontalDivider()
             }
         }
     }
-    pending?.let { (device, type) -> StepUpDialog(type, device.displayName, { pending = null }) { password ->
-        viewModel.command(device.id, type, password)
-        pending = null
-    } }
-    pendingSid?.let { (deviceId, sid, label) -> StepUpDialog("Windows account", label, { pendingSid = null }) { password ->
-        viewModel.authorizeWindowsSid(deviceId, sid, password)
-        pendingSid = null
-    } }
-    pendingSidRevoke?.let { (deviceId, sid, label) ->
-        SecurityChangeDialog(
+    when (pendingKind) {
+        "command" -> StepUpDialog(
+            type = checkNotNull(pendingCommandType),
+            device = checkNotNull(pendingLabel),
+            password = sensitive.dialogPassword,
+            onPasswordChange = viewModel::updateDialogPassword,
+            dismiss = ::clearPending,
+        ) { password ->
+            viewModel.command(checkNotNull(pendingDeviceId), checkNotNull(pendingCommandType), password)
+            clearPending()
+        }
+
+        "authorize_sid" -> StepUpDialog(
+            type = "Windows account",
+            device = checkNotNull(pendingLabel),
+            password = sensitive.dialogPassword,
+            onPasswordChange = viewModel::updateDialogPassword,
+            dismiss = ::clearPending,
+        ) { password ->
+            viewModel.authorizeWindowsSid(checkNotNull(pendingDeviceId), checkNotNull(pendingSecondaryId), password)
+            clearPending()
+        }
+
+        "revoke_sid" -> SecurityChangeDialog(
             title = "Revoke Windows account",
-            explanation = "Re-authenticate to stop $label receiving reminders or interactive commands on this PC.",
-            dismiss = { pendingSidRevoke = null },
+            explanation = "Re-authenticate to stop ${checkNotNull(pendingLabel)} receiving reminders or interactive commands on this PC.",
+            password = sensitive.dialogPassword,
+            onPasswordChange = viewModel::updateDialogPassword,
+            dismiss = ::clearPending,
         ) { password ->
-            viewModel.revokeWindowsSid(deviceId, sid, password)
-            pendingSidRevoke = null
+            viewModel.revokeWindowsSid(checkNotNull(pendingDeviceId), checkNotNull(pendingSecondaryId), password)
+            clearPending()
         }
-    }
-    pendingDeviceRevoke?.let { (deviceId, name) ->
-        SecurityChangeDialog(
+
+        "revoke_device" -> SecurityChangeDialog(
             title = "Revoke device",
-            explanation = "Re-authenticate to revoke $name and all of its device credentials.",
-            dismiss = { pendingDeviceRevoke = null },
+            explanation = "Re-authenticate to revoke ${checkNotNull(pendingLabel)} and all of its device credentials.",
+            password = sensitive.dialogPassword,
+            onPasswordChange = viewModel::updateDialogPassword,
+            dismiss = ::clearPending,
         ) { password ->
-            viewModel.revokeDevice(deviceId, password)
-            pendingDeviceRevoke = null
+            viewModel.revokeDevice(checkNotNull(pendingDeviceId), password)
+            clearPending()
         }
+
+        null -> Unit
     }
 }
 
 @Composable
-private fun StepUpDialog(type: String, device: String, dismiss: () -> Unit, confirm: (String) -> Unit) {
-    var password by remember { mutableStateOf("") }
+private fun StepUpDialog(
+    type: String,
+    device: String,
+    password: String,
+    onPasswordChange: (String) -> Unit,
+    dismiss: () -> Unit,
+    confirm: (String) -> Unit,
+) {
     val focusManager = LocalFocusManager.current
     AlertDialog(
         onDismissRequest = dismiss,
@@ -456,7 +333,7 @@ private fun StepUpDialog(type: String, device: String, dismiss: () -> Unit, conf
                 Text("Re-authenticate before sending this command to $device.")
                 OutlinedTextField(
                     password,
-                    { password = it.take(1024) },
+                    { onPasswordChange(it.take(1024)) },
                     label = { Text("Password") },
                     visualTransformation = PasswordVisualTransformation(),
                     singleLine = true,
@@ -496,12 +373,17 @@ private fun commandLabel(type: String): String = type
 @Composable
 private fun RemindersScreen(viewModel: MainViewModel) {
     val reminders by viewModel.reminders.collectAsStateWithLifecycle()
-    var text by remember { mutableStateOf("") }
-    var selectedDate by remember { mutableStateOf<LocalDate?>(null) }
-    var selectedTime by remember { mutableStateOf<LocalTime?>(null) }
+    var text by rememberSaveable { mutableStateOf("") }
+    var selectedDateValue by rememberSaveable { mutableStateOf<String?>(null) }
+    var selectedTimeValue by rememberSaveable { mutableStateOf<String?>(null) }
     val context = LocalContext.current
     val focusManager = LocalFocusManager.current
-    val suggestedStart = remember { LocalDateTime.now().plusHours(1).withSecond(0).withNano(0) }
+    val suggestedStartValue = rememberSaveable {
+        LocalDateTime.now().plusHours(1).withSecond(0).withNano(0).toString()
+    }
+    val suggestedStart = LocalDateTime.parse(suggestedStartValue)
+    val selectedDate = selectedDateValue?.let(LocalDate::parse)
+    val selectedTime = selectedTimeValue?.let(LocalTime::parse)
     val selectedStart = if (selectedDate != null && selectedTime != null) {
         LocalDateTime.of(selectedDate, selectedTime)
     } else null
@@ -531,7 +413,7 @@ private fun RemindersScreen(viewModel: MainViewModel) {
                         val initial = selectedDate ?: suggestedStart.toLocalDate()
                         DatePickerDialog(
                             context,
-                            { _, year, month, day -> selectedDate = LocalDate.of(year, month + 1, day) },
+                            { _, year, month, day -> selectedDateValue = LocalDate.of(year, month + 1, day).toString() },
                             initial.year,
                             initial.monthValue - 1,
                             initial.dayOfMonth,
@@ -544,7 +426,7 @@ private fun RemindersScreen(viewModel: MainViewModel) {
                         val initial = selectedTime ?: suggestedStart.toLocalTime()
                         TimePickerDialog(
                             context,
-                            { _, hour, minute -> selectedTime = LocalTime.of(hour, minute) },
+                            { _, hour, minute -> selectedTimeValue = LocalTime.of(hour, minute).toString() },
                             initial.hour,
                             initial.minute,
                             DateFormat.is24HourFormat(context),
@@ -560,8 +442,8 @@ private fun RemindersScreen(viewModel: MainViewModel) {
                 {
                     viewModel.reminder(text, checkNotNull(selectedStart).toString())
                     text = ""
-                    selectedDate = null
-                    selectedTime = null
+                    selectedDateValue = null
+                    selectedTimeValue = null
                 },
                 enabled = text.isNotBlank() && startValid,
             ) { Text("Save reminder") }
@@ -582,9 +464,11 @@ private fun RemindersScreen(viewModel: MainViewModel) {
 @Composable
 private fun SettingsScreen(viewModel: MainViewModel) {
     val passkeys by viewModel.passkeys.collectAsStateWithLifecycle()
+    val sensitive by viewModel.sensitiveUi.collectAsStateWithLifecycle()
     val activity = LocalActivity.current
-    var addingPasskey by remember { mutableStateOf(false) }
-    var removingPasskey by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var addingPasskey by rememberSaveable { mutableStateOf(false) }
+    var removingPasskeyId by rememberSaveable { mutableStateOf<String?>(null) }
+    var removingPasskeyName by rememberSaveable { mutableStateOf<String?>(null) }
     Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("Settings", style = MaterialTheme.typography.headlineMedium)
         Text("Access tokens remain in memory. The rotating refresh token is encrypted by Android Keystore and excluded from backup.")
@@ -599,10 +483,17 @@ private fun SettingsScreen(viewModel: MainViewModel) {
                         Text(passkey.displayName, style = MaterialTheme.typography.titleMedium)
                         Text("Added ${passkey.createdAt}")
                     }
-                    TextButton({ removingPasskey = passkey.id to passkey.displayName }) { Text("Remove") }
+                    TextButton({
+                        viewModel.clearDialogPassword()
+                        removingPasskeyId = passkey.id
+                        removingPasskeyName = passkey.displayName
+                    }) { Text("Remove") }
                 }
             }
-            OutlinedButton({ addingPasskey = true }, enabled = activity != null) { Text("Add passkey") }
+            OutlinedButton({
+                viewModel.clearDialogPassword()
+                addingPasskey = true
+            }, enabled = activity != null) { Text("Add passkey") }
         }
         OutlinedButton(viewModel::logout) { Text("Sign out") }
     }
@@ -610,27 +501,47 @@ private fun SettingsScreen(viewModel: MainViewModel) {
         SecurityChangeDialog(
             title = "Add passkey",
             explanation = "Re-authenticate, then Android will ask where to save the new passkey.",
-            dismiss = { addingPasskey = false },
+            password = sensitive.dialogPassword,
+            onPasswordChange = viewModel::updateDialogPassword,
+            dismiss = {
+                viewModel.clearDialogPassword()
+                addingPasskey = false
+            },
         ) { password ->
             viewModel.addPasskey(checkNotNull(activity), password)
+            viewModel.clearDialogPassword()
             addingPasskey = false
         }
     }
-    removingPasskey?.let { (id, name) ->
+    removingPasskeyId?.let { id ->
         SecurityChangeDialog(
             title = "Remove passkey",
-            explanation = "Re-authenticate to remove $name from your PCConnect account.",
-            dismiss = { removingPasskey = null },
+            explanation = "Re-authenticate to remove ${checkNotNull(removingPasskeyName)} from your PCConnect account.",
+            password = sensitive.dialogPassword,
+            onPasswordChange = viewModel::updateDialogPassword,
+            dismiss = {
+                viewModel.clearDialogPassword()
+                removingPasskeyId = null
+                removingPasskeyName = null
+            },
         ) { password ->
             viewModel.removePasskey(id, password)
-            removingPasskey = null
+            viewModel.clearDialogPassword()
+            removingPasskeyId = null
+            removingPasskeyName = null
         }
     }
 }
 
 @Composable
-private fun SecurityChangeDialog(title: String, explanation: String, dismiss: () -> Unit, confirm: (String) -> Unit) {
-    var password by remember { mutableStateOf("") }
+private fun SecurityChangeDialog(
+    title: String,
+    explanation: String,
+    password: String,
+    onPasswordChange: (String) -> Unit,
+    dismiss: () -> Unit,
+    confirm: (String) -> Unit,
+) {
     val focusManager = LocalFocusManager.current
     AlertDialog(
         onDismissRequest = dismiss,
@@ -640,7 +551,7 @@ private fun SecurityChangeDialog(title: String, explanation: String, dismiss: ()
                 Text(explanation)
                 OutlinedTextField(
                     password,
-                    { password = it.take(1024) },
+                    { onPasswordChange(it.take(1024)) },
                     label = { Text("Password") },
                     visualTransformation = PasswordVisualTransformation(),
                     singleLine = true,

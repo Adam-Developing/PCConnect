@@ -13,14 +13,24 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import retrofit2.HttpException
 import java.io.IOException
 
 enum class SessionState { CHECKING, SIGNED_OUT, SIGNED_IN }
 
+internal enum class SessionRestoreResult { RESTORED, RETRY_IN_BACKGROUND, NO_SESSION }
+
 data class UiMessage(val text: String, val isError: Boolean)
+
+internal data class SensitiveUiState(
+    val signInPassword: String = "",
+    val registrationPassword: String = "",
+    val resetPassword: String = "",
+    val resetConfirmation: String = "",
+    val dialogPassword: String = "",
+)
 
 class MainViewModel(private val container: AppContainer) : ViewModel() {
     private val _session = MutableStateFlow(SessionState.CHECKING)
@@ -31,6 +41,8 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
     val busy: StateFlow<Boolean> = _busy.asStateFlow()
     private val _passwordResetToken = MutableStateFlow<String?>(null)
     val passwordResetToken: StateFlow<String?> = _passwordResetToken.asStateFlow()
+    private val _sensitiveUi = MutableStateFlow(SensitiveUiState())
+    internal val sensitiveUi: StateFlow<SensitiveUiState> = _sensitiveUi.asStateFlow()
 
     val devices = container.repository.devices.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val commands = container.repository.commands.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
@@ -60,6 +72,7 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
 
     fun register(username: String, email: String, displayName: String, password: String, marketingOptIn: Boolean) = action {
         container.repository.register(username, email, displayName, password, ZoneId.systemDefault().id, marketingOptIn)
+        clearRegistrationPassword()
         _message.value = UiMessage("Account created. Check your email to verify the address.", false)
     }
 
@@ -69,6 +82,7 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun beginPasswordReset(token: String) {
+        clearResetPasswords()
         if (token.length in 32..512) _passwordResetToken.value = token
         else _message.value = UiMessage("The password-reset link is invalid.", true)
     }
@@ -78,11 +92,15 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
         container.repository.resetPassword(token, newPassword)
         container.realtime.stop()
         _passwordResetToken.value = null
+        clearResetPasswords()
         _session.value = SessionState.SIGNED_OUT
         _message.value = UiMessage("Password changed. Sign in again on this and every other device.", false)
     }
 
-    fun cancelPasswordReset() { _passwordResetToken.value = null }
+    fun cancelPasswordReset() {
+        _passwordResetToken.value = null
+        clearResetPasswords()
+    }
 
     fun verifyEmail(token: String) = action {
         require(token.length in 32..512) { "The email-verification link is invalid." }
@@ -148,15 +166,57 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
     fun logout() = action {
         container.realtime.stop()
         container.repository.logout()
+        clearSensitiveInput()
         _session.value = SessionState.SIGNED_OUT
         container.repository.clearCachedData()
     }
 
     fun dismissMessage() { _message.value = null }
 
+    fun updateSignInPassword(value: String) {
+        _sensitiveUi.update { it.copy(signInPassword = value.take(1024)) }
+    }
+
+    fun clearSignInPassword() {
+        _sensitiveUi.update { it.copy(signInPassword = "") }
+    }
+
+    fun updateRegistrationPassword(value: String) {
+        _sensitiveUi.update { it.copy(registrationPassword = value.take(1024)) }
+    }
+
+    fun clearRegistrationPassword() {
+        _sensitiveUi.update { it.copy(registrationPassword = "") }
+    }
+
+    fun updateResetPassword(value: String) {
+        _sensitiveUi.update { it.copy(resetPassword = value.take(1024)) }
+    }
+
+    fun updateResetConfirmation(value: String) {
+        _sensitiveUi.update { it.copy(resetConfirmation = value.take(1024)) }
+    }
+
+    fun clearResetPasswords() {
+        _sensitiveUi.update { it.copy(resetPassword = "", resetConfirmation = "") }
+    }
+
+    fun updateDialogPassword(value: String) {
+        _sensitiveUi.update { it.copy(dialogPassword = value.take(1024)) }
+    }
+
+    fun clearDialogPassword() {
+        _sensitiveUi.update { it.copy(dialogPassword = "") }
+    }
+
     private fun signedIn() {
+        clearSensitiveInput()
         _session.value = SessionState.SIGNED_IN
         container.realtime.start()
+    }
+
+    private fun clearSensitiveInput() {
+        _sensitiveUi.value = SensitiveUiState()
     }
 
     private suspend fun restoreSession() {
@@ -165,24 +225,32 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
             _session.value = SessionState.SIGNED_OUT
             return
         }
-        var delayMillis = 1_000L
-        repeat(3) { attempt ->
-            val restored = runCatching {
+
+        // A persisted refresh credential is enough to retain the signed-in UI.
+        // Network recovery is best-effort: the realtime client keeps retrying,
+        // while an explicit refresh rejection clears the credential and signs out.
+        _session.value = SessionState.SIGNED_IN
+        val restoreResult = restorePersistedSession(
+            refreshAndRecover = {
                 checkNotNull(container.tokenManager.refresh()) { "Session refresh is temporarily unavailable." }
                 container.repository.recoverAll()
-            }.isSuccess
-            if (restored) {
-                signedIn()
-                return
+            },
+            hasSession = container.repository::hasSession,
+        )
+        when (restoreResult) {
+            SessionRestoreResult.RESTORED -> container.realtime.start()
+            SessionRestoreResult.RETRY_IN_BACKGROUND -> {
+                container.realtime.start()
+                _message.value = UiMessage(
+                    "Connection unavailable. Your session is retained and will reconnect automatically.",
+                    false,
+                )
             }
-            if (!container.repository.hasSession()) return@repeat
-            if (attempt < 2) delay(delayMillis)
-            delayMillis = (delayMillis * 2).coerceAtMost(30_000L)
-        }
-        container.repository.clearCachedData()
-        _session.value = SessionState.SIGNED_OUT
-        if (container.repository.hasSession()) {
-            _message.value = UiMessage("We couldn't restore your session. Check the connection, then sign in again.", true)
+            SessionRestoreResult.NO_SESSION -> {
+                container.realtime.stop()
+                container.repository.clearCachedData()
+                _session.value = SessionState.SIGNED_OUT
+            }
         }
     }
 
@@ -206,6 +274,17 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T = MainViewModel(container) as T
     }
+}
+
+internal suspend fun restorePersistedSession(
+    refreshAndRecover: suspend () -> Unit,
+    hasSession: suspend () -> Boolean,
+): SessionRestoreResult = if (runCatching { refreshAndRecover() }.isSuccess) {
+    SessionRestoreResult.RESTORED
+} else if (hasSession()) {
+    SessionRestoreResult.RETRY_IN_BACKGROUND
+} else {
+    SessionRestoreResult.NO_SESSION
 }
 
 internal fun userMessage(failure: Throwable): String = when (failure) {

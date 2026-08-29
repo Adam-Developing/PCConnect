@@ -108,6 +108,47 @@ public sealed class CanonicalSchemaTests(PostgreSqlApiFixture fixture) : IClassF
     }
 
     [Fact]
+    public async Task UserDeletionAnonymizesButDoesNotMutateAppendOnlyAuditEvents()
+    {
+        if (!PostgreSqlApiFixture.Enabled) return;
+        var userId = Guid.CreateVersion7();
+        var auditId = Guid.CreateVersion7();
+        await using var connection = new NpgsqlConnection(fixture.ConnectionString);
+        await connection.OpenAsync(TestContext.Current.CancellationToken);
+        await using (var seed = new NpgsqlCommand("""
+            INSERT INTO users(id,username,email,display_name,timezone,created_at,updated_at)
+            VALUES(@userId,@username,@email,'Deletion test','Europe/London',now(),now());
+            INSERT INTO audit_events(id,event_type,user_id,actor_kind,actor_id,outcome,correlation_id)
+            VALUES(@auditId,'DeletionTest',@userId,'user',@userId,'success','integration-test');
+            DELETE FROM users WHERE id=@userId;
+            """, connection))
+        {
+            var suffix = Guid.NewGuid().ToString("N");
+            seed.Parameters.AddWithValue("userId", userId);
+            seed.Parameters.AddWithValue("auditId", auditId);
+            seed.Parameters.AddWithValue("username", "deletion-" + suffix);
+            seed.Parameters.AddWithValue("email", suffix + "@deletion.example.test");
+            await seed.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
+        }
+
+        await using (var verify = new NpgsqlCommand("SELECT user_id,event_type,outcome FROM audit_events WHERE id=@id", connection))
+        {
+            verify.Parameters.AddWithValue("id", auditId);
+            await using var reader = await verify.ExecuteReaderAsync(TestContext.Current.CancellationToken);
+            Assert.True(await reader.ReadAsync(TestContext.Current.CancellationToken));
+            Assert.True(reader.IsDBNull(0));
+            Assert.Equal("DeletionTest", reader.GetString(1));
+            Assert.Equal("success", reader.GetString(2));
+        }
+
+        await using var mutate = new NpgsqlCommand("UPDATE audit_events SET outcome='failed' WHERE id=@id", connection);
+        mutate.Parameters.AddWithValue("id", auditId);
+        var exception = await Assert.ThrowsAsync<PostgresException>(() =>
+            mutate.ExecuteNonQueryAsync(TestContext.Current.CancellationToken));
+        Assert.Contains("append-only", exception.MessageText, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task LegacyShaLoginAtomicallyUpgradesToArgon2id()
     {
         if (!PostgreSqlApiFixture.Enabled) return;
