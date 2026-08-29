@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -73,7 +74,7 @@ internal fun AuthNavigation(viewModel: MainViewModel) {
     NavHost(
         navController = navController,
         startDestination = if (resetToken == null) AuthRoute.SIGN_IN else AuthRoute.RESET_PASSWORD,
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier.fillMaxSize().navigationBarsPadding(),
     ) {
         composable(AuthRoute.SIGN_IN) {
             SignInScreen(

@@ -16,6 +16,9 @@ val releaseSigningEnvironment = mapOf(
     "keyPassword" to providers.environmentVariable("PCCONNECT_ANDROID_KEY_PASSWORD")
 )
 val hasReleaseSigning = releaseSigningEnvironment.values.all { it.isPresent }
+// Reuse one project-local debug identity so Android can update the app without
+// uninstalling it when builds are produced by different local tooling contexts.
+val stableDebugKeystore = rootProject.file("../artifacts/android-home/debug.keystore")
 val apiBaseUrl = providers.environmentVariable("PCCONNECT_ANDROID_API_BASE_URL")
     .orElse("https://api.pcconnect.adamdeveloping.co.uk/api/v2/")
     .get()
@@ -70,6 +73,14 @@ android {
     }
 
     signingConfigs {
+        if (stableDebugKeystore.isFile) {
+            getByName("debug") {
+                storeFile = stableDebugKeystore
+                storePassword = "android"
+                keyAlias = "androiddebugkey"
+                keyPassword = "android"
+            }
+        }
         if (hasReleaseSigning) {
             create("release") {
                 storeFile = file(releaseSigningEnvironment.getValue("storeFile").get())

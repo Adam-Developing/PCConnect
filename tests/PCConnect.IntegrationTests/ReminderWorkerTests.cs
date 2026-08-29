@@ -65,6 +65,11 @@ public sealed class ReminderWorkerTests(PostgreSqlApiFixture fixture) : IClassFi
             new ReminderAcknowledgement("completed", now),
             TestContext.Current.CancellationToken);
         Assert.Equal(1, await DirectStatusCountAsync(dataSource, delivery.Id, "completed"));
+        var acknowledgedReminder = await new ReminderService(dataSource, cipher, clock)
+            .GetAsync(userId, allReminder, TestContext.Current.CancellationToken);
+        Assert.Equal("completed", acknowledgedReminder.LastAcknowledgementStatus);
+        Assert.Equal(now, acknowledgedReminder.LastAcknowledgedAt);
+        Assert.Equal("Offline all", acknowledgedReminder.LastAcknowledgedBy);
         await Assert.ThrowsAsync<ConflictException>(() =>
             new ReminderService(dataSource, cipher, clock).AcknowledgeDeliveryAsync(
                 allDeviceOne,

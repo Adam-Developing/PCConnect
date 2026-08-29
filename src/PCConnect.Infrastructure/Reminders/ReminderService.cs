@@ -281,8 +281,17 @@ public sealed class ReminderService(NpgsqlDataSource dataSource, IReminderCipher
           r.wrapped_data_key,r.wrapping_key_id,r.text_aad_version,r.created_at,r.row_version,
           ARRAY(SELECT rt.device_id FROM reminder_targets rt WHERE rt.reminder_id=r.id ORDER BY rt.device_id),
           (SELECT min(ro.occurrence_at) FROM reminder_occurrences ro WHERE ro.reminder_id=r.id AND ro.cancelled_at IS NULL AND ro.occurrence_at>=now()),
-          r.updated_at
+          r.updated_at,acknowledgement.status,acknowledgement.acknowledged_at,acknowledgement.device_name
         FROM reminders r
+        LEFT JOIN LATERAL (
+          SELECT rd.status::text AS status,rd.acknowledged_at,d.display_name AS device_name
+          FROM reminder_occurrences ro
+          JOIN reminder_deliveries rd ON rd.occurrence_id=ro.id
+          JOIN devices d ON d.id=rd.device_id
+          WHERE ro.reminder_id=r.id AND rd.status IN ('dismissed','completed')
+          ORDER BY rd.acknowledged_at DESC,rd.id DESC
+          LIMIT 1
+        ) acknowledgement ON true
         """;
 
     private Reminder ReadReminder(NpgsqlDataReader reader, Guid userId)
@@ -291,7 +300,9 @@ public sealed class ReminderService(NpgsqlDataSource dataSource, IReminderCipher
         var encrypted = new EncryptedReminder(reader.GetFieldValue<byte[]>(6), reader.GetFieldValue<byte[]>(7), reader.GetFieldValue<byte[]>(8), reader.GetFieldValue<byte[]>(9), reader.GetString(10), reader.GetInt16(11));
         return new(id, cipher.Decrypt(id, userId, encrypted), reader.GetString(1) == "all_devices" ? ReminderTargetMode.AllDevices : ReminderTargetMode.SelectedDevices,
             reader.GetFieldValue<Guid[]>(14), reader.GetString(2), reader.GetBoolean(3), reader.GetDateTime(4), reader.IsDBNull(5) ? null : reader.GetString(5),
-            reader.IsDBNull(15) ? null : reader.GetFieldValue<DateTimeOffset>(15), reader.GetFieldValue<DateTimeOffset>(12), reader.GetInt64(13));
+            reader.IsDBNull(15) ? null : reader.GetFieldValue<DateTimeOffset>(15), reader.GetFieldValue<DateTimeOffset>(12), reader.GetInt64(13),
+            reader.IsDBNull(17) ? null : reader.GetString(17), reader.IsDBNull(18) ? null : reader.GetFieldValue<DateTimeOffset>(18),
+            reader.IsDBNull(19) ? null : reader.GetString(19));
     }
 
     private static void AddWriteParameters(NpgsqlCommand command, Guid id, Guid userId, Guid? sessionId, Guid? key, ReminderWrite request, Guid[] targets, EncryptedReminder encrypted, DateTimeOffset now)

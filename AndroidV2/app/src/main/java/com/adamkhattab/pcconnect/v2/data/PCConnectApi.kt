@@ -4,6 +4,8 @@ import kotlinx.serialization.json.JsonElement
 import retrofit2.http.Body
 import retrofit2.http.GET
 import retrofit2.http.Header
+import retrofit2.http.Headers
+import retrofit2.http.PATCH
 import retrofit2.http.POST
 import retrofit2.http.DELETE
 import retrofit2.http.Path
@@ -77,6 +79,13 @@ interface PCConnectApi {
     @POST("reminders")
     suspend fun createReminder(
         @Header("Idempotency-Key") idempotencyKey: String,
+        @Body request: ReminderWrite,
+    ): ReminderDto
+
+    @Headers("Content-Type: application/merge-patch+json")
+    @PATCH("reminders/{reminderId}")
+    suspend fun updateReminder(
+        @Path("reminderId") reminderId: String,
         @Body request: ReminderWrite,
     ): ReminderDto
 

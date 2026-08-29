@@ -6,6 +6,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.adamkhattab.pcconnect.v2.data.AppContainer
 import com.adamkhattab.pcconnect.v2.data.ReminderWrite
+import com.adamkhattab.pcconnect.v2.data.ReminderEntity
 import java.time.LocalDateTime
 import java.time.ZoneId
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -125,16 +126,26 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
         _message.value = UiMessage("Command accepted by the server.", false)
     }
 
-    fun reminder(text: String, localStart: String) = action {
-        container.repository.createReminder(
-            ReminderWrite(
-                text = text.trim(),
-                targetMode = "all_devices",
-                timezone = ZoneId.systemDefault().id,
-                localStart = LocalDateTime.parse(localStart.trim()).toString(),
-            ),
+    fun saveReminder(existing: ReminderEntity?, text: String, localStart: String, onSaved: () -> Unit) = action {
+        val request = ReminderWrite(
+            text = text.trim(),
+            targetMode = existing?.targetMode ?: "all_devices",
+            timezone = existing?.timezone ?: ZoneId.systemDefault().id,
+            localStart = LocalDateTime.parse(localStart.trim()).toString(),
+            targetDeviceIds = existing?.targetDeviceIds
+                ?.split(',')
+                ?.filter(String::isNotBlank)
+                ?.takeIf { existing.targetMode == "selected_devices" },
+            recurrenceRule = existing?.recurrenceRule,
+            expectedVersion = existing?.version,
         )
-        _message.value = UiMessage("Reminder saved.", false)
+        if (existing == null) {
+            container.repository.createReminder(request)
+        } else {
+            container.repository.updateReminder(existing.id, request)
+        }
+        _message.value = UiMessage(if (existing == null) "Reminder saved." else "Reminder updated.", false)
+        onSaved()
     }
 
     fun authorizeWindowsSid(deviceId: String, windowsSid: String, password: String) = action {

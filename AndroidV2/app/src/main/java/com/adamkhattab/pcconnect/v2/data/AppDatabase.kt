@@ -41,10 +41,15 @@ data class ReminderEntity(
     val id: String,
     val text: String,
     val targetMode: String,
+    val targetDeviceIds: String,
     val timezone: String,
     val localStart: String,
+    val recurrenceRule: String?,
     val nextOccurrenceAt: String?,
     val version: Long,
+    val lastAcknowledgementStatus: String?,
+    val lastAcknowledgedAt: String?,
+    val lastAcknowledgedBy: String?,
 )
 
 @Entity(tableName = "sync_cursors", primaryKeys = ["resource"])
@@ -120,7 +125,7 @@ interface ReadModelDao {
 
 @Database(
     entities = [DeviceEntity::class, CommandEntity::class, ReminderEntity::class, SyncCursorEntity::class],
-    version = 2,
+    version = 3,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -135,10 +140,20 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE reminders ADD COLUMN targetDeviceIds TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE reminders ADD COLUMN recurrenceRule TEXT")
+                db.execSQL("ALTER TABLE reminders ADD COLUMN lastAcknowledgementStatus TEXT")
+                db.execSQL("ALTER TABLE reminders ADD COLUMN lastAcknowledgedAt TEXT")
+                db.execSQL("ALTER TABLE reminders ADD COLUMN lastAcknowledgedBy TEXT")
+            }
+        }
+
         fun create(context: Context): AppDatabase = Room.databaseBuilder(
             context.applicationContext,
             AppDatabase::class.java,
             "pcconnect-v2-read-model.db",
-        ).addMigrations(MIGRATION_1_2).build()
+        ).addMigrations(MIGRATION_1_2, MIGRATION_2_3).build()
     }
 }

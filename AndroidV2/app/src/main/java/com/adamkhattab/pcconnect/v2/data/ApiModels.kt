@@ -104,6 +104,9 @@ data class ReminderDto(
     val nextOccurrenceAt: String? = null,
     val createdAt: String,
     val version: Long,
+    val lastAcknowledgementStatus: String? = null,
+    val lastAcknowledgedAt: String? = null,
+    val lastAcknowledgedBy: String? = null,
 )
 
 @Serializable

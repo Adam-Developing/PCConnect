@@ -46,7 +46,21 @@ public sealed record CommandClaim(Guid AgentInstanceId);
 public sealed record CommandAcknowledgement(string State, Guid AgentInstanceId, Guid LocalReplayKey, CommandFailureCode? FailureCode = null);
 
 public sealed record ReminderWrite(string Text, ReminderTargetMode TargetMode, string Timezone, DateTime LocalStart, IReadOnlyList<Guid>? TargetDeviceIds = null, string? RecurrenceRule = null, long? ExpectedVersion = null);
-public sealed record Reminder(Guid Id, string Text, ReminderTargetMode TargetMode, IReadOnlyList<Guid> TargetDeviceIds, string Timezone, bool TimezoneAssumed, DateTime LocalStart, string? RecurrenceRule, DateTimeOffset? NextOccurrenceAt, DateTimeOffset CreatedAt, long Version);
+public sealed record Reminder(
+    Guid Id,
+    string Text,
+    ReminderTargetMode TargetMode,
+    IReadOnlyList<Guid> TargetDeviceIds,
+    string Timezone,
+    bool TimezoneAssumed,
+    DateTime LocalStart,
+    string? RecurrenceRule,
+    DateTimeOffset? NextOccurrenceAt,
+    DateTimeOffset CreatedAt,
+    long Version,
+    string? LastAcknowledgementStatus = null,
+    DateTimeOffset? LastAcknowledgedAt = null,
+    string? LastAcknowledgedBy = null);
 public sealed record ReminderDelivery(Guid Id, Guid ReminderId, DateTimeOffset OccurrenceAt, string Text, string Status, long Version);
 public sealed record ReminderAcknowledgement(string State, DateTimeOffset AcknowledgedAt);
 

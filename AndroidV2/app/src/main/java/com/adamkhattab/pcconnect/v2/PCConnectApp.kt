@@ -1,19 +1,22 @@
 package com.adamkhattab.pcconnect.v2
 
-import android.app.DatePickerDialog
-import android.app.TimePickerDialog
 import android.os.Build
-import android.text.format.DateFormat
 import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -22,6 +25,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -43,7 +47,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
@@ -59,11 +62,6 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.adamkhattab.pcconnect.v2.data.PlatformCapabilities
-import java.time.LocalDate
-import java.time.LocalDateTime
-import java.time.LocalTime
-import java.time.format.DateTimeFormatter
-import java.time.format.FormatStyle
 
 @Composable
 fun PCConnectApp(viewModel: MainViewModel) {
@@ -75,14 +73,24 @@ fun PCConnectApp(viewModel: MainViewModel) {
         message?.let { snackbar.showSnackbar(it.text); viewModel.dismissMessage() }
     }
     MaterialTheme {
-        Scaffold(snackbarHost = { SnackbarHost(snackbar) }) { padding ->
-            Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
+        Scaffold(
+            snackbarHost = {
+                if (resetToken != null || session != SessionState.SIGNED_IN) {
+                    SnackbarHost(snackbar, Modifier.navigationBarsPadding())
+                }
+            },
+            contentWindowInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Top),
+        ) { padding ->
+            Box(
+                Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding),
+                contentAlignment = Alignment.Center,
+            ) {
                 when {
                     session == SessionState.CHECKING && resetToken == null -> CircularProgressIndicator(
                         Modifier.semantics { contentDescription = "Restoring your PCConnect session" },
                     )
                     resetToken != null || session == SessionState.SIGNED_OUT -> AuthNavigation(viewModel)
-                    else -> ControllerScreen(viewModel)
+                    else -> ControllerScreen(viewModel, snackbar)
                 }
             }
         }
@@ -90,7 +98,7 @@ fun PCConnectApp(viewModel: MainViewModel) {
 }
 
 @Composable
-private fun ControllerScreen(viewModel: MainViewModel) {
+private fun ControllerScreen(viewModel: MainViewModel, snackbar: SnackbarHostState) {
     val navController = rememberNavController()
     val currentRoute = navController.currentBackStackEntryAsState().value?.destination?.route
     val destinations = listOf(
@@ -99,22 +107,33 @@ private fun ControllerScreen(viewModel: MainViewModel) {
         ControllerDestination(ControllerRoute.REMINDERS, "Reminders", R.drawable.ic_reminders, "Reminders"),
         ControllerDestination(ControllerRoute.SETTINGS, "Settings", R.drawable.ic_settings, "Settings"),
     )
+    val showBottomBar = destinations.any { it.route == currentRoute }
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbar) },
         bottomBar = {
-            NavigationBar {
-                destinations.forEach { destination ->
-                    NavigationBarItem(
-                        selected = currentRoute == destination.route,
-                        onClick = {
-                            navController.navigate(destination.route) {
-                                popUpTo(ControllerRoute.DEVICES) { saveState = true }
-                                launchSingleTop = true
-                                restoreState = true
-                            }
-                        },
-                        icon = { Icon(painterResource(destination.iconResource), contentDescription = destination.description) },
-                        label = { Text(destination.label) },
-                    )
+            if (showBottomBar) {
+                NavigationBar {
+                    destinations.forEach { destination ->
+                        NavigationBarItem(
+                            selected = currentRoute == destination.route,
+                            onClick = {
+                                navController.navigate(destination.route) {
+                                    popUpTo(ControllerRoute.DEVICES) { saveState = true }
+                                    launchSingleTop = true
+                                    restoreState = true
+                                }
+                            },
+                            icon = { Icon(painterResource(destination.iconResource), contentDescription = destination.description) },
+                            label = { Text(destination.label) },
+                        )
+                    }
+                }
+            }
+        },
+        floatingActionButton = {
+            if (currentRoute == ControllerRoute.REMINDERS) {
+                FloatingActionButton(onClick = { navController.navigate(ControllerRoute.REMINDER_CREATE) }) {
+                    Icon(painterResource(R.drawable.ic_add), contentDescription = "Add reminder")
                 }
             }
         },
@@ -126,7 +145,31 @@ private fun ControllerScreen(viewModel: MainViewModel) {
         ) {
             composable(ControllerRoute.DEVICES) { DevicesScreen(viewModel) }
             composable(ControllerRoute.COMMANDS) { CommandsScreen(viewModel) }
-            composable(ControllerRoute.REMINDERS) { RemindersScreen(viewModel) }
+            composable(ControllerRoute.REMINDERS) {
+                ReminderListScreen(viewModel) { reminderId ->
+                    navController.navigate(ControllerRoute.reminderDetails(reminderId))
+                }
+            }
+            composable(ControllerRoute.REMINDER_CREATE) {
+                ReminderEditorScreen(viewModel, reminderId = null, onBack = navController::navigateUp) {
+                    navController.navigateUp()
+                }
+            }
+            composable(ControllerRoute.REMINDER_DETAILS) { entry ->
+                val reminderId = checkNotNull(entry.arguments?.getString("reminderId"))
+                ReminderDetailScreen(
+                    viewModel = viewModel,
+                    reminderId = reminderId,
+                    onBack = navController::navigateUp,
+                    onEdit = { navController.navigate(ControllerRoute.reminderEdit(reminderId)) },
+                )
+            }
+            composable(ControllerRoute.REMINDER_EDIT) { entry ->
+                val reminderId = checkNotNull(entry.arguments?.getString("reminderId"))
+                ReminderEditorScreen(viewModel, reminderId, navController::navigateUp) {
+                    navController.popBackStack(ControllerRoute.reminderDetails(reminderId), inclusive = false)
+                }
+            }
             composable(ControllerRoute.SETTINGS) { SettingsScreen(viewModel) }
         }
     }
@@ -136,7 +179,13 @@ private object ControllerRoute {
     const val DEVICES = "controller/devices"
     const val COMMANDS = "controller/commands"
     const val REMINDERS = "controller/reminders"
+    const val REMINDER_CREATE = "controller/reminder-create"
+    const val REMINDER_DETAILS = "controller/reminder-details/{reminderId}"
+    const val REMINDER_EDIT = "controller/reminder-edit/{reminderId}"
     const val SETTINGS = "controller/settings"
+
+    fun reminderDetails(reminderId: String) = "controller/reminder-details/$reminderId"
+    fun reminderEdit(reminderId: String) = "controller/reminder-edit/$reminderId"
 }
 
 private data class ControllerDestination(
@@ -369,97 +418,6 @@ private fun CommandsScreen(viewModel: MainViewModel) {
 private fun commandLabel(type: String): String = type
     .split('_')
     .joinToString(" ") { word -> word.replaceFirstChar(Char::uppercase) }
-
-@Composable
-private fun RemindersScreen(viewModel: MainViewModel) {
-    val reminders by viewModel.reminders.collectAsStateWithLifecycle()
-    var text by rememberSaveable { mutableStateOf("") }
-    var selectedDateValue by rememberSaveable { mutableStateOf<String?>(null) }
-    var selectedTimeValue by rememberSaveable { mutableStateOf<String?>(null) }
-    val context = LocalContext.current
-    val focusManager = LocalFocusManager.current
-    val suggestedStartValue = rememberSaveable {
-        LocalDateTime.now().plusHours(1).withSecond(0).withNano(0).toString()
-    }
-    val suggestedStart = LocalDateTime.parse(suggestedStartValue)
-    val selectedDate = selectedDateValue?.let(LocalDate::parse)
-    val selectedTime = selectedTimeValue?.let(LocalTime::parse)
-    val selectedStart = if (selectedDate != null && selectedTime != null) {
-        LocalDateTime.of(selectedDate, selectedTime)
-    } else null
-    val startValid = selectedStart?.isAfter(LocalDateTime.now()) == true
-    val startError = selectedStart != null && !startValid
-    val dateFormatter = remember { DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM) }
-    val timeFormatter = remember { DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT) }
-    LazyColumn(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        item {
-            Text("Reminders", style = MaterialTheme.typography.headlineMedium)
-            OutlinedTextField(
-                text,
-                { text = it.take(500) },
-                label = { Text("Reminder") },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(
-                    capitalization = KeyboardCapitalization.Sentences,
-                    keyboardType = KeyboardType.Text,
-                    imeAction = ImeAction.Done,
-                ),
-                keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(
-                    onClick = {
-                        val initial = selectedDate ?: suggestedStart.toLocalDate()
-                        DatePickerDialog(
-                            context,
-                            { _, year, month, day -> selectedDateValue = LocalDate.of(year, month + 1, day).toString() },
-                            initial.year,
-                            initial.monthValue - 1,
-                            initial.dayOfMonth,
-                        ).show()
-                    },
-                    modifier = Modifier.weight(1f),
-                ) { Text(selectedDate?.format(dateFormatter) ?: "Choose date") }
-                OutlinedButton(
-                    onClick = {
-                        val initial = selectedTime ?: suggestedStart.toLocalTime()
-                        TimePickerDialog(
-                            context,
-                            { _, hour, minute -> selectedTimeValue = LocalTime.of(hour, minute).toString() },
-                            initial.hour,
-                            initial.minute,
-                            DateFormat.is24HourFormat(context),
-                        ).show()
-                    },
-                    modifier = Modifier.weight(1f),
-                ) { Text(selectedTime?.format(timeFormatter) ?: "Choose time") }
-            }
-            if (startError) {
-                Text("Choose a future date and time.", color = MaterialTheme.colorScheme.error)
-            }
-            Button(
-                {
-                    viewModel.reminder(text, checkNotNull(selectedStart).toString())
-                    text = ""
-                    selectedDateValue = null
-                    selectedTimeValue = null
-                },
-                enabled = text.isNotBlank() && startValid,
-            ) { Text("Save reminder") }
-            if (reminders.isEmpty()) {
-                Text("No reminders scheduled yet.", modifier = Modifier.padding(vertical = 12.dp))
-            }
-        }
-        items(reminders, key = { it.id }) { reminder ->
-            Column(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
-                Text(reminder.text, style = MaterialTheme.typography.titleMedium)
-                Text(reminder.nextOccurrenceAt ?: "Next occurrence pending")
-            }
-            HorizontalDivider()
-        }
-    }
-}
 
 @Composable
 private fun SettingsScreen(viewModel: MainViewModel) {

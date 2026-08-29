@@ -139,6 +139,12 @@ class ControllerRepository(
         return reminder
     }
 
+    suspend fun updateReminder(reminderId: String, request: ReminderWrite): ReminderDto {
+        val reminder = api.updateReminder(reminderId, request)
+        dao.upsertReminders(listOf(reminder.toEntity(localPiiCipher)))
+        return reminder
+    }
+
     suspend fun authorizeWindowsSid(deviceId: String, windowsSid: String, password: String) {
         val idempotencyKey = UUID.randomUUID().toString()
         val options = api.stepUpOptions(StepUpIntent("security_change", idempotencyKey, deviceId))
@@ -207,4 +213,17 @@ suspend fun <T> collectAll(fetch: suspend (String?, Int) -> Page<T>): List<T> {
 
 private fun DeviceDto.toEntity() = DeviceEntity(id, displayName, platform, status, lastSeenAt, capabilities.joinToString(","), version)
 private fun CommandDto.toEntity() = CommandEntity(id, deviceId, type, status, issuedAt, failureCode, version)
-private fun ReminderDto.toEntity(cipher: LocalPiiCipher) = ReminderEntity(id, cipher.encryptReminder(id, text), targetMode, timezone, localStart, nextOccurrenceAt, version)
+private fun ReminderDto.toEntity(cipher: LocalPiiCipher) = ReminderEntity(
+    id = id,
+    text = cipher.encryptReminder(id, text),
+    targetMode = targetMode,
+    targetDeviceIds = targetDeviceIds.joinToString(","),
+    timezone = timezone,
+    localStart = localStart,
+    recurrenceRule = recurrenceRule,
+    nextOccurrenceAt = nextOccurrenceAt,
+    version = version,
+    lastAcknowledgementStatus = lastAcknowledgementStatus,
+    lastAcknowledgedAt = lastAcknowledgedAt,
+    lastAcknowledgedBy = lastAcknowledgedBy,
+)
