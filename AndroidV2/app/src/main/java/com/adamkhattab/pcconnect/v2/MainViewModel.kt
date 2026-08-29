@@ -116,6 +116,8 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
 
     fun refresh() = action { container.repository.recoverAll() }
 
+    fun refreshReminders() = action { container.repository.recoverReminders() }
+
     fun approveEnrollment(userCode: String) = action {
         container.repository.approveEnrollment(userCode)
         _message.value = UiMessage("Device enrollment approved.", false)

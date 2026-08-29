@@ -142,6 +142,10 @@ private fun ControllerScreen(viewModel: MainViewModel, snackbar: SnackbarHostSta
             navController = navController,
             startDestination = ControllerRoute.DEVICES,
             modifier = Modifier.fillMaxSize().padding(padding),
+            enterTransition = { fadeThroughEnter() },
+            exitTransition = { fadeThroughExit() },
+            popEnterTransition = { fadeThroughEnter() },
+            popExitTransition = { fadeThroughExit() },
         ) {
             composable(ControllerRoute.DEVICES) { DevicesScreen(viewModel) }
             composable(ControllerRoute.COMMANDS) { CommandsScreen(viewModel) }
@@ -150,12 +154,24 @@ private fun ControllerScreen(viewModel: MainViewModel, snackbar: SnackbarHostSta
                     navController.navigate(ControllerRoute.reminderDetails(reminderId))
                 }
             }
-            composable(ControllerRoute.REMINDER_CREATE) {
+            composable(
+                route = ControllerRoute.REMINDER_CREATE,
+                enterTransition = { sharedAxisForwardEnter() },
+                exitTransition = { sharedAxisForwardExit() },
+                popEnterTransition = { sharedAxisBackwardEnter() },
+                popExitTransition = { sharedAxisBackwardExit() },
+            ) {
                 ReminderEditorScreen(viewModel, reminderId = null, onBack = navController::navigateUp) {
                     navController.navigateUp()
                 }
             }
-            composable(ControllerRoute.REMINDER_DETAILS) { entry ->
+            composable(
+                route = ControllerRoute.REMINDER_DETAILS,
+                enterTransition = { sharedAxisForwardEnter() },
+                exitTransition = { sharedAxisForwardExit() },
+                popEnterTransition = { sharedAxisBackwardEnter() },
+                popExitTransition = { sharedAxisBackwardExit() },
+            ) { entry ->
                 val reminderId = checkNotNull(entry.arguments?.getString("reminderId"))
                 ReminderDetailScreen(
                     viewModel = viewModel,
@@ -164,7 +180,13 @@ private fun ControllerScreen(viewModel: MainViewModel, snackbar: SnackbarHostSta
                     onEdit = { navController.navigate(ControllerRoute.reminderEdit(reminderId)) },
                 )
             }
-            composable(ControllerRoute.REMINDER_EDIT) { entry ->
+            composable(
+                route = ControllerRoute.REMINDER_EDIT,
+                enterTransition = { sharedAxisForwardEnter() },
+                exitTransition = { sharedAxisForwardExit() },
+                popEnterTransition = { sharedAxisBackwardEnter() },
+                popExitTransition = { sharedAxisBackwardExit() },
+            ) { entry ->
                 val reminderId = checkNotNull(entry.arguments?.getString("reminderId"))
                 ReminderEditorScreen(viewModel, reminderId, navController::navigateUp) {
                     navController.popBackStack(ControllerRoute.reminderDetails(reminderId), inclusive = false)

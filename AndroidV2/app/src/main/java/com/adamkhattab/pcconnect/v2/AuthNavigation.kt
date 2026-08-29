@@ -75,6 +75,10 @@ internal fun AuthNavigation(viewModel: MainViewModel) {
         navController = navController,
         startDestination = if (resetToken == null) AuthRoute.SIGN_IN else AuthRoute.RESET_PASSWORD,
         modifier = Modifier.fillMaxSize().navigationBarsPadding(),
+        enterTransition = { sharedAxisForwardEnter() },
+        exitTransition = { sharedAxisForwardExit() },
+        popEnterTransition = { sharedAxisBackwardEnter() },
+        popExitTransition = { sharedAxisBackwardExit() },
     ) {
         composable(AuthRoute.SIGN_IN) {
             SignInScreen(

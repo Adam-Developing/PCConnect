@@ -20,6 +20,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -27,6 +28,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -53,34 +55,42 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun ReminderListScreen(viewModel: MainViewModel, onReminderClick: (String) -> Unit) {
     val reminders by viewModel.reminders.collectAsStateWithLifecycle()
+    val refreshing by viewModel.busy.collectAsStateWithLifecycle()
     val dateFormatter = remember { DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM) }
     val timeFormatter = remember { DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT) }
 
-    LazyColumn(
+    PullToRefreshBox(
+        isRefreshing = refreshing,
+        onRefresh = viewModel::refreshReminders,
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        item { Text("Reminders", style = MaterialTheme.typography.headlineMedium) }
-        if (reminders.isEmpty()) {
-            item { Text("No reminders scheduled yet.", modifier = Modifier.padding(vertical = 12.dp)) }
-        }
-        items(reminders, key = { it.id }) { reminder ->
-            Column(
-                Modifier
-                    .fillMaxWidth()
-                    .clickable { onReminderClick(reminder.id) }
-                    .padding(vertical = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                Text(reminder.text, style = MaterialTheme.typography.titleMedium)
-                Text("Scheduled ${formatReminderDateTime(reminder.nextOccurrenceAt, reminder.localStart, dateFormatter, timeFormatter)}")
-                reminder.acknowledgementLabel(dateFormatter, timeFormatter)?.let { Text(it) }
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 96.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            item { Text("Reminders", style = MaterialTheme.typography.headlineMedium) }
+            if (reminders.isEmpty()) {
+                item { Text("No reminders scheduled yet. Swipe down to refresh.", modifier = Modifier.padding(vertical = 12.dp)) }
             }
-            HorizontalDivider()
+            items(reminders, key = { it.id }) { reminder ->
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .clickable { onReminderClick(reminder.id) }
+                        .padding(vertical = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Text(reminder.text, style = MaterialTheme.typography.titleMedium)
+                    Text("Scheduled ${formatReminderDateTime(reminder.nextOccurrenceAt, reminder.localStart, dateFormatter, timeFormatter)}")
+                    reminder.acknowledgementLabel(dateFormatter, timeFormatter)?.let { Text(it) }
+                }
+                HorizontalDivider()
+            }
         }
     }
 }
