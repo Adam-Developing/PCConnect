@@ -3,8 +3,9 @@
 The WiX 4.0.6 MSI contains a self-contained x64 .NET 10 Windows service and WPF
 companion. It installs the service as LocalSystem, starts it automatically, and
 starts the unprivileged companion in each interactive user session through the
-machine Run key. A Start-menu enrollment shortcut launches the agent's device
-code flow; no account password or enrollment secret is placed in the MSI.
+machine Run key. The companion provides the complete graphical sign-in and
+device-enrollment flow; no account password or enrollment secret is placed in
+the MSI or passed through a command-line interface.
 
 Build inputs are produced first:
 

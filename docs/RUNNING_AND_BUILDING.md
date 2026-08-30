@@ -204,30 +204,40 @@ test Windows machine or VM when exercising commands end to end.
 
 ### Development run
 
-With the local API running, enroll the agent from a normal PowerShell terminal:
+With the local API running, run the agent and companion in separate interactive
+terminals. The credential-path override keeps local enrollment separate from an
+installed production agent:
 
 ```powershell
 $env:PCConnect__ApiBaseUrl = 'http://localhost:5080'
 $env:PCConnect__CredentialPath = "$env:LOCALAPPDATA/PCConnect/dev-device.dat"
-dotnet run --project src/PCConnect.Windows.Agent --configuration Release -- enroll
-```
-
-Follow the verification URI and device code printed by the enrollment flow.
-Then run the agent and companion in separate interactive terminals:
-
-```powershell
-$env:PCConnect__ApiBaseUrl = 'http://localhost:5080'
-$env:PCConnect__CredentialPath = "$env:LOCALAPPDATA/PCConnect/dev-device.dat"
+$env:PCConnect__PipeName = 'pcconnect-agent-dev'
 dotnet run --project src/PCConnect.Windows.Agent --configuration Release --no-build
 ```
 
 ```powershell
+$env:PCConnect__PipeName = 'pcconnect-agent-dev'
 dotnet run --project src/PCConnect.Windows.Companion --configuration Release --no-build
 ```
 
-The companion is a WPF tray process and communicates with the agent over the
-authenticated local named-pipe protocol. The installed agent normally runs as
-a Windows Service; the console run is the easier development loop.
+The companion opens a graphical sign-in screen. Log in with a PCConnect account;
+it creates, approves, and exchanges the device enrollment automatically, then
+passes only the resulting device credential to the agent over the authenticated
+local named-pipe protocol. The password is never stored. The installed agent
+normally runs as a Windows Service; the console run is the easier development
+loop.
+
+If setup was interrupted after the device credential was protected but before
+the Windows identity was authorized, reopening both applications displays a
+graphical **Finish connecting this PC** sign-in screen. Completing that screen
+recovers the existing device instead of creating a duplicate enrollment.
+
+The development pipe-name override prevents the local Agent from colliding with
+an installed PCConnect Windows Service. Both processes must use the same value.
+
+After enrollment, the installed companion starts quietly at Windows sign-in.
+Use the PCConnect Start menu shortcut to view its connection status; reminders
+can still bring the window forward when they are delivered.
 
 ### Publish the Windows binaries
 

@@ -333,6 +333,36 @@ public sealed class CanonicalSchemaTests(PostgreSqlApiFixture fixture) : IClassF
     }
 
     [Fact]
+    public async Task NewlyExchangedDeviceCanRegisterWindowsSidCandidate()
+    {
+        if (!PostgreSqlApiFixture.Enabled) return;
+        using var owner = fixture.Client;
+        var ownerPair = await RegisterAndLoginAsync(owner, "sid-candidate");
+        owner.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ownerPair.AccessToken);
+        using var enrollmentResponse = await owner.PostAsJsonAsync("/api/v2/device-enrollments", new DeviceEnrollmentRequest(
+            PlatformType.Windows, "SID candidate " + Guid.NewGuid().ToString("N"), "2.0", 3, [DeviceCapability.Lock]), TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.Created, enrollmentResponse.StatusCode);
+        var enrollment = await enrollmentResponse.Content.ReadFromJsonAsync<DeviceEnrollment>(TestContext.Current.CancellationToken) ?? throw new InvalidOperationException();
+        using var approve = await owner.PostAsync($"/api/v2/device-enrollments/{enrollment.UserCode}/approve", null, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.NoContent, approve.StatusCode);
+        using var exchange = await owner.PostAsJsonAsync("/api/v2/device-enrollments/token", new DeviceCodeRequest(enrollment.DeviceCode), TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, exchange.StatusCode);
+        var device = await exchange.Content.ReadFromJsonAsync<DeviceTokenPair>(TestContext.Current.CancellationToken) ?? throw new InvalidOperationException();
+
+        using var deviceClient = fixture.Client;
+        deviceClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", device.AccessToken);
+        using var candidateResponse = await deviceClient.PostAsJsonAsync(
+            "/api/v2/agent/windows-sid-candidates",
+            new WindowsSidCandidateRequest("S-1-5-21-1000-2000-3000-4000", "Integration user"),
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.OK, candidateResponse.StatusCode);
+        var candidate = await candidateResponse.Content.ReadFromJsonAsync<WindowsSidStatus>(TestContext.Current.CancellationToken) ?? throw new InvalidOperationException();
+        Assert.Equal("pending", candidate.Status);
+        Assert.NotNull(candidate.ObservedAt);
+    }
+
+    [Fact]
     public async Task LogoutAndDeviceRevocationInvalidateAccessAndRefreshCredentials()
     {
         if (!PostgreSqlApiFixture.Enabled) return;

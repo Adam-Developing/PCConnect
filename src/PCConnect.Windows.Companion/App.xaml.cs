@@ -9,10 +9,14 @@ public partial class App : Application, IDisposable
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        var startInBackground = e.Args.Any(argument =>
+            string.Equals(argument, "--background", StringComparison.OrdinalIgnoreCase));
         var window = new MainWindow();
         MainWindow = window;
-        window.Show();
-        client = new CompanionPipeClient(window);
+        if (!startInBackground)
+            window.Show();
+        client = new CompanionPipeClient(window, startInBackground);
+        window.Attach(client);
         client.Start();
     }
 

@@ -12,12 +12,15 @@ namespace PCConnect.Windows.Agent;
 
 public sealed partial class InteractiveSessionBroker(
     AgentApiClient api,
+    IDeviceCredentialStore credentialStore,
     CompanionPairingSecretStore secrets,
+    IConfiguration configuration,
     ILogger<InteractiveSessionBroker> logger) : BackgroundService
 {
     private readonly object connectionGate = new();
     private readonly SemaphoreSlim operationGate = new(1, 1);
     private readonly ReplayCache helloReplay = new(TimeSpan.FromMinutes(5));
+    private readonly string pipeName = PipeProtocol.ResolvePipeName(configuration["PCConnect:PipeName"]);
     private NamedPipeServerStream? activePipe;
     private static readonly Action<ILogger, string, Exception?> CandidatePending = LoggerMessage.Define<string>(LogLevel.Information, new EventId(9201, nameof(CandidatePending)), "Windows SID candidate {SidHash} is awaiting account-owner authorization");
     private static readonly Action<ILogger, Exception?> PipeFailure = LoggerMessage.Define(LogLevel.Warning, new EventId(9202, nameof(PipeFailure)), "Companion named-pipe connection rejected or lost");
@@ -40,12 +43,39 @@ public sealed partial class InteractiveSessionBroker(
                 }
                 finally { CryptographicOperations.ZeroMemory(secret); }
 
-                var sidStatus = await api.RegisterWindowsSidAsync(hello.UserSid, TryAccountLabel(hello.UserSid), stoppingToken);
-                if (sidStatus.Status != "authorized")
+                var displayLabel = TryAccountLabel(hello.UserSid);
+                var isEnrolled = await api.IsEnrolledAsync(stoppingToken);
+                Guid? deviceId = null;
+                var requiresAuthorization = false;
+                if (isEnrolled)
+                {
+                    deviceId = await api.GetDeviceIdAsync(stoppingToken)
+                        ?? throw new InvalidOperationException("The stored device credential has no device ID.");
+                    var sidStatus = await api.RegisterWindowsSidAsync(hello.UserSid, displayLabel, stoppingToken);
+                    requiresAuthorization = sidStatus.Status != "authorized";
+                }
+                var status = new AgentStatusMessage(
+                    PipeProtocol.Version,
+                    "agent_status",
+                    hello.RequestId,
+                    DateTimeOffset.UtcNow,
+                    isEnrolled,
+                    api.ApiBaseAddress.AbsoluteUri,
+                    deviceId,
+                    isEnrolled ? hello.UserSid : null,
+                    requiresAuthorization);
+                await PipeFrameCodec.WriteAsync(pipe, status, PipeJsonContext.Default.AgentStatusMessage, stoppingToken);
+                if (!isEnrolled)
+                {
+                    if (!await ProvisionDeviceAsync(pipe, hello.UserSid, displayLabel, stoppingToken)) continue;
+                }
+                else if (requiresAuthorization)
                 {
                     CandidatePending(logger, HashSid(hello.UserSid), null);
-                    continue;
+                    if (!await WaitForSidAuthorizationAsync(hello.UserSid, displayLabel, stoppingToken)) continue;
                 }
+                var ready = new AgentReadyMessage(PipeProtocol.Version, "agent_ready", Guid.NewGuid(), DateTimeOffset.UtcNow);
+                await PipeFrameCodec.WriteAsync(pipe, ready, PipeJsonContext.Default.AgentReadyMessage, stoppingToken);
                 lock (connectionGate)
                 {
                     activePipe?.Dispose();
@@ -56,9 +86,87 @@ public sealed partial class InteractiveSessionBroker(
                     await Task.Delay(TimeSpan.FromSeconds(2), stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }
-            catch (Exception exception) { PipeFailure(logger, exception); }
+            catch (UnauthorizedAccessException exception) when (pipe is null)
+            {
+                throw new InvalidOperationException(
+                    $"PCConnect could not create the local pipe '{pipeName}'. Another Agent instance is probably already running. Stop that instance or configure a unique PCConnect:PipeName for both the Agent and Companion.",
+                    exception);
+            }
+            catch (Exception exception)
+            {
+                PipeFailure(logger, exception);
+                await Task.Delay(TimeSpan.FromSeconds(1), stoppingToken);
+            }
             finally { pipe?.Dispose(); }
         }
+    }
+
+    private async Task<bool> ProvisionDeviceAsync(NamedPipeServerStream pipe, string windowsSid, string? displayLabel, CancellationToken cancellationToken)
+    {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromMinutes(5));
+        using var document = await PipeFrameCodec.ReadAsync(pipe, timeout.Token);
+        PipeProtocol.EnsureExactProperties(document.RootElement, "protocolVersion", "messageType", "requestId", "sentAt", "deviceId", "accessToken", "accessTokenExpiresAt", "refreshToken", "refreshTokenExpiresAt");
+        var request = document.RootElement.Deserialize(PipeJsonContext.Default.ProvisionDeviceRequestMessage)
+            ?? throw new InvalidDataException("The device provisioning request is invalid.");
+        if (request.ProtocolVersion != PipeProtocol.Version || request.MessageType != "provision_device" || request.RequestId == Guid.Empty || request.DeviceId == Guid.Empty)
+            throw new InvalidDataException("The device provisioning request has an unsupported version or shape.");
+        if ((DateTimeOffset.UtcNow - request.SentAt).Duration() > PipeProtocol.MaximumClockSkew ||
+            request.AccessTokenExpiresAt <= DateTimeOffset.UtcNow || request.RefreshTokenExpiresAt <= DateTimeOffset.UtcNow ||
+            request.AccessToken.Length is < 20 or > 4096 || request.RefreshToken.Length is < 20 or > 4096)
+            throw new InvalidDataException("The device provisioning credential is invalid or expired.");
+
+        var result = new ProvisionDeviceResultMessage(PipeProtocol.Version, "provision_device_result", request.RequestId, DateTimeOffset.UtcNow, false, null, false);
+        var credentialSaved = false;
+        try
+        {
+            if (await credentialStore.LoadAsync(cancellationToken) is not null)
+                result = result with { ErrorCode = "already_enrolled" };
+            else
+            {
+                await credentialStore.SaveAsync(new StoredDeviceCredential(
+                    request.DeviceId,
+                    request.AccessToken,
+                    request.AccessTokenExpiresAt,
+                    request.RefreshToken,
+                    request.RefreshTokenExpiresAt), cancellationToken);
+                credentialSaved = true;
+                var sidStatus = await api.RegisterWindowsSidAsync(windowsSid, displayLabel, cancellationToken);
+                result = result with
+                {
+                    Succeeded = true,
+                    WindowsSid = windowsSid,
+                    RequiresAuthorization = sidStatus.Status != "authorized"
+                };
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or CryptographicException or HttpRequestException)
+        {
+            if (credentialSaved)
+            {
+                try { await credentialStore.DeleteAsync(cancellationToken); }
+                catch (Exception deleteException) when (deleteException is IOException or UnauthorizedAccessException) { }
+                api.ForgetCredential();
+            }
+            result = result with { ErrorCode = credentialSaved ? "device_registration_failed" : "credential_store_failed" };
+        }
+        await PipeFrameCodec.WriteAsync(pipe, result, PipeJsonContext.Default.ProvisionDeviceResultMessage, cancellationToken);
+        if (!result.Succeeded || !result.RequiresAuthorization) return result.Succeeded;
+
+        CandidatePending(logger, HashSid(windowsSid), null);
+        return await WaitForSidAuthorizationAsync(windowsSid, displayLabel, cancellationToken);
+    }
+
+    private async Task<bool> WaitForSidAuthorizationAsync(string windowsSid, string? displayLabel, CancellationToken cancellationToken)
+    {
+        var authorizationDeadline = DateTimeOffset.UtcNow.AddMinutes(2);
+        while (DateTimeOffset.UtcNow < authorizationDeadline)
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(500), cancellationToken);
+            var sidStatus = await api.RegisterWindowsSidAsync(windowsSid, displayLabel, cancellationToken);
+            if (sidStatus.Status == "authorized") return true;
+        }
+        return false;
     }
 
     public async Task<LocalExecutionResult> ExecuteAsync(Command command, CancellationToken cancellationToken)
@@ -125,7 +233,7 @@ public sealed partial class InteractiveSessionBroker(
         return hello;
     }
 
-    private static NamedPipeServerStream CreatePipe()
+    private NamedPipeServerStream CreatePipe()
     {
         var security = new PipeSecurity();
         security.SetAccessRuleProtection(true, false);
@@ -133,7 +241,7 @@ public sealed partial class InteractiveSessionBroker(
         security.AddAccessRule(new PipeAccessRule(serviceSid, PipeAccessRights.FullControl, AccessControlType.Allow));
         security.AddAccessRule(new PipeAccessRule(new SecurityIdentifier(WellKnownSidType.AuthenticatedUserSid, null), PipeAccessRights.ReadWrite, AccessControlType.Allow));
         security.AddAccessRule(new PipeAccessRule(new SecurityIdentifier(WellKnownSidType.NetworkSid, null), PipeAccessRights.FullControl, AccessControlType.Deny));
-        return NamedPipeServerStreamAcl.Create(PipeProtocol.PipeName, PipeDirection.InOut, 1, PipeTransmissionMode.Byte,
+        return NamedPipeServerStreamAcl.Create(pipeName, PipeDirection.InOut, 1, PipeTransmissionMode.Byte,
             PipeOptions.Asynchronous | PipeOptions.WriteThrough, 0, 0, security);
     }
 

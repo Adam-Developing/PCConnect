@@ -13,13 +13,56 @@ public sealed class ProtocolSecurityTests
     [Fact]
     public async Task FrameCodecRoundTripsTypedRequest()
     {
-        var request = new ExecuteRequestMessage(1, "execute_request", Guid.NewGuid(), DateTimeOffset.UtcNow,
+        var request = new ExecuteRequestMessage(PipeProtocol.Version, "execute_request", Guid.NewGuid(), DateTimeOffset.UtcNow,
             Guid.NewGuid(), "lock", DateTimeOffset.UtcNow.AddMinutes(1), Guid.NewGuid());
         await using var stream = new MemoryStream();
         await PipeFrameCodec.WriteAsync(stream, request, PipeJsonContext.Default.ExecuteRequestMessage, TestContext.Current.CancellationToken);
         stream.Position = 0;
         using var document = await PipeFrameCodec.ReadAsync(stream, TestContext.Current.CancellationToken);
         Assert.Equal("execute_request", document.RootElement.GetProperty("messageType").GetString());
+    }
+
+    [Fact]
+    public async Task FrameCodecRoundTripsProvisioningResult()
+    {
+        var result = new ProvisionDeviceResultMessage(
+            PipeProtocol.Version,
+            "provision_device_result",
+            Guid.NewGuid(),
+            DateTimeOffset.UtcNow,
+            true,
+            "S-1-5-21-1",
+            true);
+        await using var stream = new MemoryStream();
+        await PipeFrameCodec.WriteAsync(stream, result, PipeJsonContext.Default.ProvisionDeviceResultMessage, TestContext.Current.CancellationToken);
+        stream.Position = 0;
+        using var document = await PipeFrameCodec.ReadAsync(stream, TestContext.Current.CancellationToken);
+
+        Assert.Equal("provision_device_result", document.RootElement.GetProperty("messageType").GetString());
+        Assert.True(document.RootElement.GetProperty("requiresAuthorization").GetBoolean());
+    }
+
+    [Fact]
+    public async Task AgentStatusRoundTripsAuthorizationRecoveryState()
+    {
+        var deviceId = Guid.NewGuid();
+        var status = new AgentStatusMessage(
+            PipeProtocol.Version,
+            "agent_status",
+            Guid.NewGuid(),
+            DateTimeOffset.UtcNow,
+            true,
+            "https://api.example.test/api/v2/",
+            deviceId,
+            "S-1-5-21-1",
+            true);
+        await using var stream = new MemoryStream();
+        await PipeFrameCodec.WriteAsync(stream, status, PipeJsonContext.Default.AgentStatusMessage, TestContext.Current.CancellationToken);
+        stream.Position = 0;
+        using var document = await PipeFrameCodec.ReadAsync(stream, TestContext.Current.CancellationToken);
+
+        Assert.Equal(deviceId, document.RootElement.GetProperty("deviceId").GetGuid());
+        Assert.True(document.RootElement.GetProperty("requiresAuthorization").GetBoolean());
     }
 
     [Fact]
@@ -60,10 +103,29 @@ public sealed class ProtocolSecurityTests
     public void ChallengeProofIsBoundToSidPidNonceAndRequest()
     {
         var secret = RandomNumberGenerator.GetBytes(32);
-        var hello = new HelloMessage(1, "hello", Guid.NewGuid(), DateTimeOffset.UtcNow, 42, "S-1-5-21-1", PipeProtocol.CreateNonce());
+        var hello = new HelloMessage(PipeProtocol.Version, "hello", Guid.NewGuid(), DateTimeOffset.UtcNow, 42, "S-1-5-21-1", PipeProtocol.CreateNonce());
         var proof = PipeProtocol.CreateProof(secret, hello);
         Assert.True(PipeProtocol.VerifyProof(secret, hello, proof));
         Assert.False(PipeProtocol.VerifyProof(secret, hello with { ProcessId = 43 }, proof));
+    }
+
+    [Theory]
+    [InlineData(null, PipeProtocol.PipeName)]
+    [InlineData("", PipeProtocol.PipeName)]
+    [InlineData("  pcconnect-agent-dev_2.0  ", "pcconnect-agent-dev_2.0")]
+    public void PipeNameUsesDefaultOrValidatedOverride(string? configured, string expected)
+    {
+        Assert.Equal(expected, PipeProtocol.ResolvePipeName(configured));
+    }
+
+    [Theory]
+    [InlineData("pcconnect/dev")]
+    [InlineData("pcconnect\\dev")]
+    [InlineData("pcconnect dev")]
+    [InlineData("pcconnect-💻")]
+    public void PipeNameRejectsUnsafeCharacters(string configured)
+    {
+        Assert.Throws<InvalidOperationException>(() => PipeProtocol.ResolvePipeName(configured));
     }
 
     [Fact]

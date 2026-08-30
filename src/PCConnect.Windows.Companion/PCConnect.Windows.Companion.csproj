@@ -7,6 +7,7 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
   <ItemGroup>
+    <ProjectReference Include="../PCConnect.Contracts/PCConnect.Contracts.csproj" />
     <ProjectReference Include="../PCConnect.Windows.Protocol/PCConnect.Windows.Protocol.csproj" />
   </ItemGroup>
 </Project>

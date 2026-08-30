@@ -18,6 +18,14 @@ public sealed class AgentApiClient(HttpClient http, IDeviceCredentialStore store
 
     public Uri ApiBaseAddress => http.BaseAddress!;
 
+    public async Task<Guid?> GetDeviceIdAsync(CancellationToken cancellationToken)
+    {
+        credential ??= await store.LoadAsync(cancellationToken);
+        return credential?.DeviceId;
+    }
+
+    public void ForgetCredential() => credential = null;
+
     public async Task<string> GetAccessTokenAsync(CancellationToken cancellationToken)
     {
         await EnsureAccessAsync(cancellationToken);

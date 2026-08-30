@@ -130,12 +130,12 @@ try {
     $apiProcess = Start-Process dotnet -WorkingDirectory $repositoryRoot -ArgumentList @(
         'run', '--project', 'src/PCConnect.Api', '--configuration', 'Release', '--no-build'
     ) -RedirectStandardOutput (Join-Path $logRoot 'api.stdout.log') `
-      -RedirectStandardError (Join-Path $logRoot 'api.stderr.log') -PassThru
+      -RedirectStandardError (Join-Path $logRoot 'api.stderr.log') -WindowStyle Hidden -PassThru
 
     $workerProcess = Start-Process dotnet -WorkingDirectory $repositoryRoot -ArgumentList @(
         'run', '--project', 'src/PCConnect.Worker', '--configuration', 'Release', '--no-build'
     ) -RedirectStandardOutput (Join-Path $logRoot 'worker.stdout.log') `
-      -RedirectStandardError (Join-Path $logRoot 'worker.stderr.log') -PassThru
+      -RedirectStandardError (Join-Path $logRoot 'worker.stderr.log') -WindowStyle Hidden -PassThru
 
     [ordered]@{ Api = $apiProcess.Id; Worker = $workerProcess.Id } |
         ConvertTo-Json | Set-Content -LiteralPath $processPath -Encoding UTF8
@@ -166,5 +166,5 @@ Write-Host 'API:       http://localhost:5080/api/v2/'
 Write-Host "API logs:  $logRoot\api.stdout.log"
 Write-Host "Worker:    PID $($workerProcess.Id)"
 Write-Host 'Android:   run adb reverse tcp:5080 tcp:5080, then install the localhost debug APK.'
-Write-Host 'Windows:   enroll the loose agent executable before starting agent and companion.'
+Write-Host 'Windows:   start the agent and companion, then sign in through the graphical enrollment screen.'
 Write-Host 'Stop:      ./tools/local-dev/Stop-PCConnectLocal.ps1'

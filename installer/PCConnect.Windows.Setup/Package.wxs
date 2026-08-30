@@ -16,19 +16,12 @@
     </StandardDirectory>
 
     <StandardDirectory Id="ProgramMenuFolder">
-      <Directory Id="PROGRAMMENUDIR" Name="PCConnect" />
+      <Directory Id="ProgramMenuDirectory" Name="PCConnect" />
     </StandardDirectory>
 
     <DirectoryRef Id="AGENTDIR">
       <Component Id="AgentService" Bitness="always64">
-        <File Id="AgentExe" Source="$(var.AgentPublishDir)\PCConnect.Windows.Agent.exe" KeyPath="yes">
-          <Shortcut Id="EnrollShortcut"
-                    Directory="PROGRAMMENUDIR"
-                    Name="Enroll PCConnect device"
-                    Description="Securely enroll this computer with PCConnect"
-                    Arguments="enroll"
-                    WorkingDirectory="AGENTDIR" />
-        </File>
+        <File Id="AgentExe" Source="$(var.AgentPublishDir)\PCConnect.Windows.Agent.exe" KeyPath="yes" />
         <ServiceInstall Id="AgentServiceInstall"
                         Name="PCConnectAgentV2"
                         DisplayName="PCConnect Agent v2"
@@ -51,19 +44,20 @@
 
     <DirectoryRef Id="COMPANIONDIR">
       <Component Id="CompanionApplication" Bitness="always64">
-        <File Id="CompanionExe" Source="$(var.CompanionPublishDir)\PCConnect.Windows.Companion.exe" KeyPath="yes" />
+        <File Id="CompanionExe" Source="$(var.CompanionPublishDir)\PCConnect.Windows.Companion.exe" KeyPath="yes">
+          <Shortcut Id="CompanionShortcut"
+                    Directory="ProgramMenuDirectory"
+                    Name="PCConnect"
+                    Description="Open PCConnect and connect this Windows PC"
+                    Advertise="yes"
+                    WorkingDirectory="COMPANIONDIR" />
+        </File>
         <RegistryValue Root="HKLM"
                        Key="Software\Microsoft\Windows\CurrentVersion\Run"
                        Name="PCConnect Companion v2"
-                       Value="&quot;[#CompanionExe]&quot;"
+                       Value="&quot;[#CompanionExe]&quot; --background"
                        Type="string" />
-      </Component>
-    </DirectoryRef>
-
-    <DirectoryRef Id="PROGRAMMENUDIR">
-      <Component Id="ProgramMenuCleanup" Bitness="always64">
-        <RemoveFolder Id="RemoveProgramMenuFolder" On="uninstall" />
-        <RegistryValue Root="HKLM" Key="Software\PCConnect" Name="InstallerMenu" Type="integer" Value="1" KeyPath="yes" />
+        <RemoveFolder Id="RemoveProgramMenuDirectory" Directory="ProgramMenuDirectory" On="uninstall" />
       </Component>
     </DirectoryRef>
 
@@ -71,7 +65,6 @@
       <ComponentRef Id="AgentService" />
       <ComponentRef Id="AgentConfiguration" />
       <ComponentRef Id="CompanionApplication" />
-      <ComponentRef Id="ProgramMenuCleanup" />
     </Feature>
   </Package>
 </Wix>

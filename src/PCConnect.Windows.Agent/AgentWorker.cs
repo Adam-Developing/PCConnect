@@ -6,7 +6,7 @@ public sealed class AgentWorker(AgentApiClient api, AgentRealtimeClient realtime
 {
     private readonly Guid instanceId = Guid.NewGuid();
     private static readonly Action<ILogger, Exception?> CycleFailed = LoggerMessage.Define(LogLevel.Error, new EventId(9001, nameof(CycleFailed)), "Agent synchronization cycle failed");
-    private static readonly Action<ILogger, Exception?> NotEnrolled = LoggerMessage.Define(LogLevel.Warning, new EventId(9002, nameof(NotEnrolled)), "PCConnect agent is not enrolled; run the enrollment utility before starting the service");
+    private static readonly Action<ILogger, Exception?> NotEnrolled = LoggerMessage.Define(LogLevel.Warning, new EventId(9002, nameof(NotEnrolled)), "PCConnect agent is not enrolled; open the PCConnect companion to sign in and enroll this device");
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {

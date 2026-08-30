@@ -11,6 +11,7 @@ public interface IDeviceCredentialStore
 {
     Task<StoredDeviceCredential?> LoadAsync(CancellationToken cancellationToken);
     Task SaveAsync(StoredDeviceCredential credential, CancellationToken cancellationToken);
+    Task DeleteAsync(CancellationToken cancellationToken);
 }
 
 public sealed class DpapiDeviceCredentialStore : IDeviceCredentialStore
@@ -58,6 +59,13 @@ public sealed class DpapiDeviceCredentialStore : IDeviceCredentialStore
             finally { CryptographicOperations.ZeroMemory(encrypted); }
         }
         finally { CryptographicOperations.ZeroMemory(clear); }
+    }
+
+    public Task DeleteAsync(CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (File.Exists(path)) File.Delete(path);
+        return Task.CompletedTask;
     }
 
     private static void RestrictDirectory(string directory)

@@ -25,6 +25,44 @@ public sealed record ChallengeResponseMessage(
     string Nonce,
     string Proof) : PipeMessage(ProtocolVersion, MessageType, RequestId, SentAt);
 
+public sealed record AgentStatusMessage(
+    int ProtocolVersion,
+    string MessageType,
+    Guid RequestId,
+    DateTimeOffset SentAt,
+    bool IsEnrolled,
+    string ApiBaseUrl,
+    Guid? DeviceId,
+    string? WindowsSid,
+    bool RequiresAuthorization) : PipeMessage(ProtocolVersion, MessageType, RequestId, SentAt);
+
+public sealed record ProvisionDeviceRequestMessage(
+    int ProtocolVersion,
+    string MessageType,
+    Guid RequestId,
+    DateTimeOffset SentAt,
+    Guid DeviceId,
+    string AccessToken,
+    DateTimeOffset AccessTokenExpiresAt,
+    string RefreshToken,
+    DateTimeOffset RefreshTokenExpiresAt) : PipeMessage(ProtocolVersion, MessageType, RequestId, SentAt);
+
+public sealed record ProvisionDeviceResultMessage(
+    int ProtocolVersion,
+    string MessageType,
+    Guid RequestId,
+    DateTimeOffset SentAt,
+    bool Succeeded,
+    string? WindowsSid,
+    bool RequiresAuthorization,
+    string? ErrorCode = null) : PipeMessage(ProtocolVersion, MessageType, RequestId, SentAt);
+
+public sealed record AgentReadyMessage(
+    int ProtocolVersion,
+    string MessageType,
+    Guid RequestId,
+    DateTimeOffset SentAt) : PipeMessage(ProtocolVersion, MessageType, RequestId, SentAt);
+
 public sealed record ExecuteRequestMessage(
     int ProtocolVersion,
     string MessageType,
@@ -64,6 +102,10 @@ public sealed record ReminderAcknowledgementMessage(
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 [JsonSerializable(typeof(HelloMessage))]
 [JsonSerializable(typeof(ChallengeResponseMessage))]
+[JsonSerializable(typeof(AgentStatusMessage))]
+[JsonSerializable(typeof(ProvisionDeviceRequestMessage))]
+[JsonSerializable(typeof(ProvisionDeviceResultMessage))]
+[JsonSerializable(typeof(AgentReadyMessage))]
 [JsonSerializable(typeof(ExecuteRequestMessage))]
 [JsonSerializable(typeof(ExecuteResultMessage))]
 [JsonSerializable(typeof(ReminderDeliveryMessage))]

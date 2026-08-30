@@ -6,10 +6,20 @@ namespace PCConnect.Windows.Protocol;
 
 public static class PipeProtocol
 {
-    public const int Version = 1;
+    public const int Version = 3;
     public const string PipeName = "pcconnect-agent-v1";
     public static readonly TimeSpan MaximumClockSkew = TimeSpan.FromSeconds(30);
     private static readonly HashSet<string> HelloProperties = ["protocolVersion", "messageType", "requestId", "sentAt", "processId", "userSid", "nonce"];
+
+    public static string ResolvePipeName(string? configuredName)
+    {
+        if (string.IsNullOrWhiteSpace(configuredName)) return PipeName;
+        var name = configuredName.Trim();
+        if (name.Length > 128 || name.Any(character =>
+                !char.IsAsciiLetterOrDigit(character) && character is not ('-' or '_' or '.')))
+            throw new InvalidOperationException("The PCConnect pipe name must contain only ASCII letters, digits, periods, hyphens, or underscores and be at most 128 characters.");
+        return name;
+    }
 
     public static HelloMessage ReadAndValidateHello(JsonDocument document, DateTimeOffset now)
     {

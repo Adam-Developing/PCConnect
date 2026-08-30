@@ -1,6 +1,7 @@
 using System.Data;
 using System.Security.Cryptography;
 using System.Text.Json;
+using Microsoft.Extensions.Hosting;
 using Npgsql;
 using NpgsqlTypes;
 using PCConnect.Contracts.V2;
@@ -26,7 +27,7 @@ public interface IDeviceService
     Task RevokeWindowsSidAsync(Guid userId, Guid sessionId, Guid deviceId, string windowsSid, string stepUpGrant, string correlationId, CancellationToken cancellationToken);
 }
 
-public sealed class DeviceService(NpgsqlDataSource dataSource, IOpaqueTokenService tokens, IClock clock, StepUpGrantConsumer stepUp, Microsoft.Extensions.Configuration.IConfiguration configuration) : IDeviceService
+public sealed class DeviceService(NpgsqlDataSource dataSource, IOpaqueTokenService tokens, IClock clock, StepUpGrantConsumer stepUp, Microsoft.Extensions.Configuration.IConfiguration configuration, IHostEnvironment environment) : IDeviceService
 {
     private const string UserCodeAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
     private static readonly TimeSpan EnrollmentLifetime = TimeSpan.FromMinutes(10);
@@ -37,6 +38,7 @@ public sealed class DeviceService(NpgsqlDataSource dataSource, IOpaqueTokenServi
     public async Task<DeviceEnrollment> CreateEnrollmentAsync(DeviceEnrollmentRequest request, CancellationToken cancellationToken)
     {
         ValidateEnrollment(request);
+        var verificationUri = ResolveVerificationUri(configuration, environment.IsDevelopment());
         var now = clock.UtcNow;
         var deviceCode = tokens.Create();
         var userCode = CreateUserCode();
@@ -59,9 +61,18 @@ public sealed class DeviceService(NpgsqlDataSource dataSource, IOpaqueTokenServi
         command.Parameters.AddWithValue("now", now);
         command.Parameters.AddWithValue("expiresAt", now.Add(EnrollmentLifetime));
         await command.ExecuteNonQueryAsync(cancellationToken);
-        var verificationUri = new Uri(configuration["Enrollment:VerificationUri"] ?? "https://pcconnect.adamdeveloping.co.uk/device", UriKind.Absolute);
-        if (verificationUri.Scheme != Uri.UriSchemeHttps) throw new InvalidOperationException("Enrollment:VerificationUri must use HTTPS.");
         return new(deviceCode, userCode, verificationUri, now.Add(EnrollmentLifetime), 5);
+    }
+
+    internal static Uri ResolveVerificationUri(Microsoft.Extensions.Configuration.IConfiguration configuration, bool isDevelopment)
+    {
+        var verificationUri = new Uri(configuration["Enrollment:VerificationUri"] ?? "https://pcconnect.adamdeveloping.co.uk/device", UriKind.Absolute);
+        var isDevelopmentLoopback = isDevelopment &&
+            verificationUri.Scheme == Uri.UriSchemeHttp &&
+            verificationUri.IsLoopback;
+        if (verificationUri.Scheme != Uri.UriSchemeHttps && !isDevelopmentLoopback)
+            throw new InvalidOperationException("Enrollment:VerificationUri must use HTTPS, except for an HTTP loopback URL in Development.");
+        return verificationUri;
     }
 
     public async Task ApproveEnrollmentAsync(Guid userId, string userCode, string correlationId, CancellationToken cancellationToken)
@@ -366,7 +377,10 @@ public sealed class DeviceService(NpgsqlDataSource dataSource, IOpaqueTokenServi
         candidate.Parameters.Add(new("label", NpgsqlDbType.Text) { Value = request.DisplayLabel is null ? DBNull.Value : request.DisplayLabel.Trim() });
         candidate.Parameters.AddWithValue("now", now);
         candidate.Parameters.AddWithValue("expires", now.AddDays(1));
-        if (await candidate.ExecuteScalarAsync(cancellationToken) is not DateTimeOffset observedAt) throw new AuthenticationFailureException("device_revoked");
+        await using var candidateReader = await candidate.ExecuteReaderAsync(cancellationToken);
+        if (!await candidateReader.ReadAsync(cancellationToken)) throw new AuthenticationFailureException("device_revoked");
+        var observedAt = candidateReader.GetFieldValue<DateTimeOffset>(0);
+        await candidateReader.DisposeAsync();
         await transaction.CommitAsync(cancellationToken);
         return new(request.WindowsSid, request.DisplayLabel, "pending", observedAt, null);
     }
