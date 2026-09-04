@@ -76,10 +76,91 @@ data class ChangePasswordRequest(val currentPassword: String, val newPassword: S
 @Serializable
 data class ForgotPasswordRequest(val email: String)
 
+// ── passkeys (WebAuthn) ──────────────────────────────────────────────────────
+
+@Serializable
+data class RelyingParty(val id: String, val name: String)
+
+@Serializable
+data class PasskeyUser(val id: String, val name: String, val displayName: String)
+
+@Serializable
+data class PublicKeyCredentialParameter(val type: String, val alg: Int)
+
+@Serializable
+data class PublicKeyCredentialDescriptor(
+    val type: String,
+    val id: String,
+    val transports: List<String>? = null,
+)
+
+@Serializable
+data class AuthenticatorSelection(
+    val authenticatorAttachment: String? = null,
+    val residentKey: String = "preferred",
+    val requireResidentKey: Boolean = false,
+    val userVerification: String = "preferred",
+)
+
+@Serializable
+data class PasskeyRegistrationOptions(
+    val challengeId: String,
+    val challenge: String,
+    val rp: RelyingParty,
+    val user: PasskeyUser,
+    val pubKeyCredParams: List<PublicKeyCredentialParameter>,
+    val excludeCredentials: List<PublicKeyCredentialDescriptor> = emptyList(),
+    val authenticatorSelection: AuthenticatorSelection = AuthenticatorSelection(),
+    val timeoutMilliseconds: Int = 300_000,
+    val attestation: String = "none",
+)
+
+@Serializable
+data class PasskeyRegistrationRequest(
+    val challengeId: String,
+    val credentialId: String,
+    val clientDataJson: String,
+    val attestationObject: String,
+    val transports: List<String>? = null,
+    val displayName: String? = null,
+)
+
+@Serializable
+data class PasskeyAssertionOptions(
+    val challengeId: String,
+    val challenge: String,
+    val rpId: String,
+    val allowCredentials: List<PublicKeyCredentialDescriptor> = emptyList(),
+    val timeoutMilliseconds: Int = 300_000,
+    val userVerification: String = "preferred",
+)
+
+@Serializable
+data class PasskeyAssertionRequest(
+    val challengeId: String,
+    val credentialId: String,
+    val clientDataJson: String,
+    val authenticatorData: String,
+    val signature: String,
+    val userHandle: String? = null,
+    val clientKind: String = "mobile",
+    val clientVersion: String = "",
+)
+
+@Serializable
+data class PasskeySummary(
+    val id: String,
+    val displayName: String,
+    val createdAt: String,
+    val lastUsedAt: String? = null,
+)
+
 @Serializable
 data class StepUpChallenge(
     val challengeId: String,
     val methods: List<String>,
+    /** Present when the account has a passkey, so the client need not guess. */
+    val passkey: PasskeyAssertionOptions? = null,
     val expiresInSeconds: Int,
 )
 
@@ -88,7 +169,14 @@ data class StepUpVerifyRequest(
     val challengeId: String,
     val method: String,
     val password: String? = null,
+    val passkey: PasskeyAssertionRequest? = null,
 )
+
+/** The two ways a destructive command can be confirmed (ADR-0011). */
+object StepUpMethods {
+    const val PASSWORD = "password"
+    const val PASSKEY = "passkey"
+}
 
 @Serializable
 data class StepUpToken(val stepUpToken: String, val expiresInSeconds: Int, val method: String)

@@ -13,6 +13,9 @@ okhttp = "4.12.0"
 serialization = "1.8.1"
 coroutines = "1.10.2"
 biometric = "1.1.0"
+# Passkeys. The play-services artifact is the provider that actually talks to
+# the platform authenticator; the API alone resolves no credential.
+credentials = "1.5.0"
 datastore = "1.2.1"
 signalr = "10.0.0"
 # Already on the runtime classpath via SignalR; declared so the realtime
@@ -38,6 +41,8 @@ androidx-compose-material3 = { group = "androidx.compose.material3", name = "mat
 androidx-compose-material-icons-core = { group = "androidx.compose.material", name = "material-icons-core" }
 androidx-navigation-compose = { group = "androidx.navigation", name = "navigation-compose", version.ref = "navigation" }
 androidx-biometric = { group = "androidx.biometric", name = "biometric", version.ref = "biometric" }
+androidx-credentials = { group = "androidx.credentials", name = "credentials", version.ref = "credentials" }
+androidx-credentials-play-services = { group = "androidx.credentials", name = "credentials-play-services-auth", version.ref = "credentials" }
 androidx-datastore-preferences = { group = "androidx.datastore", name = "datastore-preferences", version.ref = "datastore" }
 okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
 kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "serialization" }

@@ -15,6 +15,7 @@ namespace PCConnect.Companion.ViewModels;
 /// </summary>
 public partial class RemindersViewModel(
     PcConnectClient api,
+    DevicesViewModel devices,
     ILogger<RemindersViewModel> logger) : ObservableObject
 {
     private static readonly string[] DayInitials = ["M", "T", "W", "T", "F", "S", "S"];
@@ -57,6 +58,18 @@ public partial class RemindersViewModel(
     [ObservableProperty]
     private bool _isBusy;
 
+    /// <summary>
+    /// Whether the server understands a reminder that names its PCs. The picker
+    /// only appears when it does: one that the server ignored would be worse
+    /// than none at all.
+    /// </summary>
+    [ObservableProperty]
+    private bool _isTargetable;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowOnChosenPcs))]
+    private bool _showOnAllPcs = true;
+
     // ── the list and the calendar ────────────────────────────────────────────
 
     [ObservableProperty]
@@ -82,6 +95,9 @@ public partial class RemindersViewModel(
     /// <summary>Additional times, each of which becomes its own series.</summary>
     public ObservableCollection<TimeOnly> ExtraTimes { get; } = [];
 
+    /// <summary>The PCs on the account, each with whether this reminder names it.</summary>
+    public ObservableCollection<TargetToggle> Targets { get; } = [];
+
     public IReadOnlyList<int> IntervalOptions { get; } = [1, 2, 3, 4];
 
     public bool IsCustomRepeat => Repeat == RepeatKind.Custom;
@@ -89,6 +105,8 @@ public partial class RemindersViewModel(
     public bool HasSelection => SelectedDay is not null;
 
     public bool NoRows => Rows.Count == 0;
+
+    public bool ShowOnChosenPcs => !ShowOnAllPcs;
 
     public string MonthTitle => _viewMonth.ToString("MMMM yyyy", CultureInfo.CurrentCulture);
 
@@ -138,6 +156,40 @@ public partial class RemindersViewModel(
             });
         }
     }
+
+    /// <summary>Rebuilds the "Show on" list, keeping whatever was already ticked.</summary>
+    public void RefreshTargets()
+    {
+        var chosen = Targets.Where(t => t.IsChosen).Select(t => t.DeviceId).ToHashSet(StringComparer.Ordinal);
+
+        Targets.Clear();
+
+        foreach (var device in devices.Items)
+        {
+            Targets.Add(new TargetToggle
+            {
+                DeviceId = device.Id,
+                Name = device.DisplayName,
+                IsOnline = device.IsOnline,
+                IsChosen = chosen.Contains(device.Id),
+            });
+        }
+    }
+
+    [RelayCommand]
+    private void ToggleTarget(TargetToggle? target)
+    {
+        if (target is not null)
+        {
+            target.IsChosen = !target.IsChosen;
+        }
+    }
+
+    [RelayCommand]
+    private void ShowOnAll() => ShowOnAllPcs = true;
+
+    [RelayCommand]
+    private void ShowOnChosen() => ShowOnAllPcs = false;
 
     public async Task LoadAsync()
     {
@@ -266,7 +318,11 @@ public partial class RemindersViewModel(
                     Time: local.ToString("HH:mm", CultureInfo.CurrentCulture),
                     DayLabel: Describe(day),
                     Body: reminder.Body,
-                    Detail: string.Join(" · ", new[] { Recurrence.Describe(reminder.Rrule) }.Where(s => s.Length > 0)),
+                    Detail: string.Join(" · ", new[]
+                    {
+                        Recurrence.Describe(reminder.Rrule),
+                        DescribeTargets(reminder.DeviceIds),
+                    }.Where(s => s.Length > 0)),
                     IsCompleted: reminder.IsCompleted && day == today,
                     IsPast: past));
             }
@@ -303,6 +359,26 @@ public partial class RemindersViewModel(
         }
 
         return days;
+    }
+
+    /// <summary>"all PCs", or the names of the ones it was aimed at.</summary>
+    private string DescribeTargets(IReadOnlyList<string>? deviceIds)
+    {
+        if (deviceIds is null || deviceIds.Count == 0)
+        {
+            return "all PCs";
+        }
+
+        var names = deviceIds
+            .Select(id => devices.Items.FirstOrDefault(d => d.Id == id)?.DisplayName)
+            .Where(name => !string.IsNullOrEmpty(name))
+            .Select(name => name!)
+            .ToList();
+
+        // A device that has since been revoked is no longer in the list; saying
+        // how many are left is better than silently naming fewer PCs than the
+        // reminder actually has.
+        return names.Count == 0 ? "a PC that has been removed" : Recurrence.JoinNaturally(names);
     }
 
     internal static string Describe(DateOnly date)
@@ -424,6 +500,18 @@ public partial class RemindersViewModel(
                 ? new DateTimeOffset(DateTime.SpecifyKind(end.Date.AddDays(1).AddSeconds(-1), DateTimeKind.Local))
                 : (DateTimeOffset?)null;
 
+            // Null means every PC, which is also what a server without the
+            // capability does with any reminder it is sent.
+            var deviceIds = IsTargetable && !ShowOnAllPcs
+                ? Targets.Where(t => t.IsChosen).Select(t => t.DeviceId).ToList()
+                : null;
+
+            if (deviceIds is { Count: 0 })
+            {
+                StatusMessage = "Pick at least one PC, or choose All PCs.";
+                return;
+            }
+
             var created = 0;
 
             foreach (var time in AllTimes())
@@ -439,7 +527,8 @@ public partial class RemindersViewModel(
                     new DateTimeOffset(local).ToUniversalTime(),
                     timezone,
                     rrule,
-                    until));
+                    until,
+                    deviceIds));
 
                 if (reminder is not null)
                 {

@@ -61,6 +61,7 @@ that is contained.
 | [0010](adr/0010-passkeys.md) | Passkeys as a first-class credential — the revisit trigger 0002 named |
 | [0011](adr/0011-risk-tiered-step-up.md) | Risk-tiered step-up: a session alone cannot power a machine off |
 | [0012](adr/0012-client-technology.md) | **.NET service + WPF companion; Kotlin on Android** — supersedes 0006 and 0007 |
+| [0013](adr/0013-device-provisioning-and-reminder-targets.md) | Signing in adds the PC; reminders name their PCs; Android asserts passkeys — amends 0012 |
 | [template](adr/0000-template.md) | For the next decision |
 
 ### Machine-readable artifacts

@@ -25,7 +25,7 @@ class MainActivity : FragmentActivity() {
 
         ViewModelProvider(
             this,
-            viewModelFactory { initializer { AppViewModel(application.api, application.tokenStore) } },
+            viewModelFactory { initializer { AppViewModel(application.api, application.tokenStore, application.passkeys) } },
         )[AppViewModel::class.java]
     }
 

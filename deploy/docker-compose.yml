@@ -63,6 +63,10 @@ services:
       PCCONNECT_KEK__KEYS__k2: ${KEK_KEY_K2:-}
       PCCONNECT_WEBAUTHN__RELYINGPARTYID: ${PCCONNECT_DOMAIN}
       PCCONNECT_WEBAUTHN__ALLOWEDORIGINS__0: "https://${PCCONNECT_DOMAIN}"
+      # The Android app's origin. Not a URL: it is the signing certificate's
+      # hash, and the check is exact (ADR-0013 §3). Leave empty until the
+      # app is signed and /.well-known/assetlinks.json is served.
+      PCCONNECT_WEBAUTHN__ALLOWEDORIGINS__1: ${ANDROID_APK_KEY_HASH:-}
       PCCONNECT_WEB__CORSALLOWEDORIGINS__0: "https://${PCCONNECT_DOMAIN}"
       PCCONNECT_WEB__ENABLEHSTS: "true"
       PCCONNECT_WEB__ENABLELEGACYSHIM: ${ENABLE_LEGACY_SHIM:-true}

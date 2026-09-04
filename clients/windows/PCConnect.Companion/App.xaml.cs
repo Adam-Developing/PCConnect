@@ -55,6 +55,7 @@ public partial class App : Application
         builder.Services.AddHttpClient<PcConnectClient>();
         builder.Services.AddSingleton<PcConnectRealtimeClient>();
 
+        builder.Services.AddSingleton<ProvisioningPipeClient>();
         builder.Services.AddSingleton<CompanionSettings>();
         builder.Services.AddSingleton<StartupRegistration>();
 

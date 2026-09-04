@@ -146,8 +146,12 @@ public sealed class ReminderSchedulerJob(
 
         foreach (var reminder in due)
         {
+            // Fanned out to the account, not to a device: a companion holds a
+            // user credential, so the event carries its targets and each PC
+            // decides whether the reminder is for the screen it is sitting on.
             await realtime.ReminderDueAsync(reminder.UserPublicId,
-                new ReminderDueEvent(reminder.PublicId.ToString(), reminder.Body, reminder.DueAt), ct);
+                new ReminderDueEvent(
+                    reminder.PublicId.ToString(), reminder.Body, reminder.DueAt, reminder.DeviceIds), ct);
         }
 
         if (due.Count > 0)

@@ -44,6 +44,17 @@ class TokenStore(context: Context) {
         get() = preferences.getBoolean(KEY_BIOMETRIC, true)
         set(value) = preferences.edit().putBoolean(KEY_BIOMETRIC, value).apply()
 
+    /**
+     * Whether this phone has registered a passkey for the account.
+     *
+     * A hint for which prompt to show first, never an authorisation: the server
+     * decides what a step-up will accept, and this being wrong costs one
+     * unnecessary attempt and a fall back to the password.
+     */
+    var hasPasskey: Boolean
+        get() = preferences.getBoolean(KEY_PASSKEY, false)
+        set(value) = preferences.edit().putBoolean(KEY_PASSKEY, value).apply()
+
     // ── keystore ─────────────────────────────────────────────────────────────
 
     private fun secretKey(): SecretKey {
@@ -108,6 +119,7 @@ class TokenStore(context: Context) {
         const val KEY_REFRESH = "refreshToken"
         const val KEY_BASE_URL = "baseUrl"
         const val KEY_BIOMETRIC = "requireBiometric"
+        const val KEY_PASSKEY = "hasPasskey"
         const val ANDROID_KEYSTORE = "AndroidKeyStore"
         const val KEY_ALIAS = "pcconnect.session.v2"
         const val TRANSFORMATION = "AES/GCM/NoPadding"

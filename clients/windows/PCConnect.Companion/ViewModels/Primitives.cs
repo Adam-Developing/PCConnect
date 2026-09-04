@@ -77,6 +77,21 @@ public sealed partial class CommandRow : ObservableObject
     public bool IsDestructive => AsksForPassword;
 }
 
+/// <summary>One PC in the reminder sheet's "Show on" list.</summary>
+public sealed partial class TargetToggle : ObservableObject
+{
+    [ObservableProperty]
+    private bool _isChosen;
+
+    public required string DeviceId { get; init; }
+
+    public required string Name { get; init; }
+
+    public required bool IsOnline { get; init; }
+
+    public string Tag => IsOnline ? "online" : "offline";
+}
+
 /// <summary>A colour a person can pick for the reminder window.</summary>
 public sealed partial class Swatch : ObservableObject
 {

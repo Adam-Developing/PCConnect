@@ -1,6 +1,8 @@
 # ADR-0011 — Risk-tiered step-up for destructive commands
 
-**Status:** Accepted
+**Status:** Accepted. The passkey method it allows for is implemented on Android
+as of [ADR-0013](0013-device-provisioning-and-reminder-targets.md) §3; before
+that, only the password path existed on a client.
 **Date:** 2026-09-02
 **Extends:** [ADR-0002](0002-authentication-and-session-model.md),
 [ADR-0003](0003-command-channel-transport.md)

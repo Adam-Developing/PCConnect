@@ -36,6 +36,18 @@ public sealed class ReminderPresenter(
                 return;
             }
 
+            // The event is fanned out to the account, so this PC decides whether
+            // the reminder is for the screen it is sitting on. No targets means
+            // every PC. An unknown device id means show it: a reminder that
+            // silently never appears is the worse failure.
+            if (due.DeviceIds is { Count: > 0 } targets &&
+                settings.ThisDeviceId is { Length: > 0 } here &&
+                !targets.Contains(here, StringComparer.OrdinalIgnoreCase))
+            {
+                logger.LogDebug("Reminder {ReminderId} is not for this PC", due.ReminderId);
+                return;
+            }
+
             Show(due.ReminderId, due.Body, due.DueAt);
         }).Task;
     }

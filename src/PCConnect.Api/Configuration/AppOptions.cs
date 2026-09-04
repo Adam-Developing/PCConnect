@@ -31,7 +31,9 @@ public sealed class DiscoveryOptions
         "commands.ttl",
         "commands.stepup",
         "reminders.rrule",
+        "reminders.targets",
         "devices.pairing",
+        "devices.provisioning",
         "auth.passkeys",
         "realtime.signalr",
     ];

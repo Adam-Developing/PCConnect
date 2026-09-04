@@ -406,6 +406,22 @@ paths:
       responses:
         '200':
           description: OK
+  /v2/devices/provision:
+    post:
+      tags:
+      - Devices
+      summary: Adds the PC the caller is signed in on. Returns a ticket the agent redeems through pair/poll,
+        so the device secret reaches the agent and nothing else.
+      operationId: provisionDevice
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeviceProvisionRequest'
+        required: true
+      responses:
+        '200':
+          description: OK
   /v2/devices/pair/poll:
     post:
       tags:
@@ -830,6 +846,26 @@ components:
           - 'null'
           - string
           format: date-time
+        deviceIds:
+          type:
+          - 'null'
+          - array
+          items:
+            type: string
+      additionalProperties: false
+    DeviceProvisionRequest:
+      required:
+      - requestedName
+      type: object
+      properties:
+        requestedName:
+          type: string
+        platform:
+          type: string
+          default: windows
+        agentVersion:
+          type: string
+          default: ''
       additionalProperties: false
     DeviceTokenRequest:
       required:
@@ -1138,6 +1174,12 @@ components:
           - 'null'
           - string
           format: date-time
+        deviceIds:
+          type:
+          - 'null'
+          - array
+          items:
+            type: string
       additionalProperties: false
     VerifyEmailRequest:
       required:

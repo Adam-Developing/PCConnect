@@ -69,10 +69,14 @@ public sealed class ReminderService(
         var page = rows.Take(take).ToList();
         var dek = page.Count == 0 ? null : await TryLoadDataKeyAsync(connection, caller.UserId, ct);
 
+        // One query for the whole page. Asking per row is the N+1 that turns a
+        // fifty-item list into fifty-one round trips.
+        var targets = await LoadTargetsAsync(connection, null, page.Select(r => r.Id).ToList(), ct);
+
         try
         {
             return new Page<ReminderResponse>(
-                page.Select(r => ToResponse(r, dek)).ToList(),
+                page.Select(r => ToResponse(r, dek, targets)).ToList(),
                 hasMore ? Contexts.Commands.Cursor.Encode(page[^1].Id) : null);
         }
         finally
@@ -91,10 +95,11 @@ public sealed class ReminderService(
         await using var connection = await db.OpenAsync(ct);
         var row = await LoadOwnedAsync(connection, null, caller.UserId, reminderId, ct);
         var dek = await TryLoadDataKeyAsync(connection, caller.UserId, ct);
+        var targets = await LoadTargetsAsync(connection, null, [row.Id], ct);
 
         try
         {
-            return ToResponse(row, dek);
+            return ToResponse(row, dek, targets);
         }
         finally
         {
@@ -143,6 +148,8 @@ public sealed class ReminderService(
                         Until = request.RecurrenceUntil?.ToUniversalTime(),
                     }, tx, cancellationToken: ct));
 
+                await ReplaceTargetsAsync(connection, tx, caller.UserId, id, request.DeviceIds, ct);
+
                 var row = await connection.QuerySingleAsync<ReminderRow>(new CommandDefinition(
                     SelectSql + " WHERE r.id = @Id", new { Id = id }, tx, cancellationToken: ct));
 
@@ -151,7 +158,7 @@ public sealed class ReminderService(
                     await MaterialiseOccurrencesAsync(connection, tx, row, ct);
                 }
 
-                return ToResponse(row, dek);
+                return ToResponse(row, dek, await LoadTargetsAsync(connection, tx, [id], ct));
             }
             finally
             {
@@ -216,6 +223,8 @@ public sealed class ReminderService(
                         row.Id,
                     }, tx, cancellationToken: ct));
 
+                await ReplaceTargetsAsync(connection, tx, caller.UserId, row.Id, request.DeviceIds, ct);
+
                 var updated = await connection.QuerySingleAsync<ReminderRow>(new CommandDefinition(
                     SelectSql + " WHERE r.id = @Id", new { row.Id }, tx, cancellationToken: ct));
 
@@ -231,7 +240,7 @@ public sealed class ReminderService(
                     await MaterialiseOccurrencesAsync(connection, tx, updated, ct);
                 }
 
-                return ToResponse(updated, dek);
+                return ToResponse(updated, dek, await LoadTargetsAsync(connection, tx, [updated.Id], ct));
             }
             finally
             {
@@ -291,7 +300,7 @@ public sealed class ReminderService(
             var dek = await LoadDataKeyAsync(connection, tx, caller.UserId, create: false, ct);
             try
             {
-                return ToResponse(updated, dek);
+                return ToResponse(updated, dek, await LoadTargetsAsync(connection, tx, [updated.Id], ct));
             }
             finally
             {
@@ -402,7 +411,16 @@ public sealed class ReminderService(
 
     // ── scheduling (worker) ──────────────────────────────────────────────────
 
-    public sealed record DueReminder(Guid PublicId, Guid UserPublicId, string Body, DateTimeOffset DueAt);
+    /// <summary>
+    /// A reminder that has come due. <paramref name="DeviceIds"/> is null when it
+    /// shows on every PC, which is what a reminder with no chosen targets means.
+    /// </summary>
+    public sealed record DueReminder(
+        Guid PublicId,
+        Guid UserPublicId,
+        string Body,
+        DateTimeOffset DueAt,
+        IReadOnlyList<string>? DeviceIds);
 
     /// <summary>
     /// Everything due in this tick, decrypted for delivery. Marked as notified in
@@ -431,7 +449,8 @@ public sealed class ReminderService(
                      )
                     RETURNING id, public_id, user_id, body_ciphertext, body_dek_id, due_at_utc
                 )
-                SELECT due.public_id AS PublicId, u.public_id AS UserPublicId, u.id AS UserId,
+                SELECT due.id AS ReminderId, due.public_id AS PublicId,
+                       u.public_id AS UserPublicId, u.id AS UserId,
                        due.body_ciphertext AS BodyCiphertext, due.due_at_utc AS DueAtUtc
                   FROM due JOIN users u ON u.id = due.user_id
                 """, new { Until = until, BatchSize = batchSize }, tx, cancellationToken: ct))).ToList();
@@ -452,7 +471,8 @@ public sealed class ReminderService(
                      )
                     RETURNING o.reminder_id, o.occurs_at_utc
                 )
-                SELECT r.public_id AS PublicId, u.public_id AS UserPublicId, u.id AS UserId,
+                SELECT r.id AS ReminderId, r.public_id AS PublicId,
+                       u.public_id AS UserPublicId, u.id AS UserId,
                        r.body_ciphertext AS BodyCiphertext, due.occurs_at_utc AS DueAtUtc
                   FROM due
                   JOIN reminders r ON r.id = due.reminder_id
@@ -461,6 +481,8 @@ public sealed class ReminderService(
 
             var results = new List<DueReminder>(singles.Count + occurrences.Count);
             var keyCache = new Dictionary<long, byte[]>();
+            var targets = await LoadTargetsAsync(connection, tx,
+                singles.Concat(occurrences).Select(r => r.ReminderId).Distinct().ToList(), ct);
 
             foreach (var row in singles.Concat(occurrences))
             {
@@ -477,7 +499,8 @@ public sealed class ReminderService(
                 }
 
                 results.Add(new DueReminder(row.PublicId, row.UserPublicId,
-                    envelope.Decrypt(dek, row.BodyCiphertext, AssociatedData(row.UserId)), row.DueAtUtc));
+                    envelope.Decrypt(dek, row.BodyCiphertext, AssociatedData(row.UserId)), row.DueAtUtc,
+                    targets.GetValueOrDefault(row.ReminderId)));
             }
 
             foreach (var key in keyCache.Values)
@@ -624,6 +647,106 @@ public sealed class ReminderService(
           FROM reminders r
         """;
 
+    /// <summary>
+    /// The devices each of these reminders shows on, keyed by reminder.
+    ///
+    /// A reminder with no rows is absent from the dictionary, which is how "every
+    /// device" is represented all the way out to the client: null, not an empty
+    /// list. An empty list would mean "no PCs at all", which nothing can produce.
+    /// </summary>
+    private static async Task<IReadOnlyDictionary<long, IReadOnlyList<string>>> LoadTargetsAsync(
+        NpgsqlConnection connection, NpgsqlTransaction? tx, IReadOnlyList<long> reminderIds, CancellationToken ct)
+    {
+        if (reminderIds.Count == 0)
+        {
+            return new Dictionary<long, IReadOnlyList<string>>();
+        }
+
+        var rows = await connection.QueryAsync<TargetRow>(new CommandDefinition("""
+            SELECT rd.reminder_id AS ReminderId, d.public_id AS DeviceId
+              FROM reminder_devices rd
+              JOIN devices d ON d.id = rd.device_id
+             WHERE rd.reminder_id = ANY(@Ids)
+             ORDER BY rd.reminder_id, d.public_id
+            """, new { Ids = reminderIds.ToArray() }, tx, cancellationToken: ct));
+
+        return rows
+            .GroupBy(r => r.ReminderId)
+            .ToDictionary(
+                g => g.Key,
+                g => (IReadOnlyList<string>)g.Select(r => r.DeviceId.ToString()).ToList());
+    }
+
+    /// <summary>
+    /// Replaces a reminder's targets, rejecting any device that is not this
+    /// user's.
+    ///
+    /// Without the ownership check a reminder could name someone else's PC, and
+    /// the id would come straight back out on the reminder it was written to —
+    /// which is the same shape of defect as trusting a caller-supplied PCName
+    /// (S1-08).
+    /// </summary>
+    private static async Task ReplaceTargetsAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction tx,
+        long userId,
+        long reminderId,
+        IReadOnlyList<string>? deviceIds,
+        CancellationToken ct)
+    {
+        if (deviceIds is null)
+        {
+            return;
+        }
+
+        if (deviceIds.Count == 0)
+        {
+            throw AppException.Validation(
+                "Choose at least one PC, or send no list at all to show it on every PC.",
+                new ErrorDetail("deviceIds", "empty"));
+        }
+
+        var parsed = new List<Guid>(deviceIds.Count);
+        foreach (var id in deviceIds)
+        {
+            if (!Guid.TryParse(id, out var guid))
+            {
+                throw AppException.Validation("That is not a device id.", new ErrorDetail("deviceIds", "invalid"));
+            }
+
+            parsed.Add(guid);
+        }
+
+        var wanted = parsed.Distinct().ToArray();
+
+        var owned = (await connection.QueryAsync<long>(new CommandDefinition("""
+            SELECT id FROM devices
+             WHERE user_id = @UserId AND public_id = ANY(@PublicIds) AND revoked_at IS NULL
+            """, new { UserId = userId, PublicIds = wanted }, tx, cancellationToken: ct))).ToList();
+
+        if (owned.Count != wanted.Length)
+        {
+            throw AppException.Validation(
+                "One of those PCs is not on this account.", new ErrorDetail("deviceIds", "unknown"));
+        }
+
+        await connection.ExecuteAsync(new CommandDefinition(
+            "DELETE FROM reminder_devices WHERE reminder_id = @ReminderId",
+            new { ReminderId = reminderId }, tx, cancellationToken: ct));
+
+        await connection.ExecuteAsync(new CommandDefinition("""
+            INSERT INTO reminder_devices (reminder_id, device_id)
+            SELECT @ReminderId, unnest(@DeviceIds)
+            """, new { ReminderId = reminderId, DeviceIds = owned.ToArray() }, tx, cancellationToken: ct));
+    }
+
+    private sealed record TargetRow
+    {
+        public long ReminderId { get; init; }
+
+        public Guid DeviceId { get; init; }
+    }
+
     private static async Task<ReminderRow> LoadOwnedAsync(
         NpgsqlConnection connection, NpgsqlTransaction? tx, long userId, Guid publicId, CancellationToken ct)
     {
@@ -641,7 +764,8 @@ public sealed class ReminderService(
     /// </summary>
     internal const string UnreadableBody = "(this reminder could not be read)";
 
-    private ReminderResponse ToResponse(ReminderRow row, byte[]? dek)
+    private ReminderResponse ToResponse(
+        ReminderRow row, byte[]? dek, IReadOnlyDictionary<long, IReadOnlyList<string>>? targets = null)
     {
         // A row that will not decrypt must not take the list down with it.
         //
@@ -681,7 +805,8 @@ public sealed class ReminderService(
             row.IsCompleted,
             row.CompletedAt,
             row.CreatedAt,
-            row.UpdatedAt);
+            row.UpdatedAt,
+            targets?.GetValueOrDefault(row.Id));
     }
 
     private static void ValidateBody(string? body)
@@ -765,6 +890,7 @@ public sealed class ReminderService(
 
     private sealed record DueRow
     {
+        public long ReminderId { get; init; }
         public Guid PublicId { get; init; }
         public Guid UserPublicId { get; init; }
         public long UserId { get; init; }

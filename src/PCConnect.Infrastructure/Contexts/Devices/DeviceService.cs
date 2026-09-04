@@ -169,6 +169,98 @@ public sealed class DeviceService(
     }
 
     /// <summary>
+    /// Adds the PC the caller is sitting at, without a code being read off the
+    /// screen and typed into a phone.
+    ///
+    /// This is the same handshake as <see cref="ClaimPairingAsync"/> with the two
+    /// halves collapsed: the pairing is created already claimed, because the
+    /// person proving they own the account and the person at the keyboard are
+    /// the same request. Signing in on the PC with the account password is the
+    /// proof; the code was only ever a way to carry that proof from one device
+    /// to another.
+    ///
+    /// The ticket returned is a poll token and nothing more. It is redeemed by
+    /// <see cref="PollPairingAsync"/>, so the device secret still crosses the
+    /// wire exactly once, to the agent, and never through the app that asked for
+    /// the ticket (ADR-0013).
+    /// </summary>
+    public async Task<DeviceProvisionResponse> ProvisionAsync(
+        CallerIdentity caller, DeviceProvisionRequest request, RequestContext ctx, CancellationToken ct = default)
+    {
+        caller.Require(Scopes.DeviceManage);
+        await limiter.ConsumeAsync(RateBudgets.PairClaimPerUser, caller.UserId.ToString(System.Globalization.CultureInfo.InvariantCulture), ct);
+
+        var requestedName = (request.RequestedName ?? string.Empty).Trim();
+        if (requestedName.Length is 0 or > 128)
+        {
+            throw AppException.Validation("requestedName must be 1-128 characters.",
+                new ErrorDetail("requestedName", "length"));
+        }
+
+        var platform = NormalisePlatform(request.Platform);
+        var (ticket, ticketHash) = tokens.CreateOpaqueToken();
+
+        return await db.InTransactionAsync(async (connection, tx) =>
+        {
+            var displayName = await DeduplicateNameAsync(connection, tx, caller.UserId, requestedName, ct);
+
+            var deviceId = await connection.ExecuteScalarAsync<long>(new CommandDefinition("""
+                INSERT INTO devices (user_id, display_name, platform, agent_version)
+                VALUES (@UserId, @DisplayName, @Platform, @AgentVersion)
+                RETURNING id
+                """,
+                new
+                {
+                    UserId = caller.UserId,
+                    DisplayName = displayName,
+                    Platform = platform,
+                    AgentVersion = request.AgentVersion ?? string.Empty,
+                }, tx, cancellationToken: ct));
+
+            var secret = Base64Url(RandomNumberGenerator.GetBytes(32));
+            var (wrapped, kekId) = WrapSecret(secret);
+
+            await connection.ExecuteAsync(new CommandDefinition("""
+                INSERT INTO device_credentials (device_id, secret_hash) VALUES (@DeviceId, @Hash)
+                """, new { DeviceId = deviceId, Hash = hasher.Hash(secret) }, tx, cancellationToken: ct));
+
+            // code_hash is NOT NULL and unique, and this flow has no human code.
+            // A random value keeps the column meaningful — there is no code that
+            // could ever match it, so this pairing cannot be claimed a second
+            // time through the code path.
+            await connection.ExecuteAsync(new CommandDefinition("""
+                INSERT INTO device_pairings
+                    (code_hash, poll_token_hash, requested_name, platform, expires_at,
+                     claimed_by_user_id, device_id, claimed_at, secret_wrapped, secret_kek_id)
+                VALUES
+                    (@CodeHash, @TicketHash, @Name, @Platform, @ExpiresAt,
+                     @UserId, @DeviceId, now(), @Wrapped, @KekId)
+                """,
+                new
+                {
+                    CodeHash = RandomNumberGenerator.GetBytes(32),
+                    TicketHash = ticketHash,
+                    Name = displayName,
+                    Platform = platform,
+                    ExpiresAt = clock.UtcNow.Add(PairingTtl),
+                    UserId = caller.UserId,
+                    DeviceId = deviceId,
+                    Wrapped = wrapped,
+                    KekId = kekId,
+                }, tx, cancellationToken: ct));
+
+            var publicId = await connection.ExecuteScalarAsync<Guid>(new CommandDefinition(
+                "SELECT public_id FROM devices WHERE id = @Id", new { Id = deviceId }, tx, cancellationToken: ct));
+
+            await audit.WriteInTransactionAsync(connection, tx, caller.UserId,
+                SecurityEventNames.DeviceProvisioned, true, ctx, new { deviceId = publicId, displayName }, ct);
+
+            return new DeviceProvisionResponse(
+                publicId.ToString(), displayName, ticket, (int)PairingTtl.TotalSeconds);
+        }, ct);
+    }
+
+    /// <summary>
     /// Step 3, from the agent. The device secret crosses the wire exactly once,
     /// here, and the wrapped copy is destroyed as it is released.
     /// </summary>

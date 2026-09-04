@@ -179,6 +179,25 @@ public sealed record PairClaimResponse(string DeviceId, string DisplayName);
 
 public sealed record PairPollRequest(string PollToken);
 
+/// <summary>
+/// Adds the PC the caller is signed in on, with no code to read off a screen.
+/// The proof of ownership is the sign-in itself (ADR-0013).
+/// </summary>
+public sealed record DeviceProvisionRequest(
+    string RequestedName,
+    string Platform = "windows",
+    string AgentVersion = "");
+
+/// <summary>
+/// The ticket is a poll token: the agent redeems it through <c>pair/poll</c>, so
+/// the device secret goes to the agent and never through whatever asked for it.
+/// </summary>
+public sealed record DeviceProvisionResponse(
+    string DeviceId,
+    string DisplayName,
+    string ProvisioningTicket,
+    int ExpiresInSeconds);
+
 /// <summary>The device secret crosses the wire exactly once, here (03 §2.6).</summary>
 public sealed record PairPollResponse(string Status, string? DeviceId, string? DeviceSecret, string? DisplayName);
 
@@ -240,21 +259,34 @@ public sealed record ReminderResponse(
     bool IsCompleted,
     DateTimeOffset? CompletedAt,
     DateTimeOffset CreatedAt,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+    /// <summary>
+    /// The devices this reminder shows on, or null for every device on the
+    /// account. Null and "all of them" are the same thing, and are what every
+    /// reminder written before targeting existed means.
+    /// </summary>
+    IReadOnlyList<string>? DeviceIds = null);
 
 public sealed record CreateReminderRequest(
     string Body,
     DateTimeOffset DueAt,
     string? Timezone = null,
     string? Rrule = null,
-    DateTimeOffset? RecurrenceUntil = null);
+    DateTimeOffset? RecurrenceUntil = null,
+    /// <summary>Omit, or send null, for every device on the account.</summary>
+    IReadOnlyList<string>? DeviceIds = null);
 
 public sealed record UpdateReminderRequest(
     string? Body = null,
     DateTimeOffset? DueAt = null,
     string? Timezone = null,
     string? Rrule = null,
-    DateTimeOffset? RecurrenceUntil = null);
+    DateTimeOffset? RecurrenceUntil = null,
+    /// <summary>
+    /// Replaces the whole target set. Null leaves it alone; an empty list is
+    /// rejected, because "no PCs at all" is a reminder nobody would ever see.
+    /// </summary>
+    IReadOnlyList<string>? DeviceIds = null);
 
 public sealed record CompleteReminderRequest(bool Completed = true, DateTimeOffset? OccurrenceAt = null);
 
@@ -335,4 +367,15 @@ public sealed record DevicePresenceEvent(string DeviceId, bool IsOnline);
 
 public sealed record ReminderChangedEvent(string Type, ReminderResponse? Reminder, string ReminderId);
 
-public sealed record ReminderDueEvent(string ReminderId, string Body, DateTimeOffset DueAt);
+/// <summary>
+/// A reminder that has come due, pushed to every client on the account.
+///
+/// The fan-out is per user because a companion holds a user credential, not a
+/// device one, so <see cref="DeviceIds"/> is what lets each PC decide whether
+/// the reminder is for the screen it is sitting on. Null means every PC.
+/// </summary>
+public sealed record ReminderDueEvent(
+    string ReminderId,
+    string Body,
+    DateTimeOffset DueAt,
+    IReadOnlyList<string>? DeviceIds = null);

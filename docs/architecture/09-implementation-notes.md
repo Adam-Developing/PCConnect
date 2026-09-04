@@ -327,19 +327,39 @@ Icons Outlined geometry, generated once into a WPF `ResourceDictionary` and a se
 of Android vector drawables so a command is drawn with the same glyph on either
 client.
 
-Five things about that design could not be built exactly as drawn. Each is
-recorded here rather than approximated in the UI, because a control that lies
-about what it does is worse than one that is missing.
+Five things about that design could not be built from the UI alone. Four of them
+were then built properly, by changing the schema, the contract and the
+architecture rather than approximating them on screen — a control that lies about
+what it does is worse than one that is missing.
+[ADR-0013](adr/0013-device-provisioning-and-reminder-targets.md) records the
+decisions; this is what changed.
 
-| Drawn | Built | Why |
+| Drawn | Built | Where |
 |---|---|---|
-| A PC appears on the account by signing in on it | The pairing code stays, in the empty state and under the PC list | The device credential belongs to the agent, which runs as LocalSystem in session 0; the companion runs as the user and cannot write a credential the service can read ([ADR-0012](adr/0012-client-technology.md)). Making the code disappear would need the pairing handshake to move into the agent, not the UI. |
-| A reminder chooses which PCs it shows on | The picker appears only when discovery advertises `reminders.targets`; otherwise every reminder shows on every PC | `CreateReminderRequest` has no device targeting and `ReminderResponse` returns none, so today the server shows every reminder everywhere. The field is sent as an additive `deviceIds`, and the client reads it back through `Reminder.showsOn`, so the UI needs no change when the server grows the capability. |
-| A fingerprint confirms a destructive command *instead of* a password | The password is always asked for; the fingerprint is a local gate in front of it | Step-up is verified server-side and takes a password ([ADR-0011](adr/0011-risk-tiered-step-up.md)). Replacing it needs a passkey assertion the server accepts in place of one — the endpoints exist, the Android app does not register passkeys yet. |
+| A PC appears on the account by signing in on it | `POST /v2/devices/provision` mints a ticket for the signed-in user; the companion hands it to the agent over a second named pipe and the agent redeems it through `pair/poll`, so the device secret still only ever reaches the agent | `DeviceService.ProvisionAsync`, `ProvisioningBridge`, ADR-0013 §1 |
+| A reminder chooses which PCs it shows on | `reminder_devices`, `deviceIds` on create / update / response, and the same list on `ReminderDueEvent`; no rows means every PC, so nothing needed backfilling | [0008](../../DB/migrations/0008_reminder_targets.sql), `ReminderService`, ADR-0013 §2 |
+| A fingerprint confirms a destructive command *instead of* a password | The server always accepted a passkey for step-up; Android now registers one and asserts it, so the fingerprint *is* the confirmation and there is nothing to type | `PasskeyClient`, `AppViewModel.confirmPendingCommandWithPasskey`, ADR-0013 §3 |
 | "Snooze 10 min" on the full-screen reminder | Implemented, entirely on the PC showing it | There is no snooze on the wire. The window comes back in ten minutes; the reminder is untouched, so it still fires at its own time on every other screen, and a snooze does not survive restarting the app. |
 | A repeat with several times a day is one reminder | One series per time | `BYHOUR` and `BYMINUTE` multiply out: "10:30 and 15:45" in a single rule expands to four occurrences a day, not two. Each time is saved as its own series, which is what the words mean and what `RecurrenceExpander` already handles. The sheet says so. |
 
-Two further gaps are cosmetic and noted so nobody mistakes them for oversights.
+The last two are not gaps to close. A local snooze is the honest reading of a
+feature the wire has no concept of, and one series per time is what "twice a day"
+actually means in RFC 5545.
+
+**Three things a deployment must provide before the passkey path works**, none of
+which the app can arrange for itself:
+
+- `/.well-known/assetlinks.json` on the relying party, naming the Android
+  package and its signing-certificate fingerprint. Android refuses the ceremony
+  without it, which is exactly the phishing resistance being bought.
+- `WebAuthn:AllowedOrigins` must include `android:apk-key-hash:<base64url sha-256
+  of the signing certificate>`. The origin check is exact by design — a suffix
+  check would accept `evil-pcconnect.example` — and an Android origin is not a URL.
+- `WebAuthn:RelyingPartyId` set to the real domain rather than `localhost`.
+
+Until all three are in place the app falls back to the password, and says so.
+
+Two remaining gaps are cosmetic and noted so nobody mistakes them for oversights.
 The design is set in IBM Plex Sans and IBM Plex Mono; neither ships with Windows
 or Android, so both clients carry the design's scale on the platform faces
 (Segoe UI and Cascadia Mono; Roboto and its monospace). And the desktop calendars
@@ -349,6 +369,13 @@ The commands table in desktop Settings writes `allowedCommands` for this PC. Its
 second column, "asks for password", is deliberately read-only: which commands
 require a step-up is the server's policy, and a switch that could not turn the
 requirement off would be a lie about what it does.
+
+**Reminder targeting is a filter, not an authorisation boundary.** The server
+decides which clients are *told* about a due reminder — the fan-out is per
+account, because a companion holds a user credential and there is no per-device
+connection to address — and each PC decides whether to *show* it. Reminder bodies
+are already readable by every client on the account, so this leaks nothing new,
+but it should not be mistaken for a permission.
 
 ---
 

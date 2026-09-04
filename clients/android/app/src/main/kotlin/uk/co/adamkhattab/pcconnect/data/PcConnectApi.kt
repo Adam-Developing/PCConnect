@@ -131,7 +131,29 @@ class PcConnectApi(
     suspend fun beginStepUp(): StepUpChallenge = post("/v2/auth/step-up/start", Unit)
 
     suspend fun verifyStepUp(challengeId: String, password: String): StepUpToken =
-        post("/v2/auth/step-up/verify", StepUpVerifyRequest(challengeId, "password", password))
+        post(
+            "/v2/auth/step-up/verify",
+            StepUpVerifyRequest(challengeId, StepUpMethods.PASSWORD, password = password),
+        )
+
+    /** Confirms a destructive command with a passkey instead of a password. */
+    suspend fun verifyStepUpWithPasskey(challengeId: String, assertion: PasskeyAssertionRequest): StepUpToken =
+        post(
+            "/v2/auth/step-up/verify",
+            StepUpVerifyRequest(challengeId, StepUpMethods.PASSKEY, passkey = assertion),
+        )
+
+    // ── passkeys ─────────────────────────────────────────────────────────────
+
+    suspend fun passkeys(): List<PasskeySummary> = get<Page<PasskeySummary>>("/v2/auth/passkeys").items
+
+    suspend fun beginPasskeyRegistration(): PasskeyRegistrationOptions =
+        post("/v2/auth/passkeys/register/start", Unit)
+
+    suspend fun finishPasskeyRegistration(request: PasskeyRegistrationRequest): PasskeySummary =
+        post("/v2/auth/passkeys/register/finish", request)
+
+    suspend fun deletePasskey(passkeyId: String) = delete("/v2/auth/passkeys/$passkeyId")
 
     // ── devices, commands, reminders ─────────────────────────────────────────
 

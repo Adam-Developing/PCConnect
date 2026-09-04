@@ -53,6 +53,7 @@ fun SettingsScreen(
     state: AppState,
     requireBiometric: Boolean,
     onRequireBiometric: (Boolean) -> Unit,
+    onSetUpPasskey: () -> Unit,
     baseUrl: String,
     onBaseUrl: (String) -> Unit,
     onChangePassword: (String, String) -> Unit,
@@ -71,6 +72,8 @@ fun SettingsScreen(
             SecurityCard(
                 requireBiometric = requireBiometric,
                 onRequireBiometric = onRequireBiometric,
+                passkeyRegistered = state.passkeyRegistered,
+                onSetUpPasskey = onSetUpPasskey,
                 onChangePassword = { changingPassword = true },
             )
         }
@@ -160,9 +163,27 @@ internal fun initialsOf(name: String): String =
 private fun SecurityCard(
     requireBiometric: Boolean,
     onRequireBiometric: (Boolean) -> Unit,
+    passkeyRegistered: Boolean,
+    onSetUpPasskey: () -> Unit,
     onChangePassword: () -> Unit,
 ) {
     PcCard(Modifier.fillMaxWidth()) {
+        // With a passkey the fingerprint *is* the confirmation: the
+        // authenticator checks it and the server verifies the signature, so
+        // there is no password to type (ADR-0011).
+        SettingRow(
+            icon = PcIcons.Fingerprint,
+            title = if (passkeyRegistered) "Fingerprint confirmation is on" else "Confirm with a fingerprint",
+            subtitle = if (passkeyRegistered) {
+                "Destructive commands ask this phone to confirm, instead of asking you to type your password."
+            } else {
+                "Set up a passkey so destructive commands ask for your fingerprint instead of your password."
+            },
+            onClick = onSetUpPasskey,
+        )
+
+        RowDivider(startIndent = 52.dp)
+
         Row(
             Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,

@@ -57,6 +57,15 @@ public static class DeviceEndpoints
             .WithName("claimPairing")
             .WithSummary("User-initiated. Confirms the code and creates the device.");
 
+        group.MapPost("/provision", async (
+            DeviceProvisionRequest request, DeviceService devices, HttpContext http, CancellationToken ct) =>
+            Results.Ok(await devices.ProvisionAsync(await http.CallerAsync(ct), request, http.RequestContext(), ct)))
+            .RequireAuthorization()
+            .WithName("provisionDevice")
+            .WithSummary(
+                "Adds the PC the caller is signed in on. Returns a ticket the agent redeems through " +
+                "pair/poll, so the device secret reaches the agent and nothing else.");
+
         group.MapPost("/pair/poll", async (
             PairPollRequest request, DeviceService devices, HttpContext http, CancellationToken ct) =>
             Results.Ok(await devices.PollPairingAsync(request, http.RequestContext(), ct)))

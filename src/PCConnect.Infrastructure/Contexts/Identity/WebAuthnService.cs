@@ -398,7 +398,14 @@ public sealed class WebAuthnService(
                 "The passkey response did not answer the challenge that was issued.");
         }
 
-        if (!_options.AllowedOrigins.Contains(data.Origin, StringComparer.Ordinal))
+        // Blank entries are dropped rather than compared. Deployment
+        // configuration supplies this list positionally — an Android origin that
+        // has not been filled in yet arrives as an empty string — and an empty
+        // allowed origin is a hole nobody would notice was open.
+        if (string.IsNullOrWhiteSpace(data.Origin) ||
+            !_options.AllowedOrigins
+                .Where(origin => !string.IsNullOrWhiteSpace(origin))
+                .Contains(data.Origin, StringComparer.Ordinal))
         {
             throw AppException.Unauthorized(ErrorCodes.PasskeyVerificationFailed,
                 "The passkey response came from an origin this server does not accept.");

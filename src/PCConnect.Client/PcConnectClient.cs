@@ -244,6 +244,15 @@ public sealed class PcConnectClient(HttpClient http, PcConnectClientOptions opti
         SendAsync<PairPollResponse>(HttpMethod.Post, "/v2/devices/pair/poll",
             new PairPollRequest(pollToken), authenticated: false, ct);
 
+    /// <summary>
+    /// Adds the PC this app is running on to the signed-in account, and returns
+    /// the ticket the agent redeems for its own credential (ADR-0013).
+    /// </summary>
+    public Task<DeviceProvisionResponse?> ProvisionDeviceAsync(
+        string requestedName, string agentVersion = "", CancellationToken ct = default) =>
+        SendAsync<DeviceProvisionResponse>(HttpMethod.Post, "/v2/devices/provision",
+            new DeviceProvisionRequest(requestedName, "windows", agentVersion), authenticated: true, ct);
+
     public Task<PairClaimResponse?> ClaimPairingAsync(string code, string? displayName = null, CancellationToken ct = default) =>
         SendAsync<PairClaimResponse>(HttpMethod.Post, "/v2/devices/pair/claim",
             new PairClaimRequest(code, displayName), authenticated: true, ct);

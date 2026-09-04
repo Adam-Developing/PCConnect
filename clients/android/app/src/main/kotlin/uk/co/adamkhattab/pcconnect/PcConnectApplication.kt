@@ -1,6 +1,7 @@
 package uk.co.adamkhattab.pcconnect
 
 import android.app.Application
+import uk.co.adamkhattab.pcconnect.data.PasskeyClient
 import uk.co.adamkhattab.pcconnect.data.PcConnectApi
 import uk.co.adamkhattab.pcconnect.data.TokenStore
 
@@ -17,10 +18,14 @@ class PcConnectApplication : Application() {
     lateinit var api: PcConnectApi
         private set
 
+    lateinit var passkeys: PasskeyClient
+        private set
+
     override fun onCreate() {
         super.onCreate()
 
         tokenStore = TokenStore(this)
+        passkeys = PasskeyClient(this)
         api = PcConnectApi(
             tokens = tokenStore,
             // Build-time default, overridable at runtime and remembered. The app

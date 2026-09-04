@@ -42,14 +42,31 @@ public sealed class AgentWorker(
     CommandExecutor executor,
     ITokenStore tokens,
     IOptions<AgentOptions> options,
+    ILogger<ProvisioningPipeServer> provisioningLogger,
     ILogger<AgentWorker> logger) : BackgroundService
 {
     private readonly AgentOptions _options = options.Value;
+
+    /// <summary>Completed when the companion provisions this PC mid-pairing.</summary>
+    private readonly TaskCompletionSource _pairedNow =
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
+
     private string? _deviceId;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         logger.LogInformation("PCConnect agent {Version} starting for {Machine}", _options.Version, _options.DisplayName);
+
+        // Started before pairing, because it is one of the two ways pairing can
+        // happen: the companion signs in and hands this service a ticket
+        // (ADR-0013). The other is the code below, for a PC nobody is signed in
+        // on.
+        var provisioning = new ProvisioningPipeServer(
+            provisioningLogger,
+            () => _deviceId,
+            RedeemProvisioningTicketAsync);
+
+        _ = Task.Run(() => provisioning.RunAsync(stoppingToken), stoppingToken);
 
         await WaitForPairingAsync(stoppingToken);
 
@@ -109,6 +126,37 @@ public sealed class AgentWorker(
     }
 
     /// <summary>
+    /// Redeems a ticket the companion obtained for the signed-in user.
+    ///
+    /// This is the same collection step the pairing code ends with — the ticket
+    /// is a poll token — so the device secret is written to Credential Manager
+    /// by this process and crosses the wire exactly once, to it (ADR-0013).
+    /// </summary>
+    private async Task<string?> RedeemProvisioningTicketAsync(string ticket, CancellationToken ct)
+    {
+        var poll = await api.PollPairingAsync(ticket, ct);
+
+        if (poll?.Status != "paired" || poll.DeviceId is null || poll.DeviceSecret is null)
+        {
+            logger.LogWarning("A provisioning ticket was not accepted ({Status})", poll?.Status ?? "no response");
+            return null;
+        }
+
+        await tokens.WriteAsync(new StoredTokens(null, poll.DeviceId, poll.DeviceSecret), ct);
+        await api.ExchangeDeviceSecretAsync(poll.DeviceId, poll.DeviceSecret, Environment.OSVersion.VersionString, ct);
+
+        _deviceId = poll.DeviceId;
+        logger.LogInformation("This PC was added to the account as {DisplayName}", poll.DisplayName);
+
+        // The realtime connection was never started, because the agent was
+        // unpaired when it booted. Waking the loop is what makes the PC usable
+        // straight away rather than after the next restart.
+        _pairedNow.TrySetResult();
+
+        return poll.DeviceId;
+    }
+
+    /// <summary>
     /// Pairing: the agent asks for a code, shows it, and waits for the account
     /// owner to confirm it in the app. Nothing about this machine's name grants
     /// it anything — that is the whole of C-2.
@@ -147,6 +195,13 @@ public sealed class AgentWorker(
 
         while (!ct.IsCancellationRequested)
         {
+            // The companion may have provisioned this PC while the code was on
+            // screen. Whoever gets there first wins; the other route stops.
+            if (_pairedNow.Task.IsCompleted)
+            {
+                return;
+            }
+
             try
             {
                 var start = await api.StartPairingAsync(_options.DisplayName, ct);
@@ -168,6 +223,11 @@ public sealed class AgentWorker(
                 while (DateTimeOffset.UtcNow < deadline && !ct.IsCancellationRequested)
                 {
                     await Task.Delay(TimeSpan.FromSeconds(3), ct);
+
+                    if (_pairedNow.Task.IsCompleted)
+                    {
+                        return;
+                    }
 
                     var poll = await api.PollPairingAsync(start.PollToken, ct);
 

@@ -6,6 +6,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.Extensions.Logging;
 using PCConnect.Client;
+using PCConnect.Agent.Execution;
 using PCConnect.Companion.Services;
 using PCConnect.Core.Contracts;
 using PCConnect.Core.Domain;
@@ -16,6 +17,7 @@ public partial class ShellViewModel(
     PcConnectClient api,
     PcConnectRealtimeClient realtime,
     CompanionSettings settings,
+    ProvisioningPipeClient provisioning,
     DevicesViewModel devices,
     RemindersViewModel reminders,
     AccountViewModel account,
@@ -85,6 +87,10 @@ public partial class ShellViewModel(
         try
         {
             var discovery = await api.GetDiscoveryAsync();
+
+            // The reminder sheet only offers "Choose PCs" when the server can
+            // actually honour it (04 §2).
+            reminders.IsTargetable = discovery?.Capabilities.Contains("reminders.targets") ?? false;
 
             if (discovery is not null &&
                 PcConnectClient.IsBelowMinimum(discovery, "desktop", api.Options.ClientVersion))
@@ -181,8 +187,9 @@ public partial class ShellViewModel(
         await devices.LoadAsync();
         await reminders.LoadAsync();
 
-        ResolveThisPc();
+        await ResolveThisPcAsync();
         RebuildWeek();
+        reminders.RefreshTargets();
 
         // Subscribed before connecting, so the first transition is not missed.
         realtime.ConnectionStateChanged += connected =>
@@ -195,11 +202,12 @@ public partial class ShellViewModel(
         {
             await devices.LoadAsync();
             await reminders.LoadAsync();
-            Application.Current.Dispatcher.Invoke(() =>
+            await Application.Current.Dispatcher.InvokeAsync(async () =>
             {
-                ResolveThisPc();
+                await ResolveThisPcAsync();
                 RebuildWeek();
-            });
+                reminders.RefreshTargets();
+            }).Task;
         };
 
         try
@@ -234,17 +242,35 @@ public partial class ShellViewModel(
     }
 
     /// <summary>
-    /// Works out which paired device is this machine.
+    /// Works out which device this machine is, and adds it to the account if it
+    /// is not on one yet.
     ///
-    /// The companion holds a user credential, not a device one — the service in
-    /// session 0 owns the device identity — so it cannot simply ask. The agent
-    /// registers under <see cref="Environment.MachineName"/> by default, so
-    /// that is the first guess; the answer is then remembered, because renaming
-    /// a PC must not turn it into a different PC.
+    /// The agent is asked rather than guessed at: it is the process that holds
+    /// the device credential, so it is the only thing that actually knows. If it
+    /// is running and unclaimed, signing in here is the proof of ownership that
+    /// a typed pairing code used to carry, and the PC is added now (ADR-0013).
+    ///
+    /// Every step degrades to the old behaviour: no agent, or a refused ticket,
+    /// leaves the pairing code working exactly as before.
     /// </summary>
-    public void ResolveThisPc()
+    public async Task ResolveThisPcAsync()
     {
+        var agent = await provisioning.WhoAmIAsync();
+
+        if (agent.NeedsProvisioning)
+        {
+            await ProvisionThisPcAsync();
+            agent = await provisioning.WhoAmIAsync();
+        }
+
+        if (agent.DeviceId is { Length: > 0 } identified)
+        {
+            settings.ThisDeviceId = identified;
+        }
+
         ThisPc = devices.Items.FirstOrDefault(d => d.Id == settings.ThisDeviceId)
+            // Only as a fallback, and only for a PC paired before provisioning
+            // existed: a name is a label, never an identity (S1-08).
             ?? devices.Items.FirstOrDefault(d =>
                 string.Equals(d.DisplayName, Environment.MachineName, StringComparison.OrdinalIgnoreCase));
 
@@ -256,6 +282,39 @@ public partial class ShellViewModel(
         devices.SetThisPc(ThisPc?.Id);
         appSettings.Attach(ThisPc);
         OnPropertyChanged(nameof(ThisPcName));
+    }
+
+    private async Task ProvisionThisPcAsync()
+    {
+        try
+        {
+            var provisioned = await api.ProvisionDeviceAsync(Environment.MachineName, api.Options.ClientVersion);
+            if (provisioned is null)
+            {
+                return;
+            }
+
+            // The ticket is all the companion ever holds. The agent redeems it
+            // and keeps the device secret, which this process must never see.
+            var deviceId = await provisioning.ProvisionAsync(provisioned.ProvisioningTicket);
+
+            if (deviceId is null)
+            {
+                logger.LogWarning("This PC was registered but the agent did not collect its credential");
+                return;
+            }
+
+            logger.LogInformation("This PC was added to the account as {DisplayName}", provisioned.DisplayName);
+            StatusMessage = $"This PC was added as {provisioned.DisplayName}.";
+
+            await devices.LoadAsync();
+        }
+        catch (Exception ex) when (ex is PcConnectApiException or HttpRequestException)
+        {
+            // The pairing code still works, so this is a note rather than a
+            // failure the person has to act on.
+            logger.LogWarning(ex, "Could not add this PC automatically");
+        }
     }
 
     /// <summary>The seven-day strip on "This PC": what will appear on this screen.</summary>

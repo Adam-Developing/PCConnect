@@ -944,14 +944,56 @@
                       </Border>
 
                       <Border Style="{StaticResource Note}" Margin="0,12,0,0">
-                        <StackPanel Orientation="Horizontal">
+                        <DockPanel>
                           <Path Data="{StaticResource Icon.EventRepeat}" Fill="{StaticResource InkFaint}"
-                                Width="16" Height="16" Stretch="Uniform" VerticalAlignment="Top" />
+                                Width="16" Height="16" Stretch="Uniform" DockPanel.Dock="Left"
+                                VerticalAlignment="Top" />
                           <TextBlock Text="{Binding ScheduleSummary}" Style="{StaticResource Subtle}"
-                                     FontSize="12.5" Margin="8,0,0,0" TextWrapping="Wrap" LineHeight="18"
-                                     Width="215" />
-                        </StackPanel>
+                                     FontSize="12.5" Margin="8,0,0,0" TextWrapping="Wrap" LineHeight="18" />
+                        </DockPanel>
                       </Border>
+
+                      <!-- Only offered when the server can honour it. -->
+                      <StackPanel Margin="0,14,0,0"
+                                  Visibility="{Binding IsTargetable, Converter={StaticResource BoolToVis}}">
+                        <TextBlock Text="Show on" Style="{StaticResource FieldLabel}" />
+
+                        <RadioButton GroupName="Scope" Content="All PCs" Margin="0,2"
+                                     IsChecked="{Binding ShowOnAllPcs, Mode=OneWay}"
+                                     Command="{Binding ShowOnAllCommand}" />
+                        <TextBlock Style="{StaticResource Caption}" Margin="28,0,0,4" TextWrapping="Wrap"
+                                   Text="Including PCs you add later."
+                                   Visibility="{Binding ShowOnAllPcs, Converter={StaticResource BoolToVis}}" />
+
+                        <RadioButton GroupName="Scope" Content="Choose PCs" Margin="0,2"
+                                     IsChecked="{Binding ShowOnChosenPcs, Mode=OneWay}"
+                                     Command="{Binding ShowOnChosenCommand}" />
+
+                        <Border BorderBrush="{StaticResource Border}" BorderThickness="1" CornerRadius="8"
+                                Margin="28,4,0,0"
+                                Visibility="{Binding ShowOnChosenPcs, Converter={StaticResource BoolToVis}}">
+                          <ItemsControl ItemsSource="{Binding Targets}">
+                            <ItemsControl.ItemTemplate>
+                              <DataTemplate>
+                                <Button Command="{Binding DataContext.ToggleTargetCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                        CommandParameter="{Binding}" BorderThickness="0"
+                                        Background="Transparent" Padding="10,7"
+                                        HorizontalContentAlignment="Stretch">
+                                  <DockPanel>
+                                    <CheckBox IsChecked="{Binding IsChosen, Mode=OneWay}" IsHitTestVisible="False"
+                                              DockPanel.Dock="Left" VerticalAlignment="Center" />
+                                    <TextBlock Text="{Binding Tag}" Style="{StaticResource Caption}"
+                                               DockPanel.Dock="Right" VerticalAlignment="Center" />
+                                    <TextBlock Text="{Binding Name}" Style="{StaticResource Subtle}"
+                                               Margin="10,0" VerticalAlignment="Center"
+                                               TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
+                                  </DockPanel>
+                                </Button>
+                              </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                          </ItemsControl>
+                        </Border>
+                      </StackPanel>
                     </StackPanel>
                   </ScrollViewer>
                 </DockPanel>

@@ -23,6 +23,7 @@ public static class SecurityEventNames
     public const string DevicePairingStarted = "device.pairing_started";
     public const string DevicePairingClaimed = "device.pairing_claimed";
     public const string DevicePairingCollected = "device.pairing_collected";
+    public const string DeviceProvisioned = "device.provisioned";
     public const string DeviceRevoked = "device.revoked";
     public const string DeviceTokenIssued = "device.token_issued";
     public const string LegacyAutoPair = "legacy.auto_pair";

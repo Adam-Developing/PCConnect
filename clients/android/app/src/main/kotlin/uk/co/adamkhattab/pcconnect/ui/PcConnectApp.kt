@@ -33,6 +33,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
@@ -57,6 +58,8 @@ fun PcConnectApp(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
+    // The activity, which is what Credential Manager needs to raise its sheet.
+    val context = LocalContext.current
 
     var tab by rememberSaveable { mutableStateOf(Tab.Pcs) }
     var openDeviceId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -165,6 +168,7 @@ fun PcConnectApp(
                     state = state,
                     requireBiometric = viewModel.requireBiometric,
                     onRequireBiometric = { viewModel.requireBiometric = it },
+                    onSetUpPasskey = { viewModel.registerPasskey(context) },
                     baseUrl = viewModel.baseUrl,
                     onBaseUrl = { viewModel.baseUrl = it },
                     onChangePassword = viewModel::changePassword,
@@ -191,8 +195,13 @@ fun PcConnectApp(
         ConfirmCommandDialog(
             pending = pending,
             biometricGate = viewModel.requireBiometric && biometricAvailable,
+            // A passkey replaces the password outright: the fingerprint is
+            // checked by the authenticator and the server verifies the
+            // signature, so there is nothing left to type (ADR-0011).
+            passkeyAvailable = state.passkeyRegistered,
             error = state.stepUpError,
             busy = state.isLoading,
+            onConfirmWithPasskey = { viewModel.confirmPendingCommandWithPasskey(context) },
             onDismiss = viewModel::cancelPendingCommand,
             onConfirm = { password ->
                 // The biometric check is a local gate in front of the server's

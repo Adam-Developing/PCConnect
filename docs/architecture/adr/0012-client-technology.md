@@ -1,6 +1,9 @@
 # ADR-0012 — Client technology: .NET service + WPF companion, Kotlin on Android
 
-**Status:** Accepted
+**Status:** Accepted, amended by
+[ADR-0013](0013-device-provisioning-and-reminder-targets.md) — a second named pipe
+carries a provisioning ticket from the companion to the agent, which this ADR's
+"two verbs and nothing else" did not allow for. The session pipe is unchanged.
 **Date:** 2026-09-02
 **Supersedes:** [ADR-0006](0006-desktop-client-technology.md) (Go + Wails),
 [ADR-0007](0007-mobile-client-technology.md) (Flutter), and [06 §2.3](../06-client-architecture.md)'s

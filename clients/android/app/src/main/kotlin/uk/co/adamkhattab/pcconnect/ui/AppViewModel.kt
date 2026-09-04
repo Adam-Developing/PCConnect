@@ -15,10 +15,12 @@ import uk.co.adamkhattab.pcconnect.data.CommandTypes
 import uk.co.adamkhattab.pcconnect.data.CreateReminderRequest
 import uk.co.adamkhattab.pcconnect.data.Device
 import uk.co.adamkhattab.pcconnect.data.ErrorCodes
+import uk.co.adamkhattab.pcconnect.data.PasskeyClient
 import uk.co.adamkhattab.pcconnect.data.PcConnectApi
 import uk.co.adamkhattab.pcconnect.data.Profile
 import uk.co.adamkhattab.pcconnect.data.RealtimeClient
 import uk.co.adamkhattab.pcconnect.data.RegisterRequest
+import uk.co.adamkhattab.pcconnect.data.StepUpMethods
 import uk.co.adamkhattab.pcconnect.data.Reminder
 import uk.co.adamkhattab.pcconnect.data.TokenStore
 import java.time.Instant
@@ -48,6 +50,11 @@ data class AppState(
     /** Set when a step-up was refused, so the dialog can stay open and say why. */
     val stepUpError: String? = null,
     /**
+     * Whether this phone can confirm a destructive command with a fingerprint
+     * rather than a typed password. True once a passkey is registered here.
+     */
+    val passkeyRegistered: Boolean = false,
+    /**
      * Whether the server understands a reminder that names its PCs. The picker
      * only appears when it does; otherwise every reminder shows everywhere,
      * which is what the server actually does.
@@ -58,6 +65,7 @@ data class AppState(
 class AppViewModel(
     private val api: PcConnectApi,
     private val tokens: TokenStore,
+    private val passkeys: PasskeyClient,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(AppState())
@@ -68,6 +76,8 @@ class AppViewModel(
     fun device(deviceId: String?): Device? = _state.value.devices.firstOrNull { it.id == deviceId }
 
     init {
+        _state.update { it.copy(passkeyRegistered = tokens.hasPasskey) }
+
         viewModelScope.launch {
             checkVersion()
             if (api.isSignedIn && api.accessToken() != null) onSignedIn()
@@ -274,6 +284,70 @@ class AppViewModel(
     }
 
     fun cancelPendingCommand() = _state.update { it.copy(pendingCommand = null, stepUpError = null) }
+
+    /**
+     * Registers a passkey for this account, so a destructive command can be
+     * confirmed with a fingerprint instead of a typed password (ADR-0011).
+     *
+     * The prompt is the platform's; this app never sees the biometric, only
+     * whether the authenticator signed.
+     */
+    fun registerPasskey(activityContext: android.content.Context) = launchWithMessage {
+        val options = api.beginPasskeyRegistration()
+        val created = passkeys.register(activityContext, options)
+
+        if (created == null) {
+            return@launchWithMessage
+        }
+
+        api.finishPasskeyRegistration(created)
+        tokens.hasPasskey = true
+
+        AppLog.i(TAG, "Registered a passkey for this phone")
+        _state.update { it.copy(passkeyRegistered = true, message = "Fingerprint confirmation is set up.") }
+    }
+
+    /**
+     * Confirms the pending command with a passkey.
+     *
+     * The server is asked first what it will accept: if it does not offer the
+     * passkey method for this account, the dialog falls back to the password
+     * rather than failing, because the passkey may have been removed elsewhere.
+     */
+    fun confirmPendingCommandWithPasskey(activityContext: android.content.Context) {
+        val pending = _state.value.pendingCommand ?: return
+
+        viewModelScope.launch {
+            _state.update { it.copy(isLoading = true, stepUpError = null, message = null) }
+
+            try {
+                val challenge = api.beginStepUp()
+                val options = challenge.passkey
+
+                if (options == null || StepUpMethods.PASSKEY !in challenge.methods) {
+                    tokens.hasPasskey = false
+                    _state.update {
+                        it.copy(
+                            passkeyRegistered = false,
+                            stepUpError = "This account has no passkey any more. Use your password.",
+                        )
+                    }
+                    return@launch
+                }
+
+                val assertion = passkeys.assert(activityContext, options) ?: return@launch
+                val token = api.verifyStepUpWithPasskey(challenge.challengeId, assertion)
+
+                _state.update { it.copy(pendingCommand = null) }
+                sendCommandNow(pending.deviceId, pending.type, token.stepUpToken)
+            } catch (failure: ApiException) {
+                AppLog.w(TAG, "${failure.code} (${failure.statusCode}): ${failure.message}")
+                _state.update { it.copy(stepUpError = failure.message) }
+            } finally {
+                _state.update { it.copy(isLoading = false) }
+            }
+        }
+    }
 
     /**
      * Confirms a destructive command.
