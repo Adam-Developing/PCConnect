@@ -1,0 +1,43 @@
+# gitleaks configuration.
+#
+# Added as a blocking CI check and a pre-commit hook so that S1-01 — a live
+# database password sitting in a working tree, untracked but not gitignored —
+# cannot recur (03 §7, 07 Phase 0.8).
+
+title = "PCConnect"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "pcconnect-php-db-config"
+description = "The v1 database credentials file"
+regex = '''\$(db_?)?(pass|password|user|host)\s*=\s*["'][^"']+["']'''
+path = '''.*\.php$'''
+
+[[rules]]
+id = "pcconnect-kek"
+description = "A base64 32-byte key that looks like a KEK or a signing key"
+regex = '''(?i)(kek|encryption[_-]?key|signing[_-]?key)\s*[:=]\s*["']?[A-Za-z0-9+/]{43}=["']?'''
+
+[[rules]]
+id = "pcconnect-private-key"
+description = "A PEM private key"
+regex = '''-----BEGIN (EC|RSA|OPENSSH|PGP|DSA|ENCRYPTED)? ?PRIVATE KEY-----'''
+
+[allowlist]
+description = "Documentation, examples and test fixtures"
+paths = [
+  '''deploy/\.env\.example''',
+  '''docs/.*\.md$''',
+  '''pcconnect-a(rchitecture|udit)\.html$''',
+  '''tests/.*''',
+  '''db/legacy/legacy_baseline_mysql\.sql$''',
+]
+regexes = [
+  # The example file documents the shape of every secret and holds none.
+  '''(POSTGRES_PASSWORD|KEK_CURRENT|KEK_PREVIOUS|JWT_PRIVATE_KEY_PEM|BACKUP_AGE_RECIPIENT)=$''',
+  # Test fixtures say what they are.
+  '''(ci|test)-only-not-a-secret''',
+  '''test-only-not-a-secret''',
+]

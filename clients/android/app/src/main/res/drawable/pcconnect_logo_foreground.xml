@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The mark inset into the adaptive icon's safe zone. Its own background is the
+     same navy as the layer behind it, so the inset edge is invisible. -->
+<inset xmlns:android="http://schemas.android.com/apk/res/android"
+    android:drawable="@drawable/pcconnect_logo"
+    android:inset="28dp" />

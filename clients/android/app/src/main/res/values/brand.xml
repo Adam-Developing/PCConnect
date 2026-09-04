@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <!-- Sampled from the product mark. The v1 app used the same navy as its
+       colorPrimary, so the icon and the installed app agree. -->
+  <color name="brand_navy">#FF03253B</color>
+  <!-- PcColors.Bg. Kept here too because a window background cannot read Compose. -->
+  <color name="app_background">#FFF8FAFC</color>
+</resources>

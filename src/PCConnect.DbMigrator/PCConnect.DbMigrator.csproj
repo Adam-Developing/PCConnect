@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>PCConnect.DbMigrator</RootNamespace>
+    <AssemblyName>pcconnect-migrate</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\PCConnect.Core\PCConnect.Core.csproj" />
+    <!-- For the envelope format only: a rewrap has to produce exactly the
+         wrapper the services read, and duplicating that here would be a second
+         implementation of the one thing that must not drift. -->
+    <ProjectReference Include="..\PCConnect.Infrastructure\PCConnect.Infrastructure.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Npgsql" />
+    <PackageReference Include="Dapper" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\db\migrations\*.sql" LinkBase="Migrations" />
+    <EmbeddedResource Include="..\..\db\verification\*.sql" LinkBase="Verification" />
+  </ItemGroup>
+</Project>

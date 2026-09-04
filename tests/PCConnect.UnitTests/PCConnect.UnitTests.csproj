@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <OutputType>Exe</OutputType>
+    <NoWarn>$(NoWarn);xUnit1051</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\PCConnect.Core\PCConnect.Core.csproj" />
+    <ProjectReference Include="..\..\src\PCConnect.Infrastructure\PCConnect.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\PCConnect.LegacyMigrator\PCConnect.LegacyMigrator.csproj" />
+    <ProjectReference Include="..\..\clients\windows\PCConnect.Agent\PCConnect.Agent.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="Shouldly" />
+    <PackageReference Include="coverlet.collector" />
+  </ItemGroup>
+</Project>

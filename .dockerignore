@@ -1,0 +1,29 @@
+# The build context is the repository root, so everything that is not source
+# for the API or the worker is excluded — including the legacy PII dump, which
+# must never enter an image layer (S1-14).
+**/bin
+**/obj
+**/node_modules
+**/.gradle
+**/build
+db/*.sql
+db/dumps
+DB/*.sql
+.git
+.github
+.idea
+.vs
+clients/android
+clients/windows
+App
+PCClient
+api
+tests
+docs
+deploy/env
+**/.env
+**/.env.*
+**/*.jks
+**/*.keystore
+**/*.pfx
+**/*.pem

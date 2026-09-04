@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>pcconnect-import</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\PCConnect.Core\PCConnect.Core.csproj" />
+    <ProjectReference Include="..\PCConnect.Infrastructure\PCConnect.Infrastructure.csproj" />
+    <ProjectReference Include="..\PCConnect.DbMigrator\PCConnect.DbMigrator.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="MySqlConnector" />
+    <PackageReference Include="Npgsql" />
+    <PackageReference Include="Dapper" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="PCConnect.UnitTests" />
+  </ItemGroup>
+</Project>

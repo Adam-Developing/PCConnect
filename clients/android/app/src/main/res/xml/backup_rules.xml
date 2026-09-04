@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Nothing this app stores may leave the device in a backup: the refresh token is
+  encrypted under a hardware-backed key that does not travel, so a restored copy
+  would be useless, and the encrypted blob itself is a credential (03 §2.1).
+-->
+<full-backup-content>
+  <exclude domain="sharedpref" path="." />
+  <exclude domain="file" path="." />
+</full-backup-content>

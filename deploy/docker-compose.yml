@@ -1,0 +1,218 @@
+# =============================================================================
+# PCConnect v2 — the whole deployment, on one VM.
+#
+# Five services: caddy, api, worker, postgres, valkey (08 §1).
+#
+# The single most important line in this file is that postgres and valkey have
+# no `ports:` mapping. Today the production database is reachable at a public IP
+# (S1-02); here it exists only on the compose-internal network, so reaching it
+# means already being inside the VM.
+#
+#   docker compose --env-file .env up -d
+#
+# Secrets come from `.env`, which is gitignored. `.env.example` documents every
+# variable; `deploy/env/README.md` explains how they are produced and rotated.
+# =============================================================================
+
+name: pcconnect
+
+services:
+  caddy:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    # The only published ports in the entire stack.
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    environment:
+      PCCONNECT_DOMAIN: ${PCCONNECT_DOMAIN:?set PCCONNECT_DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL}
+    depends_on:
+      api:
+        condition: service_healthy
+    networks: [edge, internal]
+
+  api:
+    image: ${PCCONNECT_IMAGE_API:-pcconnect/api:latest}
+    build:
+      context: ..
+      dockerfile: deploy/api.Dockerfile
+    restart: unless-stopped
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:8080
+      PCCONNECT_DATABASE__CONNECTIONSTRING: >-
+        Host=postgres;Port=5432;Database=pcconnect;Username=pcconnect;Password=${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD};
+        Maximum Pool Size=20;Include Error Detail=false
+      PCCONNECT_DATABASE__MIGRATEONSTARTUP: "false"
+      PCCONNECT_CACHE__CONNECTIONSTRING: "valkey:6379"
+      PCCONNECT_JWT__ISSUER: "https://${PCCONNECT_DOMAIN}"
+      PCCONNECT_JWT__AUDIENCE: pcconnect-api
+      PCCONNECT_JWT__PRIVATEKEYPEM: ${JWT_PRIVATE_KEY_PEM:?set JWT_PRIVATE_KEY_PEM}
+      # Two named slots, and KEK_CURRENT_ID says which one is current. The name
+      # is the id that gets written to users.dek_kek_id, so it must not be
+      # reused for a different key: rotating means filling the empty slot and
+      # pointing CURRENT_ID at it, never overwriting the slot in place.
+      PCCONNECT_KEK__CURRENTKEKID: ${KEK_CURRENT_ID:?set KEK_CURRENT_ID}
+      PCCONNECT_KEK__KEYS__k1: ${KEK_KEY_K1:-}
+      PCCONNECT_KEK__KEYS__k2: ${KEK_KEY_K2:-}
+      PCCONNECT_WEBAUTHN__RELYINGPARTYID: ${PCCONNECT_DOMAIN}
+      PCCONNECT_WEBAUTHN__ALLOWEDORIGINS__0: "https://${PCCONNECT_DOMAIN}"
+      PCCONNECT_WEB__CORSALLOWEDORIGINS__0: "https://${PCCONNECT_DOMAIN}"
+      PCCONNECT_WEB__ENABLEHSTS: "true"
+      PCCONNECT_WEB__ENABLELEGACYSHIM: ${ENABLE_LEGACY_SHIM:-true}
+      PCCONNECT_WEB__LEGACYSHIMRETIRED: ${LEGACY_SHIM_RETIRED:-false}
+      PCCONNECT_DISCOVERY__REALTIMEURL: "wss://${PCCONNECT_DOMAIN}/rt"
+      PCCONNECT_DISCOVERY__LEGACYSUNSETAT: ${LEGACY_SUNSET_AT:-}
+      PCCONNECT_ARGON2__MEMORYKIB: ${ARGON2_MEMORY_KIB:-19456}
+      PCCONNECT_ARGON2__TIMECOST: ${ARGON2_TIME_COST:-2}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      # /readyz, not /healthz: a process that is alive but cannot reach its
+      # database must not be sent traffic (08 §1).
+      # A GET, not --spider: --spider sends HEAD, which the endpoint does not
+      # answer, so the container would report unhealthy while serving fine.
+      test: ["CMD-SHELL", "wget --quiet --tries=1 --output-document=- http://localhost:8080/readyz > /dev/null"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks: [internal]
+
+  worker:
+    image: ${PCCONNECT_IMAGE_WORKER:-pcconnect/worker:latest}
+    build:
+      context: ..
+      dockerfile: deploy/worker.Dockerfile
+    restart: unless-stopped
+    environment:
+      DOTNET_ENVIRONMENT: Production
+      PCCONNECT_DATABASE__CONNECTIONSTRING: >-
+        Host=postgres;Port=5432;Database=pcconnect;Username=pcconnect;Password=${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      PCCONNECT_CACHE__CONNECTIONSTRING: "valkey:6379"
+      PCCONNECT_JWT__PRIVATEKEYPEM: ${JWT_PRIVATE_KEY_PEM:?set JWT_PRIVATE_KEY_PEM}
+      # Two named slots, and KEK_CURRENT_ID says which one is current. The name
+      # is the id that gets written to users.dek_kek_id, so it must not be
+      # reused for a different key: rotating means filling the empty slot and
+      # pointing CURRENT_ID at it, never overwriting the slot in place.
+      PCCONNECT_KEK__CURRENTKEKID: ${KEK_CURRENT_ID:?set KEK_CURRENT_ID}
+      PCCONNECT_KEK__KEYS__k1: ${KEK_KEY_K1:-}
+      PCCONNECT_KEK__KEYS__k2: ${KEK_KEY_K2:-}
+      # The expiry sweep is what makes "never executed after its TTL" true
+      # rather than intended, so it runs often and cheaply (05 §4.2).
+      PCCONNECT_WORKER__COMMANDSWEEPSECONDS: ${COMMAND_SWEEP_SECONDS:-5}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks: [internal]
+
+  # Migrations run as their own one-shot service rather than at API startup, so
+  # a rolling deploy cannot have two instances racing to migrate, and a failed
+  # migration stops the deploy instead of crash-looping the API (08 §4.2).
+  migrate:
+    image: ${PCCONNECT_IMAGE_API:-pcconnect/api:latest}
+    build:
+      context: ..
+      dockerfile: deploy/api.Dockerfile
+    entrypoint: ["dotnet", "pcconnect-migrate.dll", "up"]
+    environment:
+      PCCONNECT_DATABASE__CONNECTIONSTRING: >-
+        Host=postgres;Port=5432;Database=pcconnect;Username=pcconnect;Password=${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      # Schema migrations need none of this. `rewrap-deks` needs all of it, and
+      # it runs through this same service (runbook §5).
+      PCCONNECT_KEK__CURRENTKEKID: ${KEK_CURRENT_ID:?set KEK_CURRENT_ID}
+      PCCONNECT_KEK__KEYS__k1: ${KEK_KEY_K1:-}
+      PCCONNECT_KEK__KEYS__k2: ${KEK_KEY_K2:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+    networks: [internal]
+
+  postgres:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    # No `ports:`. This is S1-02 closed: the database is not on the internet.
+    environment:
+      POSTGRES_DB: pcconnect
+      POSTGRES_USER: pcconnect
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_INITDB_ARGS: "--data-checksums"
+    volumes:
+      # PostgreSQL 18 expects a single mount at /var/lib/postgresql, with the
+      # data directory as a subdirectory of it. Mounting the data directory
+      # itself is the 17-and-earlier shape and blocks `pg_upgrade --link`.
+      - postgres-data:/var/lib/postgresql
+      - ./postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+    command: ["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pcconnect -d pcconnect"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: [internal]
+
+  valkey:
+    image: valkey/valkey:8-alpine
+    restart: unless-stopped
+    # No `ports:` either. Presence, rate limits and the realtime backplane are
+    # not something the internet gets to talk to.
+    command: ["valkey-server", "--save", "60", "1", "--appendonly", "no", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    volumes:
+      - valkey-data:/data
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks: [internal]
+
+  # Nightly, age-encrypted, off-host. An untested backup is not a backup, so
+  # the restore rehearsal runs monthly in CI (02 §9).
+  backup:
+    image: ${PCCONNECT_IMAGE_BACKUP:-pcconnect/backup:latest}
+    build:
+      context: .
+      dockerfile: backup.Dockerfile
+    restart: unless-stopped
+    environment:
+      PGHOST: postgres
+      PGUSER: pcconnect
+      PGDATABASE: pcconnect
+      PGPASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      BACKUP_AGE_RECIPIENT: ${BACKUP_AGE_RECIPIENT:?set BACKUP_AGE_RECIPIENT}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-30}
+    volumes:
+      - backup-data:/var/backups/pcconnect
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [internal]
+
+networks:
+  # Only caddy sits on both. Nothing else can be reached from outside.
+  edge:
+  internal:
+    internal: true
+
+volumes:
+  postgres-data:
+  valkey-data:
+  caddy-data:
+  caddy-config:
+  backup-data:

@@ -1,0 +1,1175 @@
+openapi: 3.1.1
+info:
+  title: PCConnect API
+  description: 'Remote PC control and reminders.
+
+
+    This document is the **contract**, and it is generated from the request and response
+
+    types the handlers use. A handler that changes shape changes this document, and CI
+
+    fails when the committed copy no longer matches (C-5).
+
+
+    ## Authentication
+
+
+    Bearer tokens only. Two token flavours share one format:
+
+
+    | Token | `did` claim | Scopes |
+
+    |---|---|---|
+
+    | User access token | absent | `reminder:*`, `device:read`, `device:manage`, `command:issue`, `account:manage`
+    |
+
+    | Device access token | the device''s id | `command:receive`, `command:ack` |
+
+
+    `command:issue` and `command:receive` are never held by the same token: a stolen
+
+    phone token can ask for a shutdown and can never receive or execute one.
+
+
+    ## Destructive commands
+
+
+    `shutdown`, `restart`, `signout` and `hibernate` additionally require a `stepUpToken`
+
+    from `POST /v2/auth/step-up/verify`. It is single-use, expires in five minutes, and
+
+    is bound to the account. A valid session is enough to lock a screen; it is not enough
+
+    to power a machine off.
+
+
+    ## Idempotency
+
+
+    Command issue is idempotent by construction: the client generates the command `id`
+
+    before sending, so a retry — or an offline queue replaying on reconnect — returns the
+
+    existing command rather than issuing a second one. `POST` responds 201 when it
+
+    created the command and 200 when it did not.
+
+
+    ## Time
+
+
+    Every instant on the wire is RFC 3339 UTC. Local rendering is a client concern,
+
+    driven by the IANA timezone on the user record.
+
+
+    ## Errors
+
+
+    One envelope, always:
+
+
+    ```json
+
+    { "error": { "code": "device.not_paired", "message": "...", "requestId": "01JZ8K…" } }
+
+    ```
+
+
+    Clients switch on `code`, never on `message`. 404 is returned for both "does not
+
+    exist" and "not visible to you", deliberately, so the API is not an existence oracle.
+
+
+    ## What is not here
+
+
+    The `/api/*` legacy compatibility surface is excluded on purpose. It reproduces the
+
+    v1 wire format for clients that are already installed, it carries `Deprecation` and
+
+    `Sunset` headers, and it is not something a new client should be generated from.'
+  license:
+    name: GPL-3.0-or-later
+    url: https://www.gnu.org/licenses/gpl-3.0.en.html
+  version: 2.0.0
+paths:
+  /v2/auth/register:
+    post:
+      tags:
+      - Auth
+      summary: Create an account and return a token pair.
+      operationId: register
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+        required: true
+      responses:
+        '200':
+          description: OK
+  /v2/auth/login:
+    post:
+      tags:
+      - Auth
+      summary: Exchange a password for a token pair.
+      description: Takes the plaintext password over TLS. `legacyPasswordHash` exists only for the installed
+        clients that pre-hash with unsalted SHA-256 and is removed at the sunset date.
+      operationId: login
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+        required: true
+      responses:
+        '200':
+          description: OK
+  /v2/auth/refresh:
+    post:
+      tags:
+      - Auth
+      summary: Rotate a refresh token. Presenting a revoked token revokes its whole family.
+      operationId: refresh
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshRequest'
+        required: true
+      responses:
+        '200':
+          description: OK
+  /v2/auth/logout:
+    post:
+      tags:
+      - Auth
+      operationId: logout
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LogoutRequest'
+        required: true
+      responses:
+        '200':
+          description: OK
+  /v2/auth/logout-all:
+    post:
+      tags:
+      - Auth
+      operationId: logoutAll
+      responses:
+        '200':
+          description: OK
+  /v2/auth/password/change:
+    post:
+      tags:
+      - Auth
+      summary: Change the password. Requires the current one and ends every session.
+      operationId: changePassword
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangePasswordRequest'
+        required: true
+      responses:
+        '200':
+          description: OK
+  /v2/auth/password/forgot:
+    post:
+      tags:
+      - Auth
+      operationId: forgotPassword
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ForgotPasswordRequest'
+        required: true
+      responses:
+        '200':
+          description: OK
+  /v2/auth/password/reset:
+    post:
+      tags:
+      - Auth
+      operationId: resetPassword
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResetPasswordRequest'
+        required: true
+      responses:
+        '200':
+          description: OK
+  /v2/auth/email/verify:
+    post:
+      tags:
+      - Auth
+      operationId: verifyEmail
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VerifyEmailRequest'
+        required: true
+      responses:
+        '200':
+          description: OK
+  /v2/auth/passkeys:
+    get:
+      tags:
+      - Passkeys
+      operationId: listPasskeys
+      responses:
+        '200':
+          description: OK
+  /v2/auth/passkeys/register/start:
+    post:
+      tags:
+      - Passkeys
+      operationId: beginPasskeyRegistration
+      responses:
+        '200':
+          description: OK
+  /v2/auth/passkeys/register/finish:
+    post:
+      tags:
+      - Passkeys
+      operationId: completePasskeyRegistration
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasskeyRegistrationRequest'
+        required: true
+      responses:
+        '200':
+          description: OK
+  /v2/auth/passkeys/{passkeyId}:
+    delete:
+      tags:
+      - Passkeys
+      operationId: revokePasskey
+      parameters:
+      - name: passkeyId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: OK
+  /v2/auth/passkeys/assert/start:
+    post:
+      tags:
+      - Passkeys
+      operationId: beginPasskeyAssertion
+      parameters:
+      - name: login
+        in: query
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+  /v2/auth/passkeys/assert/finish:
+    post:
+      tags:
+      - Passkeys
+      operationId: completePasskeyAssertion
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasskeyAssertionRequest'
+        required: true
+      responses:
+        '200':
+          description: OK
+  /v2/auth/step-up/start:
+    post:
+      tags:
+      - Step-up
+      summary: Start a confirmation challenge for a destructive command.
+      operationId: beginStepUp
+      responses:
+        '200':
+          description: OK
+  /v2/auth/step-up/verify:
+    post:
+      tags:
+      - Step-up
+      summary: Exchange a passkey assertion or password for a single-use confirmation token.
+      operationId: verifyStepUp
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StepUpVerifyRequest'
+        required: true
+      responses:
+        '200':
+          description: OK
+  /v2/devices:
+    get:
+      tags:
+      - Devices
+      operationId: listDevices
+      responses:
+        '200':
+          description: OK
+  /v2/devices/{deviceId}:
+    get:
+      tags:
+      - Devices
+      operationId: getDevice
+      parameters:
+      - name: deviceId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: OK
+    patch:
+      tags:
+      - Devices
+      summary: Rename a device or change which commands it accepts.
+      operationId: updateDevice
+      parameters:
+      - name: deviceId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateDeviceRequest'
+        required: true
+      responses:
+        '200':
+          description: OK
+    delete:
+      tags:
+      - Devices
+      summary: 'Unpair a device: its credential, sessions and pending commands all end.'
+      operationId: revokeDevice
+      parameters:
+      - name: deviceId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: OK
+  /v2/devices/pair/start:
+    post:
+      tags:
+      - Devices
+      summary: Agent-initiated. Returns a code for the user to confirm in the app.
+      operationId: startPairing
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PairStartRequest'
+        required: true
+      responses:
+        '200':
+          description: OK
+  /v2/devices/pair/claim:
+    post:
+      tags:
+      - Devices
+      summary: User-initiated. Confirms the code and creates the device.
+      operationId: claimPairing
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PairClaimRequest'
+        required: true
+      responses:
+        '200':
+          description: OK
+  /v2/devices/pair/poll:
+    post:
+      tags:
+      - Devices
+      summary: Agent collects its device id and secret. The secret is returned exactly once.
+      operationId: pollPairing
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PairPollRequest'
+        required: true
+      responses:
+        '200':
+          description: OK
+  /v2/devices/token:
+    post:
+      tags:
+      - Devices
+      summary: Agent exchanges its device secret for a token scoped to command:receive and command:ack.
+      operationId: issueDeviceToken
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeviceTokenRequest'
+        required: true
+      responses:
+        '200':
+          description: OK
+  /v2/devices/{deviceId}/heartbeat:
+    post:
+      tags:
+      - Devices
+      summary: Durable liveness, coalesced to at most one write per minute.
+      operationId: deviceHeartbeat
+      parameters:
+      - name: deviceId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HeartbeatRequest'
+        required: true
+      responses:
+        '200':
+          description: OK
+  /v2/commands:
+    post:
+      tags:
+      - Commands
+      summary: Issue a command to an owned device.
+      description: '`id` is generated by the client, which makes retry and offline replay idempotent.
+        Destructive types (shutdown, restart, signout, hibernate) additionally require a `stepUpToken`
+        from /v2/auth/step-up/verify.'
+      operationId: issueCommand
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IssueCommandRequest'
+        required: true
+      responses:
+        '200':
+          description: OK
+    get:
+      tags:
+      - Commands
+      operationId: listCommands
+      parameters:
+      - name: cursor
+        in: query
+        schema:
+          type: string
+      - name: limit
+        in: query
+        schema:
+          pattern: ^-?(?:0|[1-9]\d*)$
+          type:
+          - integer
+          - string
+          format: int32
+      - name: deviceId
+        in: query
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: OK
+  /v2/commands/pending:
+    get:
+      tags:
+      - Commands
+      summary: Device tokens only. Returns unexpired, undelivered commands and marks them delivered.
+      operationId: claimPendingCommands
+      responses:
+        '200':
+          description: OK
+  /v2/commands/{commandId}:
+    get:
+      tags:
+      - Commands
+      operationId: getCommand
+      parameters:
+      - name: commandId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: OK
+  /v2/commands/{commandId}/cancel:
+    post:
+      tags:
+      - Commands
+      operationId: cancelCommand
+      parameters:
+      - name: commandId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: OK
+  /v2/commands/{commandId}/ack:
+    post:
+      tags:
+      - Commands
+      summary: Device tokens only. Acknowledges one command with its real outcome.
+      operationId: ackCommand
+      parameters:
+      - name: commandId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AckCommandRequest'
+        required: true
+      responses:
+        '200':
+          description: OK
+  /v2/reminders:
+    get:
+      tags:
+      - Reminders
+      summary: Times are UTC RFC 3339 plus the timezone the reminder was created in.
+      operationId: listReminders
+      parameters:
+      - name: from
+        in: query
+        schema:
+          type: string
+          format: date-time
+      - name: to
+        in: query
+        schema:
+          type: string
+          format: date-time
+      - name: completed
+        in: query
+        schema:
+          type: boolean
+      - name: cursor
+        in: query
+        schema:
+          type: string
+      - name: limit
+        in: query
+        schema:
+          pattern: ^-?(?:0|[1-9]\d*)$
+          type:
+          - integer
+          - string
+          format: int32
+      responses:
+        '200':
+          description: OK
+    post:
+      tags:
+      - Reminders
+      operationId: createReminder
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateReminderRequest'
+        required: true
+      responses:
+        '200':
+          description: OK
+  /v2/reminders/{reminderId}:
+    get:
+      tags:
+      - Reminders
+      operationId: getReminder
+      parameters:
+      - name: reminderId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: OK
+    patch:
+      tags:
+      - Reminders
+      operationId: updateReminder
+      parameters:
+      - name: reminderId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateReminderRequest'
+        required: true
+      responses:
+        '200':
+          description: OK
+    delete:
+      tags:
+      - Reminders
+      summary: Soft delete; recoverable until the retention job runs.
+      operationId: deleteReminder
+      parameters:
+      - name: reminderId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: OK
+  /v2/reminders/{reminderId}/complete:
+    post:
+      tags:
+      - Reminders
+      summary: '`occurrenceAt` completes one occurrence of a series rather than the whole series.'
+      operationId: completeReminder
+      parameters:
+      - name: reminderId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CompleteReminderRequest'
+        required: true
+      responses:
+        '200':
+          description: OK
+  /v2/account/profile:
+    get:
+      tags:
+      - Account
+      operationId: getProfile
+      responses:
+        '200':
+          description: OK
+    patch:
+      tags:
+      - Account
+      summary: 'Changing the password is not here: it lives at /v2/auth/password/change.'
+      operationId: updateProfile
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateProfileRequest'
+        required: true
+      responses:
+        '200':
+          description: OK
+  /v2/account/sessions:
+    get:
+      tags:
+      - Account
+      summary: Live sessions, so a user can see and end one they do not recognise.
+      operationId: listSessions
+      responses:
+        '200':
+          description: OK
+  /v2/account/sessions/{familyId}:
+    delete:
+      tags:
+      - Account
+      operationId: revokeSession
+      parameters:
+      - name: familyId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: OK
+  /v2/account/export:
+    get:
+      tags:
+      - Account
+      summary: GDPR data export.
+      operationId: exportAccount
+      responses:
+        '200':
+          description: OK
+  /v2/account:
+    delete:
+      tags:
+      - Account
+      summary: Soft delete now; hard delete after 30 days, cascading to devices, commands and reminders.
+      operationId: deleteAccount
+      responses:
+        '200':
+          description: OK
+  /v2/meta/discovery:
+    get:
+      tags:
+      - Meta
+      operationId: discovery
+      responses:
+        '200':
+          description: OK
+  /v2/meta/time:
+    get:
+      tags:
+      - Meta
+      summary: Clock-skew diagnostics only. Scheduling is UTC end to end, so no client needs this to decide
+        when a reminder fires.
+      operationId: serverTime
+      responses:
+        '200':
+          description: OK
+components:
+  schemas:
+    AckCommandRequest:
+      required:
+      - outcome
+      type: object
+      properties:
+        outcome:
+          type: string
+        resultCode:
+          type:
+          - 'null'
+          - string
+        resultMessage:
+          type:
+          - 'null'
+          - string
+      additionalProperties: false
+    ChangePasswordRequest:
+      required:
+      - currentPassword
+      - newPassword
+      type: object
+      properties:
+        currentPassword:
+          type: string
+        newPassword:
+          type: string
+      additionalProperties: false
+    CompleteReminderRequest:
+      type: object
+      properties:
+        completed:
+          type: boolean
+          default: true
+        occurrenceAt:
+          type:
+          - 'null'
+          - string
+          format: date-time
+      additionalProperties: false
+    CreateReminderRequest:
+      required:
+      - body
+      - dueAt
+      type: object
+      properties:
+        body:
+          type: string
+        dueAt:
+          type: string
+          format: date-time
+        timezone:
+          type:
+          - 'null'
+          - string
+        rrule:
+          type:
+          - 'null'
+          - string
+        recurrenceUntil:
+          type:
+          - 'null'
+          - string
+          format: date-time
+      additionalProperties: false
+    DeviceTokenRequest:
+      required:
+      - deviceId
+      - deviceSecret
+      type: object
+      properties:
+        deviceId:
+          type: string
+        deviceSecret:
+          type: string
+        agentVersion:
+          type: string
+          default: ''
+        osVersion:
+          type: string
+          default: ''
+      additionalProperties: false
+    ForgotPasswordRequest:
+      required:
+      - email
+      type: object
+      properties:
+        email:
+          type: string
+      additionalProperties: false
+    HeartbeatRequest:
+      type: object
+      properties:
+        agentVersion:
+          type: string
+          default: ''
+        osVersion:
+          type: string
+          default: ''
+      additionalProperties: false
+    IssueCommandRequest:
+      required:
+      - id
+      - deviceId
+      - type
+      type: object
+      properties:
+        id:
+          type: string
+        deviceId:
+          type: string
+        type:
+          type: string
+        params:
+          type:
+          - 'null'
+          - object
+        ttlSeconds:
+          pattern: ^-?(?:0|[1-9]\d*)$
+          type:
+          - 'null'
+          - integer
+          - string
+          format: int32
+        stepUpToken:
+          type:
+          - 'null'
+          - string
+      additionalProperties: false
+    LoginRequest:
+      required:
+      - login
+      type: object
+      properties:
+        login:
+          type: string
+        password:
+          type:
+          - 'null'
+          - string
+        legacyPasswordHash:
+          type:
+          - 'null'
+          - string
+        clientKind:
+          type: string
+          default: mobile
+        clientVersion:
+          type: string
+          default: ''
+      additionalProperties: false
+    LogoutRequest:
+      required:
+      - refreshToken
+      type: object
+      properties:
+        refreshToken:
+          type: string
+      additionalProperties: false
+    PairClaimRequest:
+      required:
+      - pairingCode
+      type: object
+      properties:
+        pairingCode:
+          type: string
+        displayName:
+          type:
+          - 'null'
+          - string
+      additionalProperties: false
+    PairPollRequest:
+      required:
+      - pollToken
+      type: object
+      properties:
+        pollToken:
+          type: string
+      additionalProperties: false
+    PairStartRequest:
+      required:
+      - requestedName
+      type: object
+      properties:
+        requestedName:
+          type: string
+        platform:
+          type: string
+          default: windows
+        agentVersion:
+          type: string
+          default: ''
+      additionalProperties: false
+    PasskeyAssertionRequest:
+      required:
+      - challengeId
+      - credentialId
+      - clientDataJson
+      - authenticatorData
+      - signature
+      type: object
+      properties:
+        challengeId:
+          type: string
+        credentialId:
+          type: string
+        clientDataJson:
+          type: string
+        authenticatorData:
+          type: string
+        signature:
+          type: string
+        userHandle:
+          type:
+          - 'null'
+          - string
+        clientKind:
+          type: string
+          default: mobile
+        clientVersion:
+          type: string
+          default: ''
+      additionalProperties: false
+    PasskeyRegistrationRequest:
+      required:
+      - challengeId
+      - credentialId
+      - clientDataJson
+      - attestationObject
+      type: object
+      properties:
+        challengeId:
+          type: string
+        credentialId:
+          type: string
+        clientDataJson:
+          type: string
+        attestationObject:
+          type: string
+        transports:
+          type:
+          - 'null'
+          - array
+          items:
+            type: string
+        displayName:
+          type:
+          - 'null'
+          - string
+      additionalProperties: false
+    RefreshRequest:
+      required:
+      - refreshToken
+      type: object
+      properties:
+        refreshToken:
+          type: string
+      additionalProperties: false
+    RegisterRequest:
+      required:
+      - username
+      - email
+      - password
+      type: object
+      properties:
+        username:
+          type: string
+        email:
+          type: string
+        password:
+          type: string
+        displayName:
+          type:
+          - 'null'
+          - string
+        timezone:
+          type:
+          - 'null'
+          - string
+        marketingOptIn:
+          type: boolean
+          default: false
+      additionalProperties: false
+    ResetPasswordRequest:
+      required:
+      - token
+      - newPassword
+      type: object
+      properties:
+        token:
+          type: string
+        newPassword:
+          type: string
+      additionalProperties: false
+    StepUpVerifyRequest:
+      required:
+      - challengeId
+      - method
+      type: object
+      properties:
+        challengeId:
+          type: string
+        method:
+          type: string
+        password:
+          type:
+          - 'null'
+          - string
+        passkey:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/PasskeyAssertionRequest'
+      additionalProperties: false
+    UpdateDeviceRequest:
+      type: object
+      properties:
+        displayName:
+          type:
+          - 'null'
+          - string
+        allowedCommands:
+          type:
+          - 'null'
+          - array
+          items:
+            type: string
+      additionalProperties: false
+    UpdateProfileRequest:
+      type: object
+      properties:
+        displayName:
+          type:
+          - 'null'
+          - string
+        timezone:
+          type:
+          - 'null'
+          - string
+        locale:
+          type:
+          - 'null'
+          - string
+        marketingOptIn:
+          type:
+          - 'null'
+          - boolean
+      additionalProperties: false
+    UpdateReminderRequest:
+      type: object
+      properties:
+        body:
+          type:
+          - 'null'
+          - string
+        dueAt:
+          type:
+          - 'null'
+          - string
+          format: date-time
+        timezone:
+          type:
+          - 'null'
+          - string
+        rrule:
+          type:
+          - 'null'
+          - string
+        recurrenceUntil:
+          type:
+          - 'null'
+          - string
+          format: date-time
+      additionalProperties: false
+    VerifyEmailRequest:
+      required:
+      - token
+      type: object
+      properties:
+        token:
+          type: string
+      additionalProperties: false
+  securitySchemes:
+    bearer:
+      type: http
+      description: An ES256-signed access token, 15 minutes, carrying scope claims. There is no cookie
+        authentication on this API, which makes CSRF structurally impossible on it.
+      scheme: bearer
+      bearerFormat: JWT
+security:
+- bearer: []
+tags:
+- name: Auth
+  description: Passwords, tokens, passkeys and step-up confirmation.
+- name: Passkeys
+  description: WebAuthn registration and assertion.
+- name: Step-up
+  description: Confirming a destructive command.
+- name: Devices
+  description: Pairing, presence and the device registry.
+- name: Commands
+  description: Issue, deliver, acknowledge, expire.
+- name: Reminders
+  description: Encrypted reminders and recurrence.
+- name: Account
+  description: Profile, sessions, export and deletion.
+- name: Meta
+  description: Discovery, health and server time.

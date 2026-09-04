@@ -1,0 +1,45 @@
+#!/bin/sh
+# PCConnect pre-commit hook.
+#
+# Install once:  git config core.hooksPath .git-hooks
+#
+# It exists because the failure it prevents already happened: `api/db_config.php`
+# held live production credentials, untracked but not gitignored, one
+# `git add -A` from being published permanently (S1-01).
+
+set -e
+
+fail() {
+    echo "pre-commit: $1" >&2
+    echo "Commit refused. Fix it, or use --no-verify if you are certain." >&2
+    exit 1
+}
+
+staged="$(git diff --cached --name-only --diff-filter=ACM)"
+[ -z "$staged" ] && exit 0
+
+# 1. Files that must never be committed, whatever .gitignore says today.
+echo "$staged" | grep -qiE '(^|/)(db_config\.php|\.env$|\.env\.[^.]*$)' \
+    && fail "a secrets file is staged."
+
+echo "$staged" | grep -qiE '\.(jks|keystore|pfx|p12|pem|key)$' \
+    && fail "a key or keystore is staged."
+
+echo "$staged" | grep -qE '\.sql$' \
+    | grep -qvE '^(db/migrations|db/legacy|db/verification)/' \
+    && fail "a .sql file outside the migration directories is staged."
+
+# 2. Credential literals in the staged content.
+if git diff --cached -U0 | grep -nE '^\+' \
+     | grep -viE '(example|placeholder|test-only|redacted|xxx)' \
+     | grep -qiE '(password|secret|api[_-]?key)[[:space:]]*[:=][[:space:]]*["'"'"'][^"'"'"']{8,}'; then
+    fail "a credential literal appears in the staged diff."
+fi
+
+# 3. gitleaks, when it is installed. CI runs it regardless.
+if command -v gitleaks >/dev/null 2>&1; then
+    gitleaks protect --staged --no-banner --config .gitleaks.toml \
+        || fail "gitleaks found a secret."
+fi
+
+exit 0

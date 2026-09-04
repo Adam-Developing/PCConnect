@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <OutputType>Exe</OutputType>
+    <NoWarn>$(NoWarn);xUnit1051</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\PCConnect.Api\PCConnect.Api.csproj" />
+    <ProjectReference Include="..\..\src\PCConnect.Worker\PCConnect.Worker.csproj" />
+    <ProjectReference Include="..\..\src\PCConnect.LegacyMigrator\PCConnect.LegacyMigrator.csproj" />
+    <ProjectReference Include="..\..\src\PCConnect.Client\PCConnect.Client.csproj" />
+    <ProjectReference Include="..\..\src\PCConnect.DbMigrator\PCConnect.DbMigrator.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="Shouldly" />
+    <PackageReference Include="Testcontainers.PostgreSql" />
+    <PackageReference Include="Testcontainers.MySql" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
+    <PackageReference Include="coverlet.collector" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <OutputType>WinExe</OutputType>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <AssemblyName>PCConnect.Companion</AssemblyName>
+    <RootNamespace>PCConnect.Companion</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- WinForms is here only for the tray icon. Its implicit usings collide
+         with WPF on Application, Brush, Color and KeyEventArgs, so they are
+         removed and TrayIcon.cs imports what it needs explicitly. -->
+    <Using Remove="System.Windows.Forms" />
+    <Using Remove="System.Drawing" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\src\PCConnect.Client\PCConnect.Client.csproj" />
+    <ProjectReference Include="..\PCConnect.Agent\PCConnect.Agent.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- The product mark, used by the sign-in card, the sidebar and the window
+         icon. Not content: it is compiled in so a missing file beside the exe
+         cannot leave the app without a logo. -->
+    <Resource Include="Resources\logo.png" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="CommunityToolkit.Mvvm" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" />
+  </ItemGroup>
+</Project>

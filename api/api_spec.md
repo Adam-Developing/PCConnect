@@ -91,7 +91,20 @@ A basic ping endpoint functionally identical to older internet checks.
 
 ---
 
-### 3. Remote Requests
+### 3. Time Synchronization
+
+#### `GET /v1/devices/time`
+Fetches the last actively logged Server Datetime for the authenticating `PCName` and evaluates if the device is currently online (defined as having heartbeat-pinged the server within the last 5 seconds).
+* **Response:** `{"success": true, "data": {"time": "2026-04-20 18:30:00", "is_online": true}}`
+
+#### `POST /v1/devices/time`
+Updates the internal recorded time for the requesting PC. The backend will automatically generate and store the current exact Server Datetime (`Y-m-d H:i:s`) internally securely, preventing clock-sync drifting between clients.
+* **Payload:** None.
+* **Response:** `{"success": true, "data": {"message": "Time updated successfully", "saved_time": "2026-04-20 18:30:00"}}`
+
+---
+
+### 4. Remote Requests
 
 #### `GET /v1/devices/requests`
 Polls for execution requests specifically ordered by an external command application.
@@ -109,25 +122,10 @@ Submits a new request for the target PC.
 
 ---
 
-### 4. Reminders
+### 5. Reminders
 *(Note: Requires `X-API-Key`)*
 
 #### `GET /v1/reminders`
 Lists all active reminders belonging to the user. Returns them decoded properly via AES-256-CBC.
 * **Payload:** None
 * **Response:** `[{"ID": 1, "Username": 1008, "Date": "23/02/26", "Time": "15:00", "Reminder": "Buy milk", "Completed": 0}]`
-
-#### `POST /v1/reminders`
-Creates a new reminder.
-* **Payload:** `date` (String, YYYY-MM-DD), `time` (String, HH:MM or HH:MM:SS), `reminder` (String), `completed` (Boolean/Number optional)
-* **Response:** `{"success": true, "data": {"message": "Reminder created", "id": 1}}`
-
-#### `PUT /v1/reminders/:id`
-Updates an existing reminder.
-* **Payload:** `date` (optional), `time` (optional), `reminder` (optional), `completed` (optional)
-* **Response:** `{"success": true, "data": {"message": "Reminder updated", "id": 1}}`
-
-#### `POST /v1/reminders/:id/complete`
-Toggles or sets the completion status of a reminder.
-* **Payload:** `completed` (Boolean/Number)
-* **Response:** `{"success": true, "data": {"message": "Reminder completion updated", "id": 1, "completed": 1}}`

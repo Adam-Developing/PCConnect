@@ -1,0 +1,354 @@
+name: CI
+
+# The pipeline of 08 §4.1. Everything below is blocking on `main`: the point of
+# S3-01 ("no CI, no tests") being a finding is that a green build has to mean
+# something.
+
+on:
+  push:
+    branches: [main, "feat/**", "fix/**"]
+  pull_request:
+    branches: [main]
+  schedule:
+    # The monthly restore rehearsal (02 §9). An untested backup is not a backup,
+    # and this is the part that is usually a calendar reminder nobody reads.
+    - cron: "17 3 1 * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_VERSION: "10.0.x"
+  DOTNET_NOLOGO: "true"
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: "true"
+
+jobs:
+  # ── secrets ────────────────────────────────────────────────────────────────
+  # First, and blocking. S1-01 was a live database password sitting untracked
+  # but not gitignored, one `git add -A` from permanent publication.
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_CONFIG: .gitleaks.toml
+
+      - name: No credential literals in source
+        run: |
+          # The definition-of-done check from 07 §4, run on every push rather
+          # than once at the end.
+          if git grep -nIE "(password|secret|api[_-]?key)[[:space:]]*=[[:space:]]*[\"'][^\"']{8,}" \
+               -- ':!*.md' ':!**/*Tests*' ':!deploy/.env.example' ':!docs/**'; then
+            echo "::error::A credential literal reached the tree."
+            exit 1
+          fi
+
+      - name: No database dumps committed
+        run: |
+          if git ls-files | grep -iE '\.sql$' | grep -viE '^(db/migrations|db/legacy|db/verification|docs/)'; then
+            echo "::error::A .sql file outside the migration directories is tracked."
+            exit 1
+          fi
+
+  # ── build and unit tests ───────────────────────────────────────────────────
+  dotnet:
+    name: .NET build and unit tests
+    runs-on: windows-latest   # the agent and companion target net10.0-windows
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Restore
+        run: dotnet restore PCConnect.sln --locked-mode || dotnet restore PCConnect.sln
+
+      - name: Build
+        run: dotnet build PCConnect.sln -c Release --no-restore
+
+      - name: Unit tests
+        run: >-
+          dotnet test tests/PCConnect.UnitTests/PCConnect.UnitTests.csproj
+          -c Release --no-build
+          --logger "trx;LogFileName=unit.trx"
+          --collect:"XPlat Code Coverage"
+          --results-directory artifacts/test-results
+
+      - name: Publish
+        run: |
+          dotnet publish src/PCConnect.Api/PCConnect.Api.csproj -c Release -o artifacts/api
+          dotnet publish src/PCConnect.Worker/PCConnect.Worker.csproj -c Release -o artifacts/worker
+          dotnet publish clients/windows/PCConnect.Agent/PCConnect.Agent.csproj -c Release -o artifacts/agent
+          dotnet publish clients/windows/PCConnect.Companion/PCConnect.Companion.csproj -c Release -o artifacts/companion
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dotnet-artifacts
+          path: |
+            artifacts/api
+            artifacts/worker
+            artifacts/agent
+            artifacts/companion
+            artifacts/test-results
+          retention-days: 14
+
+  # ── integration, contract, migration and authorisation tests ───────────────
+  # These are the ones that matter: they run against a real PostgreSQL 18 and a
+  # real MySQL 8.4, because half of what they assert is enforced by the engine.
+  integration:
+    name: Integration tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Integration tests
+        run: >-
+          dotnet test tests/PCConnect.IntegrationTests/PCConnect.IntegrationTests.csproj
+          -c Release
+          --logger "trx;LogFileName=integration.trx"
+          --results-directory artifacts/test-results
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: integration-results
+          path: artifacts/test-results
+          retention-days: 14
+
+  # ── the contract ───────────────────────────────────────────────────────────
+  contract:
+    name: API contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Generate the OpenAPI document
+        run: ./tools/generate-openapi.sh docs/architecture/openapi/pcconnect-v2.generated.yaml
+
+      - name: The committed contract matches the code
+        run: |
+          # C-5: the contract is generated output. A handler that changes shape
+          # without the document changing means the document is prose again,
+          # which is how three parallel API generations happened.
+          if ! diff -u docs/architecture/openapi/pcconnect-v2.yaml \
+                      docs/architecture/openapi/pcconnect-v2.generated.yaml; then
+            echo "::error::The committed OpenAPI document is stale. Run tools/generate-openapi.sh and commit the result."
+            exit 1
+          fi
+
+      - name: Detect breaking changes
+        if: github.event_name == 'pull_request'
+        run: |
+          # oasdiff fails the build on a breaking change unless the PR is
+          # deliberately labelled (04 §1).
+          docker run --rm -v "$PWD:/work" tufin/oasdiff breaking \
+            /work/docs/architecture/openapi/pcconnect-v2.yaml \
+            /work/docs/architecture/openapi/pcconnect-v2.generated.yaml \
+            --fail-on ERR || {
+              if [ "${{ contains(github.event.pull_request.labels.*.name, 'api-breaking') }}" = "true" ]; then
+                echo "::warning::Breaking change accepted: the PR is labelled api-breaking."
+              else
+                echo "::error::Breaking API change without the api-breaking label."
+                exit 1
+              fi
+            }
+
+  # ── dependency and container scanning ──────────────────────────────────────
+  supply-chain:
+    name: Dependencies and containers
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Vulnerable NuGet packages
+        run: |
+          dotnet restore PCConnect.sln
+          # Blocking for high and critical, per 03 §9.
+          output=$(dotnet list PCConnect.sln package --vulnerable --include-transitive 2>&1)
+          echo "$output"
+          if echo "$output" | grep -qiE '\b(High|Critical)\b'; then
+            echo "::error::A dependency has a high or critical advisory."
+            exit 1
+          fi
+
+      - name: Deprecated packages
+        continue-on-error: true
+        run: dotnet list PCConnect.sln package --deprecated
+
+      - name: Licence check
+        run: |
+          # GPL-3.0 project: a dependency under an incompatible licence is a
+          # legal problem, not a preference (03 §9).
+          dotnet restore PCConnect.sln
+          if grep -rniE '"license"\s*:\s*"(AGPL|SSPL|BUSL|Commons Clause)' ~/.nuget/packages --include='*.nuspec' 2>/dev/null; then
+            echo "::error::A dependency uses a licence incompatible with GPL-3.0."
+            exit 1
+          fi
+
+      - name: Build images
+        run: |
+          docker build -f deploy/api.Dockerfile -t pcconnect/api:ci .
+          docker build -f deploy/worker.Dockerfile -t pcconnect/worker:ci .
+
+      - name: Scan images
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: pcconnect/api:ci
+          format: table
+          exit-code: "1"
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+
+  # ── Android ────────────────────────────────────────────────────────────────
+  android:
+    name: Android build and tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: clients/android
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Unit tests
+        run: ./gradlew :app:testDebugUnitTest --no-daemon
+
+      - name: Lint
+        run: ./gradlew :app:lintDebug --no-daemon
+
+      - name: Assemble debug
+        run: ./gradlew :app:assembleDebug --no-daemon
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: android-debug
+          path: |
+            clients/android/app/build/outputs/apk/debug/*.apk
+            clients/android/app/build/reports
+          retention-days: 14
+
+  # ── migration safety (08 §4.2) ─────────────────────────────────────────────
+  migrations:
+    name: Migration safety
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_DB: pcconnect
+          POSTGRES_USER: pcconnect
+          POSTGRES_PASSWORD: ci-only-not-a-secret
+        options: >-
+          --health-cmd "pg_isready -U pcconnect"
+          --health-interval 10s --health-timeout 5s --health-retries 5
+        ports: ["5432:5432"]
+    env:
+      PCCONNECT_DATABASE__CONNECTIONSTRING: >-
+        Host=localhost;Port=5432;Database=pcconnect;Username=pcconnect;Password=ci-only-not-a-secret
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: up, down, up
+        run: |
+          # Every migration PR must survive this on a scratch database. A
+          # migration that cannot be rolled back is a migration that cannot be
+          # deployed on a Friday.
+          dotnet run --project src/PCConnect.DbMigrator -- up
+          dotnet run --project src/PCConnect.DbMigrator -- down
+          dotnet run --project src/PCConnect.DbMigrator -- up
+          dotnet run --project src/PCConnect.DbMigrator -- status
+
+      - name: Verification gates return zero
+        run: dotnet run --project src/PCConnect.DbMigrator -- verify
+
+      - name: A destructive migration needs the label
+        if: github.event_name == 'pull_request'
+        run: |
+          if git diff --name-only origin/${{ github.base_ref }}...HEAD -- db/migrations \
+               | xargs -r grep -lE 'DROP TABLE|DROP COLUMN|TRUNCATE' ; then
+            if [ "${{ contains(github.event.pull_request.labels.*.name, 'destructive-migration') }}" != "true" ]; then
+              echo "::error::This PR adds a destructive migration and is not labelled destructive-migration."
+              exit 1
+            fi
+          fi
+
+  # ── the monthly restore rehearsal (02 §9) ──────────────────────────────────
+  restore-rehearsal:
+    name: Restore rehearsal
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_DB: scratch
+          POSTGRES_USER: pcconnect
+          POSTGRES_PASSWORD: ci-only-not-a-secret
+        options: >-
+          --health-cmd "pg_isready -U pcconnect"
+          --health-interval 10s --health-timeout 5s --health-retries 5
+        ports: ["5432:5432"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Restore the latest backup into a scratch database
+        env:
+          # The age private key is a repository secret, used only here. It is
+          # not on the deploy host and the deploy host cannot read a backup.
+          BACKUP_AGE_KEY: ${{ secrets.BACKUP_AGE_KEY }}
+          PCCONNECT_DATABASE__CONNECTIONSTRING: >-
+            Host=localhost;Port=5432;Database=scratch;Username=pcconnect;Password=ci-only-not-a-secret
+        run: |
+          if [ -z "$BACKUP_AGE_KEY" ]; then
+            echo "::warning::BACKUP_AGE_KEY is not configured; the rehearsal cannot run."
+            exit 0
+          fi
+
+          ./tools/restore-rehearsal.sh
+
+      - name: Verification gates on the restored data
+        env:
+          PCCONNECT_DATABASE__CONNECTIONSTRING: >-
+            Host=localhost;Port=5432;Database=scratch;Username=pcconnect;Password=ci-only-not-a-secret
+        run: dotnet run --project src/PCConnect.DbMigrator -- verify

@@ -1,0 +1,1070 @@
+openapi: 3.1.0
+
+info:
+  title: PCConnect API
+  version: 2.0.0
+  description: |
+    Remote PC control and reminders.
+
+    This document is the **contract**. In the target architecture it is generated from the
+    server's Zod schemas at build time, and every client model layer is generated from it.
+    It is committed so that contract changes appear in pull-request diffs, and `oasdiff`
+    fails CI on an unlabelled breaking change.
+
+    ## Authentication
+    Bearer tokens only. There is no cookie authentication on this API, which makes CSRF
+    structurally impossible. Two token flavours share one format:
+
+    | Token | `did` claim | Typical scopes |
+    |---|---|---|
+    | User access token  | `null`             | `reminder:*`, `device:read`, `device:manage`, `command:issue`, `account:manage` |
+    | Device access token| device `public_id` | `command:receive`, `command:ack` |
+
+    `command:issue` and `command:receive` are never held by the same token.
+
+    ## Idempotency
+    Every unsafe method accepts `Idempotency-Key`. Command issue is additionally idempotent
+    by construction: the client generates the command `id`, so a replay returns the existing
+    command rather than issuing a second one.
+  license:
+    name: GPL-3.0-or-later
+    url: https://www.gnu.org/licenses/gpl-3.0.html
+  contact:
+    name: PCConnect
+    url: https://pcconnect.adamkhattab.co.uk
+
+servers:
+  - url: https://api.pcconnect.example/v2
+    description: Production
+  - url: https://staging-api.pcconnect.example/v2
+    description: Staging
+
+tags:
+  - name: auth
+    description: Sessions, passwords, registration
+  - name: devices
+    description: Device registry and pairing
+  - name: commands
+    description: Command lifecycle — issue, deliver, acknowledge
+  - name: reminders
+    description: Reminders and recurrence
+  - name: account
+    description: Profile, sessions, data rights
+  - name: meta
+    description: Discovery and health
+
+security:
+  - bearerAuth: []
+
+# =============================================================================
+paths:
+# =============================================================================
+
+  # ---------------------------------------------------------------- auth ----
+  /auth/login:
+    post:
+      tags: [auth]
+      summary: Exchange credentials for a token pair
+      security: []
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [identifier]
+              properties:
+                identifier:
+                  type: string
+                  maxLength: 320
+                  description: Username or email
+                  examples: ["adam", "adam@example.com"]
+                password:
+                  type: string
+                  minLength: 1
+                  maxLength: 1024
+                  description: |
+                    Plaintext, over TLS. The server hashes with Argon2id.
+                    Supply this OR `legacyPasswordHash`, never both.
+                legacyPasswordHash:
+                  type: string
+                  pattern: '^[a-f0-9]{64}$'
+                  deprecated: true
+                  description: |
+                    **Migration only.** Unsalted client-side SHA-256, as sent by PCClient <= 4.5
+                    and the Java Android app <= 7.2. Accepted until the v1 sunset date, after which
+                    it returns 410. Cannot trigger a password upgrade — the server never sees the
+                    real password on this path.
+                clientKind:
+                  $ref: '#/components/schemas/ClientKind'
+                clientVersion: { type: string, maxLength: 32 }
+      responses:
+        '200':
+          description: Authenticated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TokenPair' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401':
+          description: |
+            Invalid credentials. Returned with a deliberately uniform body and timing
+            whether the account exists or not.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '423':
+          description: Account temporarily locked after repeated failures
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /auth/refresh:
+    post:
+      tags: [auth]
+      summary: Rotate a refresh token
+      description: |
+        Mints a new pair and revokes the presented token, keeping the family id.
+        Presenting an already-revoked token is treated as evidence of theft: the whole
+        family is revoked, a security event is recorded, and 401 is returned.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refreshToken]
+              properties:
+                refreshToken: { type: string, minLength: 32, maxLength: 512 }
+      responses:
+        '200':
+          description: Rotated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TokenPair' }
+        '401':
+          description: Invalid, expired, or reused — the family is now revoked
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /auth/logout:
+    post:
+      tags: [auth]
+      summary: Revoke the presented refresh token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refreshToken]
+              properties:
+                refreshToken: { type: string }
+      responses:
+        '204': { description: Revoked }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /auth/password/change:
+    post:
+      tags: [auth]
+      summary: Change the password
+      description: |
+        Requires the current password regardless of a valid access token, and revokes every
+        session on success. Kept off `/account/profile` deliberately: the current API allows a
+        password change on a profile PATCH with no policy enforcement (finding S1-10).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [currentPassword, newPassword]
+              properties:
+                currentPassword: { type: string, maxLength: 1024 }
+                newPassword:
+                  type: string
+                  minLength: 12
+                  maxLength: 1024
+                  description: Checked against the Pwned Passwords k-anonymity range API
+      responses:
+        '204': { description: Changed; all sessions revoked }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422':
+          description: Rejected by password policy
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /auth/password/forgot:
+    post:
+      tags: [auth]
+      summary: Request a password reset
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string, format: email, maxLength: 320 }
+      responses:
+        '202':
+          description: |
+            Always returned, whether or not the account exists. The API must not be an
+            account-existence oracle.
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  # ------------------------------------------------------------- devices ----
+  /devices:
+    get:
+      tags: [devices]
+      summary: List the caller's devices
+      parameters:
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+      responses:
+        '200':
+          description: Devices
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Device' }
+                  nextCursor: { type: [string, 'null'] }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /devices/{deviceId}:
+    parameters: [{ $ref: '#/components/parameters/DeviceId' }]
+    get:
+      tags: [devices]
+      summary: Get one device
+      responses:
+        '200':
+          description: Device
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Device' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [devices]
+      summary: Rename a device or change its permitted commands
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              minProperties: 1
+              properties:
+                displayName: { type: string, minLength: 1, maxLength: 128 }
+                allowedCommands:
+                  type: array
+                  uniqueItems: true
+                  items: { $ref: '#/components/schemas/CommandType' }
+                  description: |
+                    Server-side policy. Removing `shutdown` here makes shutdown impossible for
+                    this device even with a valid `command:issue` token.
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Device' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+    delete:
+      tags: [devices]
+      summary: Revoke and remove a device
+      description: Revokes the device credential immediately; the agent's next call returns 401.
+      responses:
+        '204': { description: Revoked }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /devices/pair/start:
+    post:
+      tags: [devices]
+      summary: Agent starts pairing and receives a code to display
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [requestedName, platform]
+              properties:
+                requestedName: { type: string, minLength: 1, maxLength: 128 }
+                platform: { $ref: '#/components/schemas/Platform' }
+                agentVersion: { type: string, maxLength: 32 }
+      responses:
+        '201':
+          description: Pairing started
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [pairingCode, pairingToken, expiresAt]
+                properties:
+                  pairingCode:
+                    type: string
+                    pattern: '^[A-Z0-9]{4}-[A-Z0-9]{4}$'
+                    description: Shown to the user; they type it into the app
+                    examples: ["K7M2-9QXB"]
+                  pairingToken:
+                    type: string
+                    description: Opaque handle the agent uses to poll. Not shown to the user.
+                  expiresAt: { type: string, format: date-time }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /devices/pair/claim:
+    post:
+      tags: [devices]
+      summary: User confirms a pairing code
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [pairingCode]
+              properties:
+                pairingCode: { type: string, pattern: '^[A-Z0-9]{4}-[A-Z0-9]{4}$' }
+                displayName:
+                  type: string
+                  maxLength: 128
+                  description: Overrides the name the agent requested
+      responses:
+        '200':
+          description: Claimed; the agent may now collect its credential
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Device' }
+        '404':
+          description: Unknown, expired, or already-claimed code
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /devices/pair/poll:
+    post:
+      tags: [devices]
+      summary: Agent collects its device credential, once
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [pairingToken]
+              properties:
+                pairingToken: { type: string }
+      responses:
+        '200':
+          description: |
+            Paired. `deviceSecret` is returned exactly once and is never retrievable again.
+            The agent stores it in the OS keychain (Windows Credential Manager).
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [deviceId, deviceSecret]
+                properties:
+                  deviceId: { $ref: '#/components/schemas/Uuid' }
+                  deviceSecret: { type: string, minLength: 43 }
+        '202': { description: Not yet claimed by the user; poll again }
+        '404': { description: Pairing expired or unknown }
+
+  /devices/token:
+    post:
+      tags: [devices]
+      summary: Exchange a device secret for a device access token
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [deviceId, deviceSecret]
+              properties:
+                deviceId: { $ref: '#/components/schemas/Uuid' }
+                deviceSecret: { type: string }
+                agentVersion: { type: string, maxLength: 32 }
+      responses:
+        '200':
+          description: Device token issued with `command:receive` and `command:ack` only
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TokenPair' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /devices/{deviceId}/heartbeat:
+    parameters: [{ $ref: '#/components/parameters/DeviceId' }]
+    post:
+      tags: [devices]
+      summary: Liveness ping from the agent
+      description: |
+        The fallback when the realtime socket is down. Coalesced server-side to at most one
+        durable write per minute. Requires a device token whose `did` matches the path id.
+      responses:
+        '204': { description: Recorded }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  # ------------------------------------------------------------ commands ----
+  /commands:
+    post:
+      tags: [commands]
+      summary: Issue a command to a device
+      description: |
+        The client generates `id` (UUIDv7) before sending. Re-issuing the same id returns the
+        existing command with `200` instead of creating a second one — which is what makes
+        offline-queue replay and user retry safe on a destructive operation.
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id, deviceId, type]
+              properties:
+                id:
+                  allOf: [{ $ref: '#/components/schemas/Uuid' }]
+                  description: Client-generated UUIDv7
+                deviceId: { $ref: '#/components/schemas/Uuid' }
+                type: { $ref: '#/components/schemas/CommandType' }
+                params:
+                  type: object
+                  additionalProperties: true
+                  description: |
+                    Structured only. Never a shell string — the agent maps `type` to a fixed argv.
+                  examples: [{ delaySeconds: 10 }]
+                ttlSeconds:
+                  type: integer
+                  minimum: 5
+                  maximum: 600
+                  default: 120
+                  description: |
+                    After this, the command is `expired` and will never execute — even if the
+                    device comes online later holding it. This is the fix for stale destructive
+                    commands firing hours after they were sent (finding S2-03).
+      responses:
+        '201':
+          description: Issued
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Command' }
+        '200':
+          description: Idempotent replay — the existing command is returned unchanged
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Command' }
+        '403':
+          description: Not the caller's device, or the type is not in `allowedCommands`
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+    get:
+      tags: [commands]
+      summary: Command history for the caller
+      parameters:
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+        - name: deviceId
+          in: query
+          schema: { $ref: '#/components/schemas/Uuid' }
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/CommandStatus' }
+      responses:
+        '200':
+          description: Commands
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Command' }
+                  nextCursor: { type: [string, 'null'] }
+
+  /commands/{commandId}:
+    parameters:
+      - name: commandId
+        in: path
+        required: true
+        schema: { $ref: '#/components/schemas/Uuid' }
+    get:
+      tags: [commands]
+      summary: Live status of one command
+      responses:
+        '200':
+          description: Command
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Command' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /commands/{commandId}/cancel:
+    parameters:
+      - name: commandId
+        in: path
+        required: true
+        schema: { $ref: '#/components/schemas/Uuid' }
+    post:
+      tags: [commands]
+      summary: Cancel a command that has not been delivered
+      responses:
+        '200':
+          description: Cancelled
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Command' }
+        '409':
+          description: Already delivered or terminal
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /commands/pending:
+    get:
+      tags: [commands]
+      summary: Fetch this device's undelivered commands
+      description: |
+        Device tokens only (`command:receive`). Returns unexpired commands and atomically marks
+        them `delivered`. This is the **fallback** path; the primary path is the realtime
+        `command.issued` event. Both converge because execution is gated on the per-command ack.
+      responses:
+        '200':
+          description: Pending commands
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Command' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /commands/{commandId}/ack:
+    parameters:
+      - name: commandId
+        in: path
+        required: true
+        schema: { $ref: '#/components/schemas/Uuid' }
+    post:
+      tags: [commands]
+      summary: Acknowledge the outcome of one command
+      description: |
+        Replaces the legacy "clear the mailbox" operation, which could not distinguish which
+        command had been handled and lost the outcome entirely.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [outcome]
+              properties:
+                outcome: { type: string, enum: [succeeded, failed, rejected] }
+                resultCode: { type: string, maxLength: 32 }
+                resultMessage: { type: string, maxLength: 255 }
+      responses:
+        '200':
+          description: Recorded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Command' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: Already terminal
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  # ----------------------------------------------------------- reminders ----
+  /reminders:
+    get:
+      tags: [reminders]
+      summary: List reminders
+      parameters:
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+        - name: from
+          in: query
+          schema: { type: string, format: date-time }
+        - name: to
+          in: query
+          schema: { type: string, format: date-time }
+        - name: completed
+          in: query
+          schema: { type: boolean }
+      responses:
+        '200':
+          description: Reminders
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Reminder' }
+                  nextCursor: { type: [string, 'null'] }
+    post:
+      tags: [reminders]
+      summary: Create a reminder
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReminderInput' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Reminder' }
+        '422':
+          description: Semantically invalid — e.g. an `rrule` that never fires
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /reminders/{reminderId}:
+    parameters:
+      - name: reminderId
+        in: path
+        required: true
+        schema: { $ref: '#/components/schemas/Uuid' }
+    get:
+      tags: [reminders]
+      summary: Get one reminder
+      responses:
+        '200':
+          description: Reminder
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Reminder' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [reminders]
+      summary: Update a reminder
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf: [{ $ref: '#/components/schemas/ReminderInput' }]
+              minProperties: 1
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Reminder' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [reminders]
+      summary: Delete a reminder
+      responses:
+        '204': { description: Deleted }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /reminders/{reminderId}/complete:
+    parameters:
+      - name: reminderId
+        in: path
+        required: true
+        schema: { $ref: '#/components/schemas/Uuid' }
+    post:
+      tags: [reminders]
+      summary: Mark a reminder, or one occurrence of a series, complete
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [completed]
+              properties:
+                completed: { type: boolean }
+                occurrenceAt:
+                  type: string
+                  format: date-time
+                  description: |
+                    Completes a single occurrence of a recurring series. Omit to act on the
+                    whole reminder.
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Reminder' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ------------------------------------------------------------- account ----
+  /account/profile:
+    get:
+      tags: [account]
+      summary: Get the caller's profile
+      responses:
+        '200':
+          description: Profile
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Profile' }
+    patch:
+      tags: [account]
+      summary: Update the profile
+      description: Password changes are not accepted here — use `/auth/password/change`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              minProperties: 1
+              properties:
+                displayName: { type: string, maxLength: 255 }
+                timezone:
+                  type: string
+                  maxLength: 64
+                  description: IANA identifier; authoritative for reminder local times
+                  examples: ["Europe/London", "Asia/Kolkata"]
+                locale: { type: string, maxLength: 16 }
+                marketingOptIn: { type: boolean }
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Profile' }
+
+  /account/sessions:
+    get:
+      tags: [account]
+      summary: List active sessions
+      responses:
+        '200':
+          description: Sessions
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Session' }
+
+  /account:
+    delete:
+      tags: [account]
+      summary: Delete the account
+      description: Soft-deletes immediately; hard delete after 30 days, cascading everywhere.
+      responses:
+        '204': { description: Scheduled for deletion }
+
+  # ---------------------------------------------------------------- meta ----
+  /meta/discovery:
+    get:
+      tags: [meta]
+      summary: Client bootstrap document
+      description: |
+        Unauthenticated. Clients call this at startup to learn the realtime URL, whether they
+        are below the minimum supported build, and when legacy support ends. This is the
+        mechanism that eventually permits switching the v1 shim off.
+      security: []
+      responses:
+        '200':
+          description: Discovery
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Discovery' }
+
+  /meta/readyz:
+    get:
+      tags: [meta]
+      summary: Readiness — database and cache reachable
+      security: []
+      responses:
+        '200': { description: Ready }
+        '503': { description: A dependency is unavailable }
+
+# =============================================================================
+components:
+# =============================================================================
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: EdDSA (Ed25519) signed access token, 15-minute lifetime
+
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      schema: { type: string, maxLength: 255 }
+      description: Replaying a key with a different body returns 409.
+    Cursor:
+      name: cursor
+      in: query
+      schema: { type: string }
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+    DeviceId:
+      name: deviceId
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/Uuid' }
+
+  responses:
+    BadRequest:
+      description: Malformed or schema-invalid request
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Unauthorized:
+      description: Missing, expired, or invalid token
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Forbidden:
+      description: Valid token, insufficient scope
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotFound:
+      description: |
+        Not found, or not visible to the caller. These are deliberately indistinguishable so
+        the API cannot be used as an existence oracle across ownership boundaries.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Conflict:
+      description: Conflicting state
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    RateLimited:
+      description: Too many requests
+      headers:
+        Retry-After:
+          schema: { type: integer }
+          description: Seconds
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+  schemas:
+
+    Uuid:
+      type: string
+      format: uuid
+      description: UUIDv7. Internal auto-increment ids are never exposed.
+      examples: ["01932f4e-7c3a-7000-8000-9f1a2b3c4d5e"]
+
+    ClientKind:
+      type: string
+      enum: [desktop_agent, mobile, web, legacy]
+
+    Platform:
+      type: string
+      enum: [windows, macos, linux]
+
+    CommandType:
+      type: string
+      enum: [shutdown, restart, signout, lock, sleep, hibernate]
+      description: |
+        Closed vocabulary. Enforced server-side at issue and independently agent-side at
+        execution, where each value maps to a fixed argv with no shell involved.
+
+    CommandStatus:
+      type: string
+      enum: [issued, delivered, succeeded, failed, expired, cancelled]
+
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, requestId]
+          properties:
+            code:
+              type: string
+              description: Stable machine-readable identifier; clients switch on this, not on `message`.
+              examples: ["device.not_paired", "command.type_not_allowed", "auth.token_reused"]
+            message: { type: string }
+            requestId: { type: string }
+            details:
+              type: array
+              items:
+                type: object
+                properties:
+                  field: { type: string }
+                  issue: { type: string }
+
+    TokenPair:
+      type: object
+      required: [accessToken, refreshToken, expiresIn, tokenType, scopes]
+      properties:
+        accessToken: { type: string }
+        refreshToken:
+          type: string
+          description: Opaque, rotating. Store in the OS keychain, never in plain preferences.
+        tokenType: { type: string, const: Bearer }
+        expiresIn: { type: integer, description: Access token lifetime in seconds, examples: [900] }
+        scopes:
+          type: array
+          items: { type: string }
+
+    Device:
+      type: object
+      required: [id, displayName, platform, status, isOnline, allowedCommands, pairedAt]
+      properties:
+        id: { $ref: '#/components/schemas/Uuid' }
+        displayName:
+          type: string
+          description: |
+            A label only. Unlike the legacy `PCName` header it grants no authority — device
+            authorisation is by authenticated device id.
+        platform: { $ref: '#/components/schemas/Platform' }
+        osVersion: { type: string }
+        agentVersion: { type: string }
+        status: { type: string, enum: [active, revoked, suspended] }
+        isOnline: { type: boolean, description: Live presence from the realtime layer }
+        lastSeenAt: { type: [string, 'null'], format: date-time }
+        allowedCommands:
+          type: array
+          items: { $ref: '#/components/schemas/CommandType' }
+        pairedAt: { type: string, format: date-time }
+
+    Command:
+      type: object
+      required: [id, deviceId, type, status, issuedAt, expiresAt]
+      properties:
+        id: { $ref: '#/components/schemas/Uuid' }
+        deviceId: { $ref: '#/components/schemas/Uuid' }
+        type: { $ref: '#/components/schemas/CommandType' }
+        params: { type: [object, 'null'], additionalProperties: true }
+        status: { $ref: '#/components/schemas/CommandStatus' }
+        issuedByClient: { $ref: '#/components/schemas/ClientKind' }
+        issuedAt: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time }
+        deliveredAt: { type: [string, 'null'], format: date-time }
+        ackedAt: { type: [string, 'null'], format: date-time }
+        resultCode: { type: [string, 'null'] }
+        resultMessage: { type: [string, 'null'] }
+
+    ReminderInput:
+      type: object
+      required: [body, dueAt, timezone]
+      properties:
+        body:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          description: Encrypted at rest with AES-256-GCM under a per-user data key.
+        dueAt:
+          type: string
+          format: date-time
+          description: UTC instant. Local wall-clock strings are not accepted.
+        timezone:
+          type: string
+          maxLength: 64
+          description: IANA identifier the user entered the time in; retained for DST-correct recurrence.
+          examples: ["Europe/London"]
+        rrule:
+          type: [string, 'null']
+          maxLength: 255
+          description: RFC 5545 recurrence rule, replacing the five ad-hoc recurrence columns.
+          examples: ["FREQ=WEEKLY;BYDAY=MO,WE;UNTIL=20270101T000000Z"]
+
+    Reminder:
+      allOf:
+        - $ref: '#/components/schemas/ReminderInput'
+        - type: object
+          required: [id, isCompleted, createdAt]
+          properties:
+            id: { $ref: '#/components/schemas/Uuid' }
+            isCompleted: { type: boolean }
+            completedAt: { type: [string, 'null'], format: date-time }
+            nextOccurrenceAt: { type: [string, 'null'], format: date-time }
+            createdAt: { type: string, format: date-time }
+            updatedAt: { type: string, format: date-time }
+
+    Profile:
+      type: object
+      required: [id, username, email, timezone]
+      properties:
+        id: { $ref: '#/components/schemas/Uuid' }
+        username: { type: string }
+        email: { type: string, format: email }
+        isEmailVerified: { type: boolean }
+        displayName: { type: string }
+        timezone: { type: string }
+        locale: { type: string }
+        marketingOptIn: { type: boolean }
+        createdAt: { type: string, format: date-time }
+
+    Session:
+      type: object
+      required: [familyId, clientKind, issuedAt]
+      properties:
+        familyId: { $ref: '#/components/schemas/Uuid' }
+        clientKind: { $ref: '#/components/schemas/ClientKind' }
+        clientVersion: { type: string }
+        deviceId: { type: [string, 'null'], format: uuid }
+        ipFirstSeen: { type: [string, 'null'] }
+        issuedAt: { type: string, format: date-time }
+        lastUsedAt: { type: [string, 'null'], format: date-time }
+
+    Discovery:
+      type: object
+      required: [apiVersion, realtimeUrl, minimumSupportedClient]
+      properties:
+        apiVersion: { type: string }
+        realtimeUrl: { type: string, format: uri }
+        minimumSupportedClient:
+          type: object
+          properties:
+            desktop: { type: string }
+            mobile: { type: string }
+        recommendedClient:
+          type: object
+          properties:
+            desktop: { type: string }
+            mobile: { type: string }
+        legacySunset:
+          type: object
+          additionalProperties: { type: string, format: date-time }
+        capabilities:
+          type: array
+          items: { type: string }

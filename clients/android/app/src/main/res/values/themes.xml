@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <!-- The window behind Compose. It is painted the app's own background so the
+       first frame after the splash is not a white flash on a #F8FAFC app, and
+       the system bars are transparent because the app draws edge to edge. -->
+  <style name="Theme.PCConnect" parent="android:Theme.Material.Light.NoActionBar">
+    <item name="android:windowBackground">@color/app_background</item>
+    <item name="android:statusBarColor">@android:color/transparent</item>
+    <item name="android:navigationBarColor">@android:color/transparent</item>
+    <item name="android:windowLightStatusBar">true</item>
+    <item name="android:windowLightNavigationBar">true</item>
+  </style>
+</resources>

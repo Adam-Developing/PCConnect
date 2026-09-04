@@ -1,40 +1,105 @@
-# Deprecated directories
-api_PHP_Deprecated/
-PCClient_Deprecated/
+# ─────────────────────────────────────────────────────────────────────────────
+# PCConnect — repository ignore rules
+#
+# Rule (03-security-architecture.md §7): no secret is ever a file in the
+# repository. Secrets are SOPS+age encrypted (*.enc, which IS committed) or
+# injected as environment variables at deploy time.
+# ─────────────────────────────────────────────────────────────────────────────
 
-# Node
+# ── Secrets and credentials (S1-01, S1-14, S1-15) ────────────────────────────
+api/db_config.php
+**/db_config.php
+*.env
+.env
+.env.*
+!.env.example
+!*.env.example
+!*.enc
+!.env.*.enc
+secrets/
+*.pem
+*.key
+!**/testdata/*.key
+*.pfx
+*.p12
+*.jks
+*.keystore
+App/Key Store/
+appsettings.Local.json
+appsettings.*.Local.json
+local.properties
+keystore.properties
+
+# ── Database dumps containing real PII (S1-14) ───────────────────────────────
+db/*.sql
+DB/*.sql
+db/dumps/
+*.dump
+*.sql.gz
+*.sql.age
+
+# ── .NET ─────────────────────────────────────────────────────────────────────
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+*.user
+*.suo
+*.userprefs
+.vs/
+TestResults/
+*.trx
+*.coverage
+coverage/
+*.opencover.xml
+BenchmarkDotNet.Artifacts/
+publish/
+artifacts/
+
+# ── Node / web ───────────────────────────────────────────────────────────────
 node_modules/
 npm-debug.log
 yarn-error.log
+*.tsbuildinfo
+frontend/dist/
 
-# IDEs and Editors
+# ── Android / Gradle ─────────────────────────────────────────────────────────
+.gradle/
+App/build/
+App/.gradle/
+clients/android/build/
+clients/android/**/build/
+clients/android/.gradle/
+clients/android/local.properties
+captures/
+.cxx/
+*.apk
+*.aab
+
+# ── Legacy build output (S3-04) ──────────────────────────────────────────────
+PCClient/.vs/
+PCClient/**/bin/
+PCClient/**/obj/
+PCClient/PCClient Setup/
+PCClient/PCClient Setup Installer/
+PCClient/PCClient Setup JCC/
+PCClient/packages/
+PCClient/UpgradeLog*.htm
+App/app/build/
+App/build/
+
+# ── IDE / OS ─────────────────────────────────────────────────────────────────
 .idea/
 .vscode/
 *.swp
 *.swo
-
-# Sensitive/Keys
-App/Key Store/
-*.jks
-*.keystore
-.env
-.env.*
-*.pem
-
-# OS generated files
 .DS_Store
 Thumbs.db
+desktop.ini
 
-# Databases with data
-DB/pcconnect.sql
-DB/pcconnect_new.sql
-
-# Wails / Build Artifacts
-temp_wails/
-.task/
-PCClientWails/.task/
-*.tsbuildinfo
-frontend/dist/
-frontend/node_modules/
-bin/
-build/
+# ── Local operational scratch ────────────────────────────────────────────────
+tmp/
+.tmp/
+*.local

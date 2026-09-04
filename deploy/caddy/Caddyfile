@@ -1,0 +1,90 @@
+# =============================================================================
+# Caddy — the only thing listening on the public interface.
+#
+# TLS is ACME-issued and renewed automatically; HSTS is set with a two-year
+# max-age and preload (03 §5). Everything else in the stack is on an internal
+# network with no published port.
+# =============================================================================
+
+{
+	email {$ACME_EMAIL}
+	servers {
+		protocols h1 h2 h3
+	}
+}
+
+{$PCCONNECT_DOMAIN} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		-Server
+	}
+
+	# The realtime hub. Long-lived connections, so the read timeout has to be
+	# generous or every agent reconnects on a timer for no reason.
+	@realtime path /rt*
+	handle @realtime {
+		reverse_proxy api:8080 {
+			transport http {
+				read_timeout 24h
+				write_timeout 24h
+			}
+		}
+	}
+
+	# The v2 API.
+	handle /v2/* {
+		reverse_proxy api:8080
+	}
+
+	handle /openapi/* {
+		reverse_proxy api:8080
+	}
+
+	handle /.well-known/jwks.json {
+		reverse_proxy api:8080
+	}
+
+	# The legacy compatibility surface. The installed VB.NET and Java clients
+	# call /api/*; it is rate limited more tightly than /v2 because nothing on
+	# it should be busy, and it dies with the shim (ADR-0008).
+	handle /api/* {
+		reverse_proxy api:8080
+	}
+
+	handle /legacy/* {
+		reverse_proxy api:8080
+	}
+
+	# Health and metrics are reachable from the host only. /metrics in
+	# particular leaks per-endpoint volumes and must not be public.
+	@internal_only {
+		path /metrics /healthz /readyz
+		not remote_ip private_ranges
+	}
+	respond @internal_only 404
+
+	handle /metrics {
+		reverse_proxy api:8080
+	}
+
+	handle /healthz {
+		reverse_proxy api:8080
+	}
+
+	handle /readyz {
+		reverse_proxy api:8080
+	}
+
+	handle {
+		respond "PCConnect" 200
+	}
+
+	log {
+		output stdout
+		format json
+	}
+}
