@@ -7,7 +7,6 @@
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── Secrets and credentials (S1-01, S1-14, S1-15) ────────────────────────────
-api/db_config.php
 **/db_config.php
 *.env
 .env
@@ -24,7 +23,6 @@ secrets/
 *.p12
 *.jks
 *.keystore
-App/Key Store/
 appsettings.Local.json
 appsettings.*.Local.json
 local.properties
@@ -67,8 +65,6 @@ frontend/dist/
 
 # ── Android / Gradle ─────────────────────────────────────────────────────────
 .gradle/
-App/build/
-App/.gradle/
 clients/android/build/
 clients/android/**/build/
 clients/android/.gradle/
@@ -77,18 +73,6 @@ captures/
 .cxx/
 *.apk
 *.aab
-
-# ── Legacy build output (S3-04) ──────────────────────────────────────────────
-PCClient/.vs/
-PCClient/**/bin/
-PCClient/**/obj/
-PCClient/PCClient Setup/
-PCClient/PCClient Setup Installer/
-PCClient/PCClient Setup JCC/
-PCClient/packages/
-PCClient/UpgradeLog*.htm
-App/app/build/
-App/build/
 
 # ── IDE / OS ─────────────────────────────────────────────────────────────────
 .idea/

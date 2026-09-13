@@ -55,8 +55,9 @@ docs/    architecture/ and runbook.md
 tools/   generate-openapi.sh, restore-rehearsal.sh
 ```
 
-`PCClient/`, `App/` and `api/` are the v1 system. They are still here because the migration plan
-([07](docs/architecture/07-migration-plan.md)) removes them at the end, not at the start.
+The retired v1 source trees (`PCClient/`, `App/` and `api/`) have been removed. The v2 API keeps
+the temporary compatibility routes described in the migration plan
+([07](docs/architecture/07-migration-plan.md)) for already-installed v1 clients.
 
 ---
 
@@ -161,23 +162,6 @@ component is switched off — is [07](docs/architecture/07-migration-plan.md).
   system and the written architecture disagreed, what was changed, and what is deliberately not
   built yet
 - [Runbook](docs/runbook.md)
-
----
-
-## v1 release notes
-
-Kept because they are the record of what the installed clients do, and those clients are still
-carrying traffic until the shim is switched off.
-
-**PCClient 4.5** — bug fix for the exit and logout buttons after they moved into the settings
-panel.
-
-**PCClient 4.0** — multi-PC support, so one account can manage several machines rather than
-needing an account each. The settings menu gained reminder text and background colour, for eye
-strain.
-
-**PCClient 3.0** — rewritten in VB.NET, with a control panel that shows and adds reminders
-without needing the phone.
 
 ---
 
