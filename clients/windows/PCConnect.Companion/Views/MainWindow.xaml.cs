@@ -1,11 +1,15 @@
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Media;
 using PCConnect.Companion.ViewModels;
 
 namespace PCConnect.Companion.Views;
 
 public partial class MainWindow : Window
 {
+    private ItemsControl? _calendarDrag;
+
     public MainWindow()
     {
         InitializeComponent();
@@ -17,6 +21,7 @@ public partial class MainWindow : Window
                 // The step-up prompt is a window, so the view owns it; the view
                 // model only knows that something must confirm (ADR-0011).
                 shell.Devices.RequestStepUpPassword = RequestStepUpPasswordAsync;
+                shell.Reminders.RowsReset += () => RemindersScrollViewer.ScrollToTop();
             }
         };
 
@@ -29,7 +34,153 @@ public partial class MainWindow : Window
                 shell.Devices.CloseLogCommand.Execute(null);
                 e.Handled = true;
             }
+            else if (e.Key == Key.Escape &&
+                     DataContext is ShellViewModel { Page: CompanionPage.Reminders } remindersShell)
+            {
+                EndCalendarDrag();
+                remindersShell.Reminders.ClearSelectionCommand.Execute(null);
+                e.Handled = true;
+            }
         };
+
+        Deactivated += (_, _) => EndCalendarDrag();
+    }
+
+    private static Button? CalendarDayAt(ItemsControl calendar, Point position)
+    {
+        var hit = calendar.InputHitTest(position) as DependencyObject;
+        while (hit is not null && hit != calendar)
+        {
+            if (hit is Button { DataContext: DayCell } button)
+            {
+                return button;
+            }
+
+            hit = VisualTreeHelper.GetParent(hit);
+        }
+
+        return null;
+    }
+
+    private void OnCalendarMouseDown(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is not ItemsControl { DataContext: RemindersViewModel reminders } calendar ||
+            CalendarDayAt(calendar, e.GetPosition(calendar)) is not { DataContext: DayCell day } button)
+        {
+            return;
+        }
+
+        EndCalendarDrag();
+        button.Focus();
+        reminders.BeginDaySelection(day.Date,
+            Keyboard.Modifiers.HasFlag(ModifierKeys.Shift),
+            Keyboard.Modifiers.HasFlag(ModifierKeys.Control));
+        _calendarDrag = calendar;
+        if (!calendar.CaptureMouse())
+        {
+            EndCalendarDrag();
+        }
+
+        e.Handled = true;
+    }
+
+    private void OnCalendarMouseMove(object sender, MouseEventArgs e)
+    {
+        if (_calendarDrag is not { DataContext: RemindersViewModel reminders } calendar)
+        {
+            return;
+        }
+
+        if (e.LeftButton != MouseButtonState.Pressed)
+        {
+            EndCalendarDrag();
+        }
+        else if (CalendarDayAt(calendar, e.GetPosition(calendar)) is { DataContext: DayCell day })
+        {
+            reminders.ExtendDaySelection(day.Date);
+        }
+
+        e.Handled = true;
+    }
+
+    private void OnCalendarMouseUp(object sender, MouseButtonEventArgs e)
+    {
+        if (_calendarDrag is { DataContext: RemindersViewModel reminders } calendar)
+        {
+            if (CalendarDayAt(calendar, e.GetPosition(calendar)) is { DataContext: DayCell day })
+            {
+                reminders.ExtendDaySelection(day.Date);
+            }
+
+            EndCalendarDrag();
+            e.Handled = true;
+        }
+    }
+
+    private void OnCalendarLostMouseCapture(object sender, MouseEventArgs e) => EndCalendarDrag();
+
+    private void EndCalendarDrag()
+    {
+        var calendar = _calendarDrag;
+        _calendarDrag = null;
+        (calendar?.DataContext as RemindersViewModel)?.EndDaySelection();
+        if (calendar?.IsMouseCaptured == true)
+        {
+            calendar.ReleaseMouseCapture();
+        }
+    }
+
+    // Button.Click also handles Space/Enter and accessibility activation.
+    private void OnCalendarDayClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { DataContext: DayCell day } && DataContext is ShellViewModel shell)
+        {
+            shell.Reminders.BeginDaySelection(day.Date,
+                Keyboard.Modifiers.HasFlag(ModifierKeys.Shift),
+                Keyboard.Modifiers.HasFlag(ModifierKeys.Control));
+            shell.Reminders.EndDaySelection();
+            e.Handled = true;
+        }
+    }
+
+    private void OnCalendarMouseWheel(object sender, MouseWheelEventArgs e)
+    {
+        if (DataContext is ShellViewModel shell)
+        {
+            if (e.Delta > 0)
+            {
+                shell.Reminders.PreviousMonthCommand.Execute(null);
+            }
+            else if (e.Delta < 0)
+            {
+                shell.Reminders.NextMonthCommand.Execute(null);
+            }
+
+            e.Handled = true;
+        }
+    }
+
+    private void OnRemindersScrollChanged(object sender, ScrollChangedEventArgs e)
+    {
+        var scrollable = e.ExtentHeight - e.ViewportHeight;
+        if (e.VerticalOffset > 0 && scrollable > 0 && e.VerticalOffset >= scrollable - 80)
+        {
+            if (DataContext is ShellViewModel shell && shell.Reminders.HasMoreRows)
+            {
+                shell.Reminders.LoadMoreRowsCommand.Execute(null);
+            }
+        }
+    }
+
+    private void OnRemindersPreviewMouseWheel(object sender, MouseWheelEventArgs e)
+    {
+        if (e.Delta < 0 && RemindersScrollViewer.VerticalOffset >= RemindersScrollViewer.ScrollableHeight - 5)
+        {
+            if (DataContext is ShellViewModel shell && shell.Reminders.HasMoreRows)
+            {
+                shell.Reminders.LoadMoreRowsCommand.Execute(null);
+            }
+        }
     }
 
     private void OnSignInClick(object sender, RoutedEventArgs e) => SignIn();

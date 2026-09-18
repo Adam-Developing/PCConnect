@@ -75,8 +75,8 @@
 
     <!-- A day in a month grid. -->
     <DataTemplate x:Key="DayCellTemplate">
-      <Button Command="{Binding DataContext.SelectDayCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
-              CommandParameter="{Binding}" BorderThickness="0" Padding="0" Height="30" Margin="1"
+      <Button Click="OnCalendarDayClick" BorderThickness="0" Padding="0" Height="30" Margin="1"
+              AutomationProperties.Name="{Binding Date}" Cursor="Hand" ToolTip="{Binding Tooltip}"
               Background="Transparent">
         <Button.Template>
           <ControlTemplate TargetType="Button">
@@ -85,16 +85,21 @@
                 <TextBlock x:Name="Num" Text="{Binding Number}" FontSize="12.5"
                            HorizontalAlignment="Center" Foreground="{StaticResource Ink}" />
                 <Ellipse x:Name="Dot" Width="4" Height="4" Margin="0,1,0,0"
-                         Fill="Transparent" HorizontalAlignment="Center" />
+                         Fill="{StaticResource Accent}" HorizontalAlignment="Center"
+                         Visibility="{Binding HasEvents, Converter={StaticResource BoolToVis}}" />
               </StackPanel>
             </Border>
             <ControlTemplate.Triggers>
               <DataTrigger Binding="{Binding InMonth}" Value="False">
                 <Setter TargetName="Num" Property="Foreground" Value="{StaticResource InkDisabled}" />
               </DataTrigger>
-              <DataTrigger Binding="{Binding HasEvents}" Value="True">
-                <Setter TargetName="Dot" Property="Fill" Value="{StaticResource Accent}" />
-              </DataTrigger>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Bd" Property="Background" Value="{StaticResource Track}" />
+              </Trigger>
+              <Trigger Property="IsKeyboardFocused" Value="True">
+                <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource InkSoft}" />
+                <Setter TargetName="Bd" Property="BorderThickness" Value="1" />
+              </Trigger>
               <DataTrigger Binding="{Binding IsToday}" Value="True">
                 <Setter TargetName="Num" Property="Foreground" Value="{StaticResource Primary}" />
                 <Setter TargetName="Num" Property="FontWeight" Value="SemiBold" />
@@ -107,9 +112,6 @@
                 <Setter TargetName="Num" Property="FontWeight" Value="SemiBold" />
                 <Setter TargetName="Dot" Property="Fill" Value="White" />
               </DataTrigger>
-              <Trigger Property="IsMouseOver" Value="True">
-                <Setter TargetName="Bd" Property="Background" Value="{StaticResource Track}" />
-              </Trigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>
         </Button.Template>
@@ -498,20 +500,6 @@
               </Grid.ColumnDefinitions>
 
               <DockPanel Margin="0,0,16,0">
-                <Border DockPanel.Dock="Bottom" BorderBrush="{StaticResource InkDisabled}"
-                        BorderThickness="1" CornerRadius="12" Padding="14" Margin="0,10,0,0">
-                  <StackPanel>
-                    <TextBlock Text="Add another PC" Style="{StaticResource Body}" FontWeight="SemiBold"
-                               FontSize="13.5" />
-                    <TextBlock Style="{StaticResource Caption}" Margin="0,4,0,8" TextWrapping="Wrap"
-                               Text="Sign in on that PC and type the code it shows." />
-                    <TextBox Text="{Binding PairingCode, UpdateSourceTrigger=PropertyChanged}"
-                             FontFamily="{StaticResource MonoFont}" Height="36" />
-                    <Button Content="Add this PC" Command="{Binding ClaimPairingCommand}"
-                            Style="{StaticResource PrimaryButton}" Height="36" Margin="0,8,0,0" />
-                  </StackPanel>
-                </Border>
-
                 <ListBox ItemsSource="{Binding Others}" SelectedItem="{Binding SelectedDevice}">
                   <ListBox.ItemTemplate>
                     <DataTemplate>
@@ -536,9 +524,9 @@
               </DockPanel>
 
               <!-- no other PCs at all -->
-              <Border Grid.Column="1" Style="{StaticResource Card}" VerticalAlignment="Top"
+              <Border Grid.ColumnSpan="2" Style="{StaticResource Card}"
                       Visibility="{Binding SelectedDevice, Converter={StaticResource NullToVis}}">
-                <StackPanel HorizontalAlignment="Center" Margin="0,40">
+                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Margin="40">
                   <Border Width="64" Height="64" CornerRadius="20" Background="{StaticResource PrimaryTint}">
                     <Path Data="{StaticResource Icon.Devices}" Fill="{StaticResource Primary}"
                           Width="32" Height="32" Stretch="Uniform"
@@ -548,7 +536,7 @@
                              HorizontalAlignment="Center" Margin="0,18,0,0" />
                   <TextBlock Style="{StaticResource Subtle}" HorizontalAlignment="Center" Margin="0,8,0,0"
                              TextAlignment="Center" MaxWidth="360" TextWrapping="Wrap"
-                             Text="Install PCConnect on another Windows PC, sign in with this account, and add it with the code it shows." />
+                             Text="Install PCConnect on another Windows PC and sign in there with this account. It will appear here automatically." />
                 </StackPanel>
               </Border>
 
@@ -706,12 +694,44 @@
                         <TextBlock Text="{Binding ListSummary}" Style="{StaticResource Caption}"
                                    Margin="0,2,0,0" />
                       </StackPanel>
-                      <Button DockPanel.Dock="Right" Content="Show all" Command="{Binding ClearSelectionCommand}"
-                              Height="28" Padding="10,0" FontSize="12.5"
-                              Visibility="{Binding HasSelection, Converter={StaticResource BoolToVis}}" />
+                      <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                        <Button Content="Show all" Command="{Binding ClearSelectionCommand}"
+                                Height="28" Padding="10,0" FontSize="12.5"
+                                Visibility="{Binding HasSelection, Converter={StaticResource BoolToVis}}" />
+                      </StackPanel>
                     </DockPanel>
 
-                    <ScrollViewer Margin="0,10,0,0" VerticalScrollBarVisibility="Auto">
+                    <!-- Button bar at the top of the list saying show completed reminders -->
+                    <Border DockPanel.Dock="Top"
+                            Visibility="{Binding HasCompletedReminders, Converter={StaticResource BoolToVis}}"
+                            Margin="0,8,0,2">
+                      <Button Command="{Binding ToggleShowCompletedRemindersCommand}"
+                              HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                              Height="32" Cursor="Hand" Background="{StaticResource Track}" BorderThickness="0">
+                        <Button.Template>
+                          <ControlTemplate TargetType="Button">
+                            <Border x:Name="Bd" Background="{TemplateBinding Background}"
+                                    CornerRadius="8" Padding="12,0">
+                              <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
+                                <Path Data="{StaticResource Icon.CheckCircle}" Fill="{StaticResource InkSoft}"
+                                      Width="14" Height="14" Stretch="Uniform" Margin="0,0,6,0" VerticalAlignment="Center" />
+                                <TextBlock Text="{Binding DataContext.CompletedRemindersButtonText, RelativeSource={RelativeSource AncestorType=Button}}"
+                                           FontSize="12.5" FontWeight="Medium"
+                                           Foreground="{StaticResource InkSoft}" VerticalAlignment="Center" />
+                              </StackPanel>
+                            </Border>
+                            <ControlTemplate.Triggers>
+                              <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource PrimaryTint}" />
+                              </Trigger>
+                            </ControlTemplate.Triggers>
+                          </ControlTemplate>
+                        </Button.Template>
+                      </Button>
+                    </Border>
+
+                    <ScrollViewer x:Name="RemindersScrollViewer" Margin="0,6,0,0" VerticalScrollBarVisibility="Auto"
+                                  ScrollChanged="OnRemindersScrollChanged" PreviewMouseWheel="OnRemindersPreviewMouseWheel">
                       <StackPanel>
                         <ItemsControl ItemsSource="{Binding Rows}" ItemTemplate="{StaticResource ReminderRowTemplate}" />
 
@@ -726,43 +746,178 @@
                     </ScrollViewer>
                   </DockPanel>
 
-                  <StackPanel Grid.Column="1">
-                    <DockPanel>
-                      <Button DockPanel.Dock="Left" Command="{Binding PreviousMonthCommand}"
-                              BorderThickness="0" Background="Transparent" Padding="4" Width="26" Height="26">
+                  <StackPanel Grid.Column="1" PreviewMouseWheel="OnCalendarMouseWheel">
+                    <!-- Unified Calendar header: Left arrow, Title in middle (Month/Year/Decade), Right arrow -->
+                    <Grid Margin="0,0,0,4">
+                      <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                      </Grid.ColumnDefinitions>
+
+                      <Button Grid.Column="0" Command="{Binding HeaderPreviousCommand}"
+                              BorderThickness="0" Background="Transparent" Padding="4" Width="26" Height="26"
+                              ToolTip="Previous" Cursor="Hand">
                         <Path Data="{StaticResource Icon.ChevronLeft}" Fill="{StaticResource InkSoft}"
                               Width="18" Height="18" Stretch="Uniform" />
                       </Button>
-                      <Button DockPanel.Dock="Right" Command="{Binding NextMonthCommand}"
-                              BorderThickness="0" Background="Transparent" Padding="4" Width="26" Height="26">
+
+                      <Button Grid.Column="1" Command="{Binding HeaderTitleClickCommand}" BorderThickness="0" Background="Transparent"
+                              Padding="4,2" Cursor="Hand" HorizontalAlignment="Center" VerticalAlignment="Center"
+                              ToolTip="Click to change view">
+                        <StackPanel Orientation="Horizontal">
+                          <TextBlock Text="{Binding CalendarHeaderTitle}" Style="{StaticResource Body}" FontSize="13.5"
+                                     FontWeight="SemiBold" VerticalAlignment="Center" />
+                          <Path Data="{StaticResource Icon.ExpandMore}" Fill="{StaticResource InkSoft}"
+                                Width="14" Height="14" Stretch="Uniform" Margin="4,0,0,0" VerticalAlignment="Center"
+                                Visibility="{Binding CalendarHeaderHasChevron, Converter={StaticResource BoolToVis}}" />
+                        </StackPanel>
+                      </Button>
+
+                      <Button Grid.Column="2" Command="{Binding HeaderNextCommand}"
+                              BorderThickness="0" Background="Transparent" Padding="4" Width="26" Height="26"
+                              ToolTip="Next" Cursor="Hand">
                         <Path Data="{StaticResource Icon.ChevronRight}" Fill="{StaticResource InkSoft}"
                               Width="18" Height="18" Stretch="Uniform" />
                       </Button>
-                      <TextBlock Text="{Binding MonthTitle}" Style="{StaticResource Body}" FontSize="13.5"
-                                 FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center" />
-                    </DockPanel>
+                    </Grid>
 
-                    <UniformGrid Columns="7" Margin="0,8,0,4">
-                      <TextBlock Text="MO" Style="{StaticResource WeekdayHeader}" />
-                      <TextBlock Text="TU" Style="{StaticResource WeekdayHeader}" />
-                      <TextBlock Text="WE" Style="{StaticResource WeekdayHeader}" />
-                      <TextBlock Text="TH" Style="{StaticResource WeekdayHeader}" />
-                      <TextBlock Text="FR" Style="{StaticResource WeekdayHeader}" />
-                      <TextBlock Text="SA" Style="{StaticResource WeekdayHeader}" />
-                      <TextBlock Text="SU" Style="{StaticResource WeekdayHeader}" />
-                    </UniformGrid>
+                    <!-- Year selector panel -->
+                    <StackPanel Visibility="{Binding IsYearsView, Converter={StaticResource BoolToVis}}" Margin="0,4,0,0">
+                      <!-- 12 Years Grid: 3 columns x 4 rows -->
+                      <ItemsControl ItemsSource="{Binding YearOptions}">
+                        <ItemsControl.ItemsPanel>
+                          <ItemsPanelTemplate>
+                            <UniformGrid Columns="3" />
+                          </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                          <DataTemplate>
+                            <Button Command="{Binding DataContext.SelectYearCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                    CommandParameter="{Binding Year}"
+                                    Margin="2" Height="32" Padding="0" Cursor="Hand">
+                              <Button.Style>
+                                <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+                                  <Setter Property="Background" Value="Transparent" />
+                                  <Setter Property="BorderThickness" Value="1" />
+                                  <Setter Property="BorderBrush" Value="Transparent" />
+                                  <Setter Property="FontSize" Value="12" />
+                                  <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsCurrent}" Value="True">
+                                      <Setter Property="BorderBrush" Value="{StaticResource Primary}" />
+                                      <Setter Property="FontWeight" Value="SemiBold" />
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                                      <Setter Property="Background" Value="{StaticResource Primary}" />
+                                      <Setter Property="BorderBrush" Value="{StaticResource Primary}" />
+                                      <Setter Property="Foreground" Value="White" />
+                                      <Setter Property="FontWeight" Value="SemiBold" />
+                                    </DataTrigger>
+                                  </Style.Triggers>
+                                </Style>
+                              </Button.Style>
+                              <TextBlock Text="{Binding Year}"
+                                         Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                         HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            </Button>
+                          </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                      </ItemsControl>
 
-                    <ItemsControl ItemsSource="{Binding Days}" ItemTemplate="{StaticResource DayCellTemplate}">
-                      <ItemsControl.ItemsPanel>
-                        <ItemsPanelTemplate>
-                          <UniformGrid Columns="7" />
-                        </ItemsPanelTemplate>
-                      </ItemsControl.ItemsPanel>
-                    </ItemsControl>
+                      <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,8,0,0">
+                        <Button Command="{Binding GoToTodayCommand}" Content="Go to Today"
+                                Height="28" Padding="12,0" FontSize="12" FontWeight="Medium"
+                                Margin="0,0,8,0" ToolTip="Go to current month" />
+                        <Button Command="{Binding BackToCalendarCommand}" Content="Back to calendar"
+                                Style="{StaticResource LinkButton}" FontSize="11.5" Padding="6,2" />
+                      </StackPanel>
+                    </StackPanel>
 
-                    <TextBlock Style="{StaticResource Caption}" Margin="0,8,0,0" FontSize="11.5"
-                               TextWrapping="Wrap" LineHeight="17"
-                               Text="Click a day to see just that day. Click it again to show them all." />
+                    <!-- Month selector panel -->
+                    <StackPanel Visibility="{Binding IsMonthsView, Converter={StaticResource BoolToVis}}" Margin="0,4,0,0">
+                      <!-- 12 Months Grid: 3 columns x 4 rows -->
+                      <ItemsControl ItemsSource="{Binding MonthOptions}">
+                        <ItemsControl.ItemsPanel>
+                          <ItemsPanelTemplate>
+                            <UniformGrid Columns="3" />
+                          </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                          <DataTemplate>
+                            <Button Command="{Binding DataContext.SelectMonthCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                    CommandParameter="{Binding MonthNumber}"
+                                    Margin="2" Height="32" Padding="0" Cursor="Hand">
+                              <Button.Style>
+                                <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+                                  <Setter Property="Background" Value="Transparent" />
+                                  <Setter Property="BorderThickness" Value="1" />
+                                  <Setter Property="BorderBrush" Value="Transparent" />
+                                  <Setter Property="FontSize" Value="12" />
+                                  <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsCurrent}" Value="True">
+                                      <Setter Property="BorderBrush" Value="{StaticResource Primary}" />
+                                      <Setter Property="FontWeight" Value="SemiBold" />
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                                      <Setter Property="Background" Value="{StaticResource Primary}" />
+                                      <Setter Property="BorderBrush" Value="{StaticResource Primary}" />
+                                      <Setter Property="Foreground" Value="White" />
+                                      <Setter Property="FontWeight" Value="SemiBold" />
+                                    </DataTrigger>
+                                  </Style.Triggers>
+                                </Style>
+                              </Button.Style>
+                              <TextBlock Text="{Binding ShortName}"
+                                         Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                         HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            </Button>
+                          </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                      </ItemsControl>
+
+                      <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,8,0,0">
+                        <Button Command="{Binding GoToTodayCommand}" Content="Go to Today"
+                                Height="28" Padding="12,0" FontSize="12" FontWeight="Medium"
+                                Margin="0,0,8,0" ToolTip="Go to current month" />
+                        <Button Command="{Binding BackToCalendarCommand}" Content="Back to calendar"
+                                Style="{StaticResource LinkButton}" FontSize="11.5" Padding="6,2" />
+                      </StackPanel>
+                    </StackPanel>
+
+                    <!-- Days calendar view -->
+                    <StackPanel Visibility="{Binding IsDaysView, Converter={StaticResource BoolToVis}}">
+                      <UniformGrid Columns="7" Margin="0,8,0,4">
+                        <TextBlock Text="MO" Style="{StaticResource WeekdayHeader}" />
+                        <TextBlock Text="TU" Style="{StaticResource WeekdayHeader}" />
+                        <TextBlock Text="WE" Style="{StaticResource WeekdayHeader}" />
+                        <TextBlock Text="TH" Style="{StaticResource WeekdayHeader}" />
+                        <TextBlock Text="FR" Style="{StaticResource WeekdayHeader}" />
+                        <TextBlock Text="SA" Style="{StaticResource WeekdayHeader}" />
+                        <TextBlock Text="SU" Style="{StaticResource WeekdayHeader}" />
+                      </UniformGrid>
+
+                      <ItemsControl ItemsSource="{Binding Days}" ItemTemplate="{StaticResource DayCellTemplate}"
+                                    PreviewMouseLeftButtonDown="OnCalendarMouseDown"
+                                    PreviewMouseMove="OnCalendarMouseMove"
+                                    PreviewMouseLeftButtonUp="OnCalendarMouseUp"
+                                    LostMouseCapture="OnCalendarLostMouseCapture">
+                        <ItemsControl.ItemsPanel>
+                          <ItemsPanelTemplate>
+                            <UniformGrid Columns="7" />
+                          </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                      </ItemsControl>
+
+                      <!-- Dedicated Go to Today button below calendar days -->
+                      <Button Command="{Binding GoToTodayCommand}" Content="Go to Today"
+                              Height="28" Padding="14,0" FontSize="12" FontWeight="Medium"
+                              HorizontalAlignment="Center" Margin="0,8,0,0"
+                              ToolTip="Go to current month" />
+
+                      <TextBlock Style="{StaticResource Caption}" Margin="0,4,0,0" FontSize="11.5"
+                                 TextWrapping="Wrap" LineHeight="17"
+                                 Text="Click a day to filter. Drag or Shift-click for a range. Ctrl-click to add or remove days. Show all or Esc clears the selection." />
+                    </StackPanel>
                   </StackPanel>
                 </Grid>
               </Border>
@@ -796,13 +951,40 @@
                           <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
                         <StackPanel Margin="0,0,4,0">
-                          <TextBlock Text="{Binding DateLabel}" Style="{StaticResource FieldLabel}" />
-                          <DatePicker SelectedDate="{Binding NewDate}" Height="36" />
+                          <DockPanel Margin="0,0,0,4" MinHeight="18">
+                            <TextBlock Text="{Binding DateLabel}" Style="{StaticResource FieldLabel}" VerticalAlignment="Center" />
+                          </DockPanel>
+                          <DatePicker SelectedDate="{Binding NewDate}" Height="34" />
                         </StackPanel>
                         <StackPanel Grid.Column="1" Margin="4,0,0,0">
-                          <TextBlock Text="Time" Style="{StaticResource FieldLabel}" />
-                          <TextBox Text="{Binding NewTime, UpdateSourceTrigger=PropertyChanged}"
-                                   FontFamily="{StaticResource MonoFont}" Height="36" />
+                          <DockPanel Margin="0,0,0,4" MinHeight="18">
+                            <TextBlock Text="Time" Style="{StaticResource FieldLabel}" VerticalAlignment="Center" />
+                          </DockPanel>
+                          <Border Background="{StaticResource Surface}" BorderThickness="1"
+                                  CornerRadius="{StaticResource ControlRadius}" Height="34">
+                            <Border.Style>
+                              <Style TargetType="Border">
+                                <Setter Property="BorderBrush" Value="{StaticResource Border}" />
+                                <Style.Triggers>
+                                  <DataTrigger Binding="{Binding IsKeyboardFocusWithin, ElementName=TimeBox}" Value="True">
+                                    <Setter Property="BorderBrush" Value="{StaticResource Primary}" />
+                                  </DataTrigger>
+                                </Style.Triggers>
+                              </Style>
+                            </Border.Style>
+                            <Grid>
+                              <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                              </Grid.ColumnDefinitions>
+                              <Path Data="{StaticResource Icon.Schedule}" Fill="{StaticResource InkSoft}"
+                                    Width="15" Height="15" Stretch="Uniform" Margin="9,0,2,0" VerticalAlignment="Center" />
+                              <TextBox x:Name="TimeBox" Grid.Column="1" Text="{Binding NewTime, UpdateSourceTrigger=PropertyChanged}"
+                                       FontFamily="{StaticResource MonoFont}" FontSize="13"
+                                       Background="Transparent" BorderThickness="0" Height="32" Padding="4,0,8,0"
+                                       VerticalContentAlignment="Center" />
+                            </Grid>
+                          </Border>
                         </StackPanel>
                       </Grid>
 
@@ -909,7 +1091,7 @@
                               </ItemsControl.ItemsPanel>
                               <ItemsControl.ItemTemplate>
                                 <DataTemplate>
-                                  <Border Background="{StaticResource Track}" CornerRadius="999"
+                                  <Border Background="{StaticResource Track}" CornerRadius="15"
                                           Padding="10,0,6,0" Height="30" Margin="0,0,6,6">
                                     <StackPanel Orientation="Horizontal">
                                       <TextBlock Text="{Binding StringFormat=HH\\:mm}" Style="{StaticResource Mono}"
@@ -1118,13 +1300,13 @@
                                    Text="How it appears on your phone and other PCs." />
                       </StackPanel>
                       <TextBox Text="{Binding PcName, UpdateSourceTrigger=PropertyChanged}"
-                               Width="140" Height="34" HorizontalAlignment="Right"
-                               IsEnabled="{Binding HasThisPc}" />
+                               Width="140" Height="34" MaxLength="128" HorizontalAlignment="Right" />
                     </DockPanel>
                   </Border>
 
                   <Button Content="Save this PC's name" Command="{Binding RenameThisPcCommand}"
-                          Height="36" Margin="0,8,0,0" IsEnabled="{Binding HasThisPc}" />
+                          Height="36" Margin="0,8,0,0"
+                          Visibility="{Binding IsPcNameChanged, Converter={StaticResource BoolToVis}}" />
 
                   <Border Style="{StaticResource Card}" Margin="0,14,0,0">
                     <DockPanel>
@@ -1156,14 +1338,14 @@
                         <StackPanel Orientation="Horizontal">
                           <Path Data="{StaticResource Icon.Sync}" Fill="#0E7490" Width="15" Height="15"
                                 Stretch="Uniform" VerticalAlignment="Center" />
-                          <TextBlock Text="Synced with your phone" Style="{StaticResource PillText}"
+                          <TextBlock Text="{Binding DeviceSettingsStatus}" Style="{StaticResource PillText}"
                                      Foreground="#0E7490" Margin="5,0,0,0" />
                         </StackPanel>
                       </Border>
                       <StackPanel>
                         <TextBlock Text="Commands" Style="{StaticResource CardTitle}" />
                         <TextBlock Style="{StaticResource Caption}" Margin="0,2,0,0"
-                                   Text="Accepted is for this PC. Asking for a password is the account's rule." />
+                                   Text="Choose what this PC accepts and which commands ask for your password." />
                       </StackPanel>
                     </DockPanel>
 
@@ -1193,29 +1375,28 @@
 
                               <StackPanel Orientation="Horizontal">
                                 <Path Data="{Binding IconKey, Converter={StaticResource IconKey}}"
-                                      Fill="{Binding IsDestructive, Converter={StaticResource DangerIcon}}"
+                                      Fill="{StaticResource Ink}"
                                       Width="18" Height="18" Stretch="Uniform" VerticalAlignment="Center" />
                                 <TextBlock Text="{Binding Name}" Style="{StaticResource Subtle}"
                                            FontWeight="Medium" Margin="10,0,0,0" VerticalAlignment="Center"
-                                           Foreground="{Binding IsDestructive, Converter={StaticResource DangerText}}" />
+                                           Foreground="{StaticResource Ink}" />
                               </StackPanel>
 
                               <Button Grid.Column="1" HorizontalAlignment="Center" BorderThickness="0"
                                       Background="Transparent" Padding="4"
                                       Command="{Binding DataContext.ToggleAcceptedCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
-                                      CommandParameter="{Binding}"
-                                      IsEnabled="{Binding DataContext.HasThisPc, RelativeSource={RelativeSource AncestorType=ItemsControl}}">
+                                      CommandParameter="{Binding}">
                                 <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Accepted, Mode=OneWay}"
                                           IsHitTestVisible="False" />
                               </Button>
 
-                              <!-- Read-only on purpose: the four destructive commands always
-                                   ask, and a switch that cannot turn that off would be a lie
-                                   about what it does (ADR-0011). -->
-                              <CheckBox Grid.Column="2" Style="{StaticResource Switch}"
-                                        IsChecked="{Binding AsksForPassword, Mode=OneWay}"
-                                        IsHitTestVisible="False" IsEnabled="False"
-                                        HorizontalAlignment="Center" VerticalAlignment="Center" />
+                              <Button Grid.Column="2" HorizontalAlignment="Center" BorderThickness="0"
+                                      Background="Transparent" Padding="4" IsEnabled="{Binding Accepted}"
+                                      Command="{Binding DataContext.TogglePasswordRequiredCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                      CommandParameter="{Binding}">
+                                <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding AsksForPassword, Mode=OneWay}"
+                                          IsHitTestVisible="False" />
+                              </Button>
                             </Grid>
                           </Border>
                         </DataTemplate>
@@ -1224,7 +1405,7 @@
 
                     <TextBlock Style="{StaticResource Caption}" Margin="0,10,0,0" TextWrapping="Wrap"
                                Visibility="{Binding HasThisPc, Converter={StaticResource NotBoolToVis}}"
-                               Text="This PC is not on the account yet, so there is nothing to accept. Add it from your phone or from Other PCs on another machine." />
+                               Text="These choices are saved on this PC now and will sync automatically when it is linked to the account." />
                   </StackPanel>
                 </Border>
 

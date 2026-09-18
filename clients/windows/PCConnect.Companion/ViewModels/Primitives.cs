@@ -40,6 +40,44 @@ public sealed partial class DayCell : ObservableObject
     public required bool HasEvents { get; init; }
 
     public string Number => Date.Day.ToString(CultureInfo.CurrentCulture);
+
+    public string Tooltip => HasEvents
+        ? $"{Date.ToString("ddd d MMM", CultureInfo.CurrentCulture)} · Has reminders"
+        : Date.ToString("ddd d MMM", CultureInfo.CurrentCulture);
+}
+
+/// <summary>The navigation zoom level of the reminders calendar.</summary>
+public enum CalendarViewMode
+{
+    Days,
+    Months,
+    Years,
+}
+
+/// <summary>One year in a decade/year picker grid.</summary>
+public sealed partial class YearOption : ObservableObject
+{
+    public required int Year { get; init; }
+
+    [ObservableProperty]
+    private bool _isSelected;
+
+    [ObservableProperty]
+    private bool _isCurrent;
+}
+
+/// <summary>One month in a month/year picker grid.</summary>
+public sealed partial class MonthOption : ObservableObject
+{
+    public required int MonthNumber { get; init; }
+    public required string ShortName { get; init; }
+    public required string FullName { get; init; }
+
+    [ObservableProperty]
+    private bool _isSelected;
+
+    [ObservableProperty]
+    private bool _isCurrent;
 }
 
 /// <summary>One reminder in a list, already rendered for the screen.</summary>
@@ -58,6 +96,9 @@ public sealed partial class CommandRow : ObservableObject
     [ObservableProperty]
     private bool _accepted;
 
+    [ObservableProperty]
+    private bool _asksForPassword;
+
     public required string Type { get; init; }
 
     public required string Name { get; init; }
@@ -65,16 +106,7 @@ public sealed partial class CommandRow : ObservableObject
     /// <summary>The key in `Resources/Icons.xaml`, e.g. `Icon.PowerSettingsNew`.</summary>
     public required string IconKey { get; init; }
 
-    /// <summary>
-    /// Whether this command stops and asks for a password.
-    ///
-    /// It is the server's policy, not a switch on this PC: the four destructive
-    /// commands always ask (ADR-0011). Shown, never toggled — a switch that
-    /// cannot turn the requirement off would be a lie about what it does.
-    /// </summary>
-    public bool AsksForPassword => CommandTypes.Destructive.Contains(Type);
-
-    public bool IsDestructive => AsksForPassword;
+    public bool IsDestructive => CommandTypes.Destructive.Contains(Type);
 }
 
 /// <summary>One PC in the reminder sheet's "Show on" list.</summary>

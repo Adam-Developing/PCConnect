@@ -72,15 +72,89 @@ public partial class RemindersViewModel(
 
     // ── the list and the calendar ────────────────────────────────────────────
 
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(HasSelection))]
-    private DateOnly? _selectedDay;
+    public const int PageSize = 20;
+
+    private readonly HashSet<DateOnly> _selectedDays = [];
+    private readonly List<ReminderRow> _allRows = [];
+    private DateOnly? _selectionAnchor;
+    private DateOnly? _dragAnchor;
+    private DateOnly? _dragEnd;
+    private HashSet<DateOnly> _rangeBase = [];
+
+    public event Action? RowsReset;
 
     [ObservableProperty]
-    private string _listTitle = "Upcoming";
+    private string _listTitle = "All events";
 
     [ObservableProperty]
     private string _listSummary = string.Empty;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CompletedRemindersButtonText))]
+    [NotifyPropertyChangedFor(nameof(PastRemindersButtonText))]
+    private bool _showCompletedReminders;
+
+    [ObservableProperty]
+    private bool _hasCompletedReminders;
+
+    public string CompletedRemindersButtonText => ShowCompletedReminders ? "Hide completed reminders" : "Show completed reminders";
+
+    public bool ShowPastReminders
+    {
+        get => ShowCompletedReminders;
+        set => ShowCompletedReminders = value;
+    }
+
+    public bool HasPastReminders => HasCompletedReminders;
+
+    public string PastRemindersButtonText => CompletedRemindersButtonText;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsDaysView))]
+    [NotifyPropertyChangedFor(nameof(IsMonthsView))]
+    [NotifyPropertyChangedFor(nameof(IsYearsView))]
+    [NotifyPropertyChangedFor(nameof(IsMonthYearPickerOpen))]
+    [NotifyPropertyChangedFor(nameof(CalendarHeaderTitle))]
+    [NotifyPropertyChangedFor(nameof(CalendarHeaderHasChevron))]
+    private CalendarViewMode _viewMode = CalendarViewMode.Days;
+
+    public bool IsDaysView => ViewMode == CalendarViewMode.Days;
+    public bool IsMonthsView => ViewMode == CalendarViewMode.Months;
+    public bool IsYearsView => ViewMode == CalendarViewMode.Years;
+
+    public bool IsMonthYearPickerOpen
+    {
+        get => ViewMode != CalendarViewMode.Days;
+        set => ViewMode = value ? CalendarViewMode.Months : CalendarViewMode.Days;
+    }
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CalendarHeaderTitle))]
+    private int _pickerYear = DateTime.Today.Year;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CalendarHeaderTitle))]
+    private int _decadeStart = (DateTime.Today.Year / 12) * 12;
+
+    public string CalendarHeaderTitle => ViewMode switch
+    {
+        CalendarViewMode.Days => MonthTitle,
+        CalendarViewMode.Months => PickerYear.ToString(CultureInfo.CurrentCulture),
+        CalendarViewMode.Years => $"{DecadeStart} – {DecadeStart + 11}",
+        _ => MonthTitle
+    };
+
+    public bool CalendarHeaderHasChevron => ViewMode != CalendarViewMode.Years;
+
+    public ObservableCollection<YearOption> YearOptions { get; } = [];
+
+    public ObservableCollection<MonthOption> MonthOptions { get; } = new(
+        Enumerable.Range(1, 12).Select(m => new MonthOption
+        {
+            MonthNumber = m,
+            ShortName = new DateTime(2026, m, 1).ToString("MMM", CultureInfo.CurrentCulture),
+            FullName = new DateTime(2026, m, 1).ToString("MMMM", CultureInfo.CurrentCulture),
+        }));
 
     public ObservableCollection<ReminderResponse> Items { get; } = [];
 
@@ -102,7 +176,11 @@ public partial class RemindersViewModel(
 
     public bool IsCustomRepeat => Repeat == RepeatKind.Custom;
 
-    public bool HasSelection => SelectedDay is not null;
+    public bool HasSelection => _selectedDays.Count > 0;
+
+    public bool HasMoreRows => Rows.Count < _allRows.Count;
+
+    public bool IsCurrentMonth => _viewMonth.Year == DateTime.Today.Year && _viewMonth.Month == DateTime.Today.Month;
 
     public bool NoRows => Rows.Count == 0;
 
@@ -236,11 +314,73 @@ public partial class RemindersViewModel(
                 InMonth = day.Month == first.Month && day.Year == first.Year,
                 IsToday = day == today,
                 HasEvents = Items.Any(r => Recurrence.OccursOn(r.Rrule, DateOnly.FromDateTime(r.DueAt.ToLocalTime().Date), day)),
-                IsSelected = SelectedDay == day,
+                IsSelected = _selectedDays.Contains(day),
             });
         }
 
         OnPropertyChanged(nameof(MonthTitle));
+        OnPropertyChanged(nameof(IsCurrentMonth));
+        OnPropertyChanged(nameof(CalendarHeaderTitle));
+        OnPropertyChanged(nameof(CalendarHeaderHasChevron));
+        UpdateMonthOptions();
+    }
+
+    [RelayCommand]
+    private void HeaderPrevious()
+    {
+        switch (ViewMode)
+        {
+            case CalendarViewMode.Days:
+                PreviousMonth();
+                break;
+            case CalendarViewMode.Months:
+                PreviousYear();
+                break;
+            case CalendarViewMode.Years:
+                PreviousDecade();
+                break;
+        }
+    }
+
+    [RelayCommand]
+    private void HeaderNext()
+    {
+        switch (ViewMode)
+        {
+            case CalendarViewMode.Days:
+                NextMonth();
+                break;
+            case CalendarViewMode.Months:
+                NextYear();
+                break;
+            case CalendarViewMode.Years:
+                NextDecade();
+                break;
+        }
+    }
+
+    [RelayCommand]
+    private void HeaderTitleClick()
+    {
+        switch (ViewMode)
+        {
+            case CalendarViewMode.Days:
+                ViewMode = CalendarViewMode.Months;
+                PickerYear = _viewMonth.Year;
+                UpdateMonthOptions();
+                break;
+            case CalendarViewMode.Months:
+                ViewMode = CalendarViewMode.Years;
+                DecadeStart = (PickerYear / 12) * 12;
+                UpdateYearOptions();
+                break;
+            case CalendarViewMode.Years:
+                ViewMode = CalendarViewMode.Months;
+                UpdateMonthOptions();
+                break;
+        }
+        OnPropertyChanged(nameof(CalendarHeaderTitle));
+        OnPropertyChanged(nameof(CalendarHeaderHasChevron));
     }
 
     [RelayCommand]
@@ -248,7 +388,10 @@ public partial class RemindersViewModel(
     {
         _viewMonth = _viewMonth.AddMonths(-1);
         RebuildCalendar();
-        RebuildRows();
+        if (HasSelection)
+        {
+            RebuildRows();
+        }
     }
 
     [RelayCommand]
@@ -256,110 +399,409 @@ public partial class RemindersViewModel(
     {
         _viewMonth = _viewMonth.AddMonths(1);
         RebuildCalendar();
+        if (HasSelection)
+        {
+            RebuildRows();
+        }
+    }
+
+    [RelayCommand]
+    private void GoToToday()
+    {
+        _viewMonth = new DateOnly(DateTime.Today.Year, DateTime.Today.Month, 1);
+        PickerYear = DateTime.Today.Year;
+        ViewMode = CalendarViewMode.Days;
+        RebuildCalendar();
+        if (HasSelection)
+        {
+            RebuildRows();
+        }
+        OnPropertyChanged(nameof(CalendarHeaderTitle));
+        OnPropertyChanged(nameof(CalendarHeaderHasChevron));
+    }
+
+    [RelayCommand]
+    private void ToggleShowCompletedReminders()
+    {
+        ShowCompletedReminders = !ShowCompletedReminders;
         RebuildRows();
     }
 
-    /// <summary>Clicking the selected day again clears the filter, as Esc does.</summary>
     [RelayCommand]
-    private void SelectDay(DayCell? cell)
+    private void ToggleShowPastReminders() => ToggleShowCompletedReminders();
+
+    [RelayCommand]
+    private void ToggleMonthYearPicker()
     {
-        if (cell is null)
+        if (ViewMode == CalendarViewMode.Days)
+        {
+            ViewMode = CalendarViewMode.Months;
+            PickerYear = _viewMonth.Year;
+            UpdateMonthOptions();
+        }
+        else
+        {
+            ViewMode = CalendarViewMode.Days;
+        }
+        OnPropertyChanged(nameof(CalendarHeaderTitle));
+        OnPropertyChanged(nameof(CalendarHeaderHasChevron));
+    }
+
+    [RelayCommand]
+    private void PreviousYear()
+    {
+        PickerYear--;
+        UpdateMonthOptions();
+        OnPropertyChanged(nameof(CalendarHeaderTitle));
+    }
+
+    [RelayCommand]
+    private void NextYear()
+    {
+        PickerYear++;
+        UpdateMonthOptions();
+        OnPropertyChanged(nameof(CalendarHeaderTitle));
+    }
+
+    [RelayCommand]
+    private void PreviousDecade()
+    {
+        DecadeStart -= 12;
+        UpdateYearOptions();
+        OnPropertyChanged(nameof(CalendarHeaderTitle));
+    }
+
+    [RelayCommand]
+    private void NextDecade()
+    {
+        DecadeStart += 12;
+        UpdateYearOptions();
+        OnPropertyChanged(nameof(CalendarHeaderTitle));
+    }
+
+    [RelayCommand]
+    private void SelectYear(object? param)
+    {
+        var year = param switch
+        {
+            int y => y,
+            YearOption opt => opt.Year,
+            string s when int.TryParse(s, out var parsed) => parsed,
+            _ => PickerYear
+        };
+
+        PickerYear = year;
+        ViewMode = CalendarViewMode.Months;
+        UpdateMonthOptions();
+        OnPropertyChanged(nameof(CalendarHeaderTitle));
+        OnPropertyChanged(nameof(CalendarHeaderHasChevron));
+    }
+
+    [RelayCommand]
+    private void SelectMonth(object? param)
+    {
+        var monthNumber = param switch
+        {
+            int n => n,
+            MonthOption opt => opt.MonthNumber,
+            string s when int.TryParse(s, out var parsed) => parsed,
+            _ => _viewMonth.Month
+        };
+
+        _viewMonth = new DateOnly(PickerYear, monthNumber, 1);
+        ViewMode = CalendarViewMode.Days;
+        RebuildCalendar();
+        if (HasSelection)
+        {
+            RebuildRows();
+        }
+        OnPropertyChanged(nameof(CalendarHeaderTitle));
+        OnPropertyChanged(nameof(CalendarHeaderHasChevron));
+    }
+
+    [RelayCommand]
+    private void BackToCalendar()
+    {
+        ViewMode = CalendarViewMode.Days;
+        OnPropertyChanged(nameof(CalendarHeaderTitle));
+        OnPropertyChanged(nameof(CalendarHeaderHasChevron));
+    }
+
+    private void UpdateYearOptions()
+    {
+        YearOptions.Clear();
+        var todayYear = DateTime.Today.Year;
+        for (var y = DecadeStart; y < DecadeStart + 12; y++)
+        {
+            YearOptions.Add(new YearOption
+            {
+                Year = y,
+                IsSelected = y == PickerYear,
+                IsCurrent = y == todayYear,
+            });
+        }
+    }
+
+    private void UpdateMonthOptions()
+    {
+        var today = DateTime.Today;
+        foreach (var opt in MonthOptions)
+        {
+            opt.IsSelected = opt.MonthNumber == _viewMonth.Month && PickerYear == _viewMonth.Year;
+            opt.IsCurrent = opt.MonthNumber == today.Month && PickerYear == today.Year;
+        }
+    }
+
+    [RelayCommand]
+    public void LoadMoreRows()
+    {
+        if (!HasMoreRows)
         {
             return;
         }
 
-        SelectedDay = SelectedDay == cell.Date ? null : cell.Date;
-
-        foreach (var day in Days)
+        var nextBatch = _allRows.Skip(Rows.Count).Take(PageSize).ToList();
+        foreach (var row in nextBatch)
         {
-            day.IsSelected = SelectedDay == day.Date;
+            Rows.Add(row);
         }
 
-        RebuildRows();
+        UpdateListSummary();
+        OnPropertyChanged(nameof(HasMoreRows));
+    }
+
+    /// <summary>Starts a click or drag; Shift extends a range and Ctrl toggles a day.</summary>
+    public void BeginDaySelection(DateOnly date, bool extend, bool toggle)
+    {
+        if (extend)
+        {
+            var anchor = _selectionAnchor ?? date;
+            _dragAnchor = anchor;
+            _dragEnd = date;
+            SetRange(anchor, date);
+        }
+        else if (toggle)
+        {
+            if (!_selectedDays.Remove(date))
+            {
+                _selectedDays.Add(date);
+            }
+            _rangeBase = new HashSet<DateOnly>(_selectedDays);
+            _selectionAnchor = date;
+            _dragAnchor = date;
+            _dragEnd = date;
+        }
+        else
+        {
+            _selectedDays.Clear();
+            _selectedDays.Add(date);
+            _rangeBase.Clear();
+            _selectionAnchor = date;
+            _dragAnchor = date;
+            _dragEnd = date;
+        }
+
+        RefreshSelection();
+    }
+
+    public void ExtendDaySelection(DateOnly date)
+    {
+        if (_dragAnchor is not { } anchor || _dragEnd == date)
+        {
+            return;
+        }
+
+        _dragEnd = date;
+        SetRange(anchor, date);
+        RefreshSelection();
+    }
+
+    public void EndDaySelection()
+    {
+        _dragAnchor = null;
+        _dragEnd = null;
+    }
+
+    private void SetRange(DateOnly anchor, DateOnly date)
+    {
+        _selectedDays.Clear();
+        _selectedDays.UnionWith(_rangeBase);
+        var start = Math.Min(anchor.DayNumber, date.DayNumber);
+        var end = Math.Max(anchor.DayNumber, date.DayNumber);
+        for (var number = start; number <= end; number++)
+        {
+            _selectedDays.Add(DateOnly.FromDayNumber(number));
+        }
     }
 
     [RelayCommand]
     private void ClearSelection()
     {
-        SelectedDay = null;
+        EndDaySelection();
+        _selectionAnchor = null;
+        _rangeBase.Clear();
+        _selectedDays.Clear();
+        RefreshSelection();
+    }
 
+    private void RefreshSelection()
+    {
         foreach (var day in Days)
         {
-            day.IsSelected = false;
+            day.IsSelected = _selectedDays.Contains(day.Date);
         }
 
+        OnPropertyChanged(nameof(HasSelection));
         RebuildRows();
     }
 
-    private void RebuildRows()
+    public void RebuildRows()
     {
         Rows.Clear();
+        _allRows.Clear();
 
         var today = DateOnly.FromDateTime(DateTime.Today);
-        var days = SelectedDay is { } picked
-            ? [picked]
-            : DaysOfMonthFrom(today);
 
-        foreach (var day in days)
+        if (HasSelection)
         {
-            foreach (var reminder in Items)
+            var days = _selectedDays.Order().ToList();
+            foreach (var day in days)
             {
-                var seriesStart = DateOnly.FromDateTime(reminder.DueAt.ToLocalTime().Date);
-                if (!Recurrence.OccursOn(reminder.Rrule, seriesStart, day))
+                foreach (var reminder in Items.OrderBy(r => r.DueAt.ToLocalTime().TimeOfDay))
                 {
-                    continue;
-                }
-
-                var local = reminder.DueAt.ToLocalTime();
-                var past = day < today || (day == today && reminder.IsCompleted);
-
-                Rows.Add(new ReminderRow(
-                    Id: reminder.Id,
-                    Time: local.ToString("HH:mm", CultureInfo.CurrentCulture),
-                    DayLabel: Describe(day),
-                    Body: reminder.Body,
-                    Detail: string.Join(" · ", new[]
+                    var seriesStart = DateOnly.FromDateTime(reminder.DueAt.ToLocalTime().Date);
+                    if (!Recurrence.OccursOn(reminder.Rrule, seriesStart, day))
                     {
-                        Recurrence.Describe(reminder.Rrule),
-                        DescribeTargets(reminder.DeviceIds),
-                    }.Where(s => s.Length > 0)),
-                    IsCompleted: reminder.IsCompleted && day == today,
-                    IsPast: past));
+                        continue;
+                    }
+                    if (reminder.RecurrenceUntil is { } until && day > DateOnly.FromDateTime(until.ToLocalTime().Date))
+                    {
+                        continue;
+                    }
+
+                    var local = reminder.DueAt.ToLocalTime();
+                    var isCompleted = string.IsNullOrEmpty(reminder.Rrule)
+                        ? reminder.IsCompleted
+                        : (reminder.IsCompleted && day == today);
+                    var past = day < today || isCompleted;
+
+                    _allRows.Add(new ReminderRow(
+                        Id: reminder.Id,
+                        Time: local.ToString("HH:mm", CultureInfo.CurrentCulture),
+                        DayLabel: Describe(day),
+                        Body: reminder.Body,
+                        Detail: string.Join(" · ", new[]
+                        {
+                            Recurrence.Describe(reminder.Rrule),
+                            DescribeTargets(reminder.DeviceIds),
+                        }.Where(s => s.Length > 0)),
+                        IsCompleted: isCompleted,
+                        IsPast: past));
+                }
             }
-        }
 
-        var count = Rows.Count == 1 ? "1 reminder" : $"{Rows.Count} reminders";
-
-        if (SelectedDay is { } chosen)
-        {
-            ListTitle = Describe(chosen);
-            ListSummary = count;
+            ListTitle = _selectedDays.Count == 1 ? Describe(days[0]) : $"{days.Count} days selected";
+            HasCompletedReminders = false;
+            OnPropertyChanged(nameof(HasPastReminders));
         }
         else
         {
-            ListTitle = "Upcoming";
-            ListSummary = $"{MonthTitle} · {count}";
-        }
+            ListTitle = "All events";
 
-        OnPropertyChanged(nameof(NoRows));
-    }
-
-    private List<DateOnly> DaysOfMonthFrom(DateOnly today)
-    {
-        var days = new List<DateOnly>();
-        var isCurrentMonth = _viewMonth.Year == today.Year && _viewMonth.Month == today.Month;
-
-        for (var day = 1; day <= DateTime.DaysInMonth(_viewMonth.Year, _viewMonth.Month); day++)
-        {
-            var date = new DateOnly(_viewMonth.Year, _viewMonth.Month, day);
-            if (!isCurrentMonth || date >= today)
+            if (Items.Count > 0)
             {
-                days.Add(date);
+                var earliestDate = Items.Select(r =>
+                {
+                    var start = DateOnly.FromDateTime(r.DueAt.ToLocalTime().Date);
+                    return string.IsNullOrEmpty(r.Rrule)
+                        ? start
+                        : (start < today.AddDays(-30) ? today.AddDays(-30) : start);
+                }).Min();
+
+                var hasIndefiniteRecurring = Items.Any(r => !string.IsNullOrEmpty(r.Rrule) && r.RecurrenceUntil is null);
+                var maxFixedDate = Items.Select(r => r.RecurrenceUntil is { } u
+                    ? DateOnly.FromDateTime(u.ToLocalTime().Date)
+                    : DateOnly.FromDateTime(r.DueAt.ToLocalTime().Date)).Max();
+
+                var endDate = hasIndefiniteRecurring
+                    ? (maxFixedDate > today.AddYears(1) ? maxFixedDate : today.AddYears(1))
+                    : maxFixedDate;
+
+                var pastCount = 0;
+                for (var day = earliestDate; day <= endDate; day = day.AddDays(1))
+                {
+                    foreach (var reminder in Items.OrderBy(r => r.DueAt.ToLocalTime().TimeOfDay))
+                    {
+                        var seriesStart = DateOnly.FromDateTime(reminder.DueAt.ToLocalTime().Date);
+                        if (reminder.Rrule is not null && day < seriesStart)
+                        {
+                            continue;
+                        }
+                        if (reminder.RecurrenceUntil is { } until && day > DateOnly.FromDateTime(until.ToLocalTime().Date))
+                        {
+                            continue;
+                        }
+                        if (!Recurrence.OccursOn(reminder.Rrule, seriesStart, day))
+                        {
+                            continue;
+                        }
+
+                        var local = reminder.DueAt.ToLocalTime();
+                        var isCompleted = string.IsNullOrEmpty(reminder.Rrule)
+                            ? reminder.IsCompleted
+                            : (reminder.IsCompleted && day == today);
+                        var past = day < today || isCompleted;
+
+                        if (past)
+                        {
+                            pastCount++;
+                            if (!ShowCompletedReminders)
+                            {
+                                continue;
+                            }
+                        }
+
+                        _allRows.Add(new ReminderRow(
+                            Id: reminder.Id,
+                            Time: local.ToString("HH:mm", CultureInfo.CurrentCulture),
+                            DayLabel: Describe(day),
+                            Body: reminder.Body,
+                            Detail: string.Join(" · ", new[]
+                            {
+                                Recurrence.Describe(reminder.Rrule),
+                                DescribeTargets(reminder.DeviceIds),
+                            }.Where(s => s.Length > 0)),
+                            IsCompleted: isCompleted,
+                            IsPast: past));
+                    }
+                }
+
+                HasCompletedReminders = pastCount > 0;
+                OnPropertyChanged(nameof(HasPastReminders));
+            }
+            else
+            {
+                HasCompletedReminders = false;
+                OnPropertyChanged(nameof(HasPastReminders));
             }
         }
 
-        return days;
+        foreach (var row in _allRows.Take(PageSize))
+        {
+            Rows.Add(row);
+        }
+
+        UpdateListSummary();
+        OnPropertyChanged(nameof(NoRows));
+        OnPropertyChanged(nameof(HasMoreRows));
+        RowsReset?.Invoke();
     }
+
+    private void UpdateListSummary()
+    {
+        ListSummary = _allRows.Count == 1 ? "1 reminder" : $"{_allRows.Count} reminders";
+    }
+
 
     /// <summary>"all PCs", or the names of the ones it was aimed at.</summary>
     private string DescribeTargets(IReadOnlyList<string>? deviceIds)
@@ -443,6 +885,15 @@ public partial class RemindersViewModel(
         {
             ExtraTimes.Remove(value);
             OnPropertyChanged(nameof(ScheduleSummary));
+        }
+    }
+
+    [RelayCommand]
+    private void SetTime(string? time)
+    {
+        if (!string.IsNullOrWhiteSpace(time))
+        {
+            NewTime = time;
         }
     }
 
@@ -540,6 +991,8 @@ public partial class RemindersViewModel(
             {
                 NewBody = string.Empty;
                 ExtraTimes.Clear();
+                NewDate = DateTime.Today;
+                NewTime = DateTime.Now.AddHours(1).ToString("HH:00", CultureInfo.InvariantCulture);
                 await LoadAsync();
                 StatusMessage = created == 1 ? "Reminder added." : $"{created} reminders added.";
             }

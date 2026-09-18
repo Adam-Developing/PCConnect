@@ -222,3 +222,19 @@ public sealed class BoolToStrikethroughConverter : IValueConverter
     public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) =>
         throw new NotSupportedException();
 }
+
+/// <summary>
+/// A pill's corner radius: half its height, so both ends are semicircles.
+///
+/// A large constant radius is not the same thing in WPF. A radius too big for
+/// the border is cut back to half the width across and half the height down,
+/// separately, so a border wider than it is tall comes out as an ellipse.
+/// </summary>
+public sealed class HeightToPillRadiusConverter : IValueConverter
+{
+    public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+        new CornerRadius(value is double height ? height / 2 : 0);
+
+    public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+        throw new NotSupportedException();
+}
