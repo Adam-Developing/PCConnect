@@ -160,7 +160,6 @@ public static class CacheKeys
 
     public static string StepUpToken(string tokenHash) => $"stepup:{tokenHash}";
 
-    public static string PairingAttempts(string codeHash) => $"pairattempt:{codeHash}";
 }
 
 /// <summary>Live presence with a TTL, refreshed by the realtime connection (05 §6).</summary>

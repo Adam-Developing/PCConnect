@@ -1,6 +1,8 @@
 using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Net.Http;
+using System.Windows;
+using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.Extensions.Logging;
@@ -21,6 +23,12 @@ public partial class RemindersViewModel(
     private static readonly string[] DayInitials = ["M", "T", "W", "T", "F", "S", "S"];
 
     private DateOnly _viewMonth = new(DateTime.Today.Year, DateTime.Today.Month, 1);
+
+    private DispatcherTimer? _statusTimer;
+    private double _remainingSeconds;
+    private const double TotalStatusDuration = 5.0;
+    private const double TimerIntervalMs = 50.0;
+    private bool _isStatusTimerPaused;
 
     // ── the form ─────────────────────────────────────────────────────────────
 
@@ -56,7 +64,27 @@ public partial class RemindersViewModel(
     private string _statusMessage = string.Empty;
 
     [ObservableProperty]
+    private bool _isStatusError;
+
+    [ObservableProperty]
+    private double _statusProgress = 1.0;
+
+    [ObservableProperty]
+    private bool _isRefreshing;
+
+    [ObservableProperty]
     private bool _isBusy;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(FormTitle))]
+    [NotifyPropertyChangedFor(nameof(SaveButtonText))]
+    private bool _isEditing;
+
+    [ObservableProperty]
+    private string? _editingReminderId;
+
+    public string FormTitle => IsEditing ? "Edit reminder" : "New reminder";
+    public string SaveButtonText => IsEditing ? "Save changes" : "Save reminder";
 
     /// <summary>
     /// Whether the server understands a reminder that names its PCs. The picker
@@ -187,6 +215,7 @@ public partial class RemindersViewModel(
     public bool ShowOnChosenPcs => !ShowOnAllPcs;
 
     public string MonthTitle => _viewMonth.ToString("MMMM yyyy", CultureInfo.CurrentCulture);
+    public DateOnly ViewMonth => _viewMonth;
 
     public string DateLabel => Repeat == RepeatKind.Once ? "Date" : "Starts";
 
@@ -242,16 +271,113 @@ public partial class RemindersViewModel(
 
         Targets.Clear();
 
+        var thisPcId = devices.ThisPcId;
+
         foreach (var device in devices.Items)
         {
+            var isThisPc = !string.IsNullOrEmpty(thisPcId) && string.Equals(device.Id, thisPcId, StringComparison.OrdinalIgnoreCase);
+
             Targets.Add(new TargetToggle
             {
                 DeviceId = device.Id,
                 Name = device.DisplayName,
-                IsOnline = device.IsOnline,
+                IsOnline = device.IsOnline || isThisPc,
+                IsThisPc = isThisPc,
                 IsChosen = chosen.Contains(device.Id),
             });
         }
+    }
+
+    public void ApplyPresence(DevicePresenceEvent presence)
+    {
+        var target = Targets.FirstOrDefault(t => t.DeviceId == presence.DeviceId);
+        if (target is not null && !target.IsThisPc)
+        {
+            target.IsOnline = presence.IsOnline;
+        }
+    }
+
+    [RelayCommand]
+    public async Task RefreshAsync()
+    {
+        if (IsBusy || IsRefreshing)
+        {
+            return;
+        }
+
+        IsRefreshing = true;
+        try
+        {
+            var reloadTask = Task.WhenAll(devices.LoadAsync(), LoadAsync());
+            var minDelayTask = Task.Delay(650);
+            await Task.WhenAll(reloadTask, minDelayTask);
+            RefreshTargets();
+        }
+        finally
+        {
+            IsRefreshing = false;
+        }
+    }
+
+    public void ShowStatus(string message, bool isError)
+    {
+        StatusMessage = message;
+        IsStatusError = isError;
+        _remainingSeconds = TotalStatusDuration;
+        StatusProgress = 1.0;
+        _isStatusTimerPaused = false;
+
+        var dispatcher = Application.Current?.Dispatcher ?? Dispatcher.CurrentDispatcher;
+        if (_statusTimer is null)
+        {
+            _statusTimer = new DispatcherTimer(TimeSpan.FromMilliseconds(TimerIntervalMs), DispatcherPriority.Normal, OnStatusTimerTick, dispatcher);
+        }
+        else
+        {
+            _statusTimer.Stop();
+            _statusTimer.Start();
+        }
+    }
+
+    private void OnStatusTimerTick(object? sender, EventArgs e)
+    {
+        if (_isStatusTimerPaused)
+        {
+            return;
+        }
+
+        _remainingSeconds -= TimerIntervalMs / 1000.0;
+        if (_remainingSeconds <= 0)
+        {
+            _statusTimer?.Stop();
+            StatusMessage = string.Empty;
+            StatusProgress = 1.0;
+        }
+        else
+        {
+            StatusProgress = Math.Clamp(_remainingSeconds / TotalStatusDuration, 0.0, 1.0);
+        }
+    }
+
+    [RelayCommand]
+    public void PauseStatusTimer()
+    {
+        _isStatusTimerPaused = true;
+    }
+
+    [RelayCommand]
+    public void ResumeStatusTimer()
+    {
+        _isStatusTimerPaused = false;
+    }
+
+    [RelayCommand]
+    public void DismissStatus()
+    {
+        _statusTimer?.Stop();
+        StatusMessage = string.Empty;
+        StatusProgress = 1.0;
+        _isStatusTimerPaused = false;
     }
 
     [RelayCommand]
@@ -286,7 +412,7 @@ public partial class RemindersViewModel(
         }
         catch (Exception ex) when (ex is PcConnectApiException or HttpRequestException)
         {
-            StatusMessage = "Could not load your reminders.";
+            ShowStatus("Could not load your reminders.", true);
             logger.LogWarning(ex, "Reminder list failed");
         }
     }
@@ -319,6 +445,7 @@ public partial class RemindersViewModel(
         }
 
         OnPropertyChanged(nameof(MonthTitle));
+        OnPropertyChanged(nameof(ViewMonth));
         OnPropertyChanged(nameof(IsCurrentMonth));
         OnPropertyChanged(nameof(CalendarHeaderTitle));
         OnPropertyChanged(nameof(CalendarHeaderHasChevron));
@@ -412,10 +539,7 @@ public partial class RemindersViewModel(
         PickerYear = DateTime.Today.Year;
         ViewMode = CalendarViewMode.Days;
         RebuildCalendar();
-        if (HasSelection)
-        {
-            RebuildRows();
-        }
+        ClearSelection();
         OnPropertyChanged(nameof(CalendarHeaderTitle));
         OnPropertyChanged(nameof(CalendarHeaderHasChevron));
     }
@@ -916,19 +1040,19 @@ public partial class RemindersViewModel(
     {
         if (string.IsNullOrWhiteSpace(NewBody))
         {
-            StatusMessage = "Type the reminder first.";
+            ShowStatus("Type the reminder first.", true);
             return;
         }
 
         if (!TimeOnly.TryParse(NewTime, CultureInfo.CurrentCulture, out _))
         {
-            StatusMessage = "That time is not valid. Use HH:mm.";
+            ShowStatus("That time is not valid. Use HH:mm.", true);
             return;
         }
 
         if (Repeat == RepeatKind.Custom && RepeatDays.All(d => !d.IsOn))
         {
-            StatusMessage = "Pick at least one day.";
+            ShowStatus("Pick at least one day.", true);
             return;
         }
 
@@ -959,7 +1083,29 @@ public partial class RemindersViewModel(
 
             if (deviceIds is { Count: 0 })
             {
-                StatusMessage = "Pick at least one PC, or choose All PCs.";
+                ShowStatus("Pick at least one PC, or choose All PCs.", true);
+                return;
+            }
+
+            if (IsEditing && !string.IsNullOrEmpty(EditingReminderId))
+            {
+                var times = AllTimes();
+                var local = DateTime.SpecifyKind(date.ToDateTime(times[0]), DateTimeKind.Local);
+                var updateReq = new UpdateReminderRequest(
+                    Body: NewBody.Trim(),
+                    DueAt: new DateTimeOffset(local).ToUniversalTime(),
+                    Timezone: timezone,
+                    Rrule: rrule ?? string.Empty,
+                    RecurrenceUntil: until,
+                    DeviceIds: deviceIds);
+
+                var updated = await api.UpdateReminderAsync(EditingReminderId, updateReq);
+                if (updated is not null)
+                {
+                    CancelEdit();
+                    await LoadAsync();
+                    ShowStatus("Reminder updated.", false);
+                }
                 return;
             }
 
@@ -994,20 +1140,205 @@ public partial class RemindersViewModel(
                 NewDate = DateTime.Today;
                 NewTime = DateTime.Now.AddHours(1).ToString("HH:00", CultureInfo.InvariantCulture);
                 await LoadAsync();
-                StatusMessage = created == 1 ? "Reminder added." : $"{created} reminders added.";
+                ShowStatus(created == 1 ? "Reminder added." : $"{created} reminders added.", false);
             }
         }
         catch (PcConnectApiException ex)
         {
-            StatusMessage = ex.Message;
+            ShowStatus(ex.Message, true);
         }
         catch (HttpRequestException)
         {
-            StatusMessage = "Could not reach the PCConnect server.";
+            ShowStatus("Could not reach the PCConnect server.", true);
         }
         finally
         {
             IsBusy = false;
+        }
+    }
+
+    [RelayCommand]
+    public void StartEdit(ReminderRow? row)
+    {
+        if (row is null)
+        {
+            return;
+        }
+
+        DismissStatus();
+
+        var reminder = Items.FirstOrDefault(r => r.Id == row.Id);
+        if (reminder is null)
+        {
+            return;
+        }
+
+        IsEditing = true;
+        EditingReminderId = reminder.Id;
+        NewBody = reminder.Body;
+
+        var localDue = reminder.DueAt.ToLocalTime();
+        NewDate = localDue.Date;
+        NewTime = localDue.ToString("HH:mm", CultureInfo.InvariantCulture);
+        ExtraTimes.Clear();
+
+        var (kind, days, interval) = Recurrence.FromRrule(reminder.Rrule);
+        Repeat = kind;
+        IntervalWeeks = interval;
+
+        foreach (var chip in RepeatChips)
+        {
+            chip.IsSelected = chip.Kind == kind;
+        }
+
+        foreach (var dayToggle in RepeatDays)
+        {
+            dayToggle.IsOn = days.Contains(dayToggle.Day);
+        }
+
+        Until = reminder.RecurrenceUntil?.ToLocalTime().DateTime;
+
+        if (reminder.DeviceIds is { Count: > 0 } targetIds)
+        {
+            ShowOnAllPcs = false;
+            foreach (var target in Targets)
+            {
+                target.IsChosen = targetIds.Contains(target.DeviceId, StringComparer.OrdinalIgnoreCase);
+            }
+        }
+        else
+        {
+            ShowOnAllPcs = true;
+            foreach (var target in Targets)
+            {
+                target.IsChosen = false;
+            }
+        }
+
+        DismissStatus();
+        OnPropertyChanged(nameof(ScheduleSummary));
+        OnPropertyChanged(nameof(EndsLabel));
+        OnPropertyChanged(nameof(DateLabel));
+        OnPropertyChanged(nameof(PickedDateLabel));
+    }
+
+    [RelayCommand]
+    public void CancelEdit()
+    {
+        IsEditing = false;
+        EditingReminderId = null;
+        NewBody = string.Empty;
+        ExtraTimes.Clear();
+        NewDate = DateTime.Today;
+        NewTime = DateTime.Now.AddHours(1).ToString("HH:00", CultureInfo.InvariantCulture);
+        Repeat = RepeatKind.Once;
+        IntervalWeeks = 1;
+        Until = null;
+        foreach (var chip in RepeatChips)
+        {
+            chip.IsSelected = chip.Kind == RepeatKind.Once;
+        }
+        foreach (var day in RepeatDays)
+        {
+            day.IsOn = false;
+        }
+        ShowOnAllPcs = true;
+        foreach (var target in Targets)
+        {
+            target.IsChosen = false;
+        }
+        DismissStatus();
+        OnPropertyChanged(nameof(ScheduleSummary));
+        OnPropertyChanged(nameof(EndsLabel));
+        OnPropertyChanged(nameof(DateLabel));
+        OnPropertyChanged(nameof(PickedDateLabel));
+    }
+
+    [RelayCommand]
+    public async Task DeleteAsync(object? parameter)
+    {
+        var id = parameter switch
+        {
+            ReminderRow row => row.Id,
+            string idString => idString,
+            _ => EditingReminderId
+        };
+
+        if (string.IsNullOrWhiteSpace(id))
+        {
+            return;
+        }
+
+        IsBusy = true;
+        try
+        {
+            await api.DeleteReminderAsync(id);
+            if (EditingReminderId == id)
+            {
+                CancelEdit();
+            }
+            await LoadAsync();
+            ShowStatus("Reminder deleted.", false);
+        }
+        catch (PcConnectApiException ex)
+        {
+            ShowStatus(ex.Message, true);
+        }
+        catch (HttpRequestException)
+        {
+            ShowStatus("Could not reach the PCConnect server.", true);
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    public Func<ReminderRow, Task<ReopenChoice>>? RequestReopenChoice { get; set; }
+
+    public async Task RescheduleForTodayAsync(string reminderId)
+    {
+        var item = Items.FirstOrDefault(r => r.Id == reminderId);
+        if (item is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var now = DateTime.Now;
+            var today = DateOnly.FromDateTime(now.Date);
+            if (!TimeOnly.TryParse(item.DueLocalTime, CultureInfo.CurrentCulture, out var time))
+            {
+                time = TimeOnly.FromDateTime(now.AddHours(1));
+            }
+
+            var localCandidate = DateTime.SpecifyKind(today.ToDateTime(time), DateTimeKind.Local);
+            if (localCandidate <= now)
+            {
+                localCandidate = DateTime.SpecifyKind(now.AddHours(1), DateTimeKind.Local);
+            }
+
+            var updateReq = new UpdateReminderRequest(
+                Body: item.Body,
+                DueAt: new DateTimeOffset(localCandidate).ToUniversalTime(),
+                Timezone: item.Timezone,
+                Rrule: item.Rrule,
+                RecurrenceUntil: item.RecurrenceUntil,
+                DeviceIds: item.DeviceIds);
+
+            var updated = await api.UpdateReminderAsync(item.Id, updateReq);
+            if (updated is not null)
+            {
+                await api.CompleteReminderAsync(item.Id, false);
+                await LoadAsync();
+                ShowStatus($"Reminder rescheduled for today at {localCandidate:HH:mm}.", false);
+            }
+        }
+        catch (Exception ex) when (ex is PcConnectApiException or HttpRequestException)
+        {
+            ShowStatus("Could not reschedule that reminder.", true);
+            logger.LogWarning(ex, "Reschedule failed");
         }
     }
 
@@ -1019,17 +1350,33 @@ public partial class RemindersViewModel(
             return;
         }
 
+        if (row.IsCompleted && row.IsPast && RequestReopenChoice is not null)
+        {
+            var choice = await RequestReopenChoice(row);
+            if (choice == ReopenChoice.Cancel)
+            {
+                return;
+            }
+
+            if (choice == ReopenChoice.RescheduleForToday)
+            {
+                await RescheduleForTodayAsync(row.Id);
+                return;
+            }
+        }
+
         try
         {
             var updated = await api.CompleteReminderAsync(row.Id, !row.IsCompleted);
             if (updated is not null)
             {
                 await LoadAsync();
+                ShowStatus(row.IsCompleted ? "Reminder reopened as overdue." : "Reminder completed.", false);
             }
         }
         catch (Exception ex) when (ex is PcConnectApiException or HttpRequestException)
         {
-            StatusMessage = "Could not update that reminder.";
+            ShowStatus("Could not update that reminder.", true);
             logger.LogWarning(ex, "Reminder completion failed");
         }
     }

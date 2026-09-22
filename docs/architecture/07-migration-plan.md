@@ -82,7 +82,7 @@ restore rehearsal job is green; branch count is down to `main` plus active work.
 | 2.7 | Rate limiting in Valkey | Per [03 §6](03-security-architecture.md) |
 | 2.8 | Authorisation test matrix | For every resource: owner 2xx / other user 404 / wrong scope 403 / no token 401 |
 | 2.9 | **Shadow traffic** | Mirror production requests at the new service, compare responses against PHP, alert on divergence. Read-only paths first. |
-| 2.10 | Cut over | Point `pcconnect.adamkhattab.co.uk/api/*` at the shim. Legacy clients notice nothing. |
+| 2.10 | Cut over | Point `pcconnect.adamdeveloping.co.uk/api/*` at the shim. Legacy clients notice nothing. |
 
 **Exit gate:** shadow comparison shows zero unexplained divergence for 7 days; the shim serves 100%
 of legacy traffic for 72 h with error rates at or below the PHP baseline; rollback is a DNS or proxy
@@ -103,7 +103,7 @@ change tested at least once.
 | 3.3 | Ship clients that send the **plaintext** password | Nothing can be upgraded until clients stop pre-hashing |
 | 3.4 | Token pairs: `refresh_tokens`, rotation, family reuse detection | After 3.2 |
 | 3.5 | Scopes on tokens; `command:issue` and `command:receive` made disjoint | After 3.4 |
-| 3.6 | Device pairing: `devices`, `device_credentials`, `device_pairings`; pairing UI in agent and app | After 3.5 |
+| 3.6 | Device provisioning: `devices`, `device_credentials`, `device_provisionings`; sign-in handoff from companion to local agent | After 3.5 |
 | 3.7 | Password policy on signup, change **and** reset (fixes S1-10) | Any time after 3.2 |
 | 3.8 | Envelope encryption: KEK in the secret manager, per-user DEK, AES-256-GCM | Before 3.9 |
 | 3.9 | Re-encrypt every reminder ([02 §7](02-data-architecture.md)) | **Must complete before `users.api_key` is dropped in P4** |
@@ -152,8 +152,8 @@ After 4.9, restore from backup. That asymmetry is why 4.9 is last and separately
 
 | # | Action |
 |---|---|
-| 5.1 | Desktop agent to parity: pairing, commands with TTL and ack, reminders, fullscreen window, tray, signed auto-update |
-| 5.2 | Flutter app to parity: pairing-code entry, command issue with live status, reminders with recurrence, biometric gate, sessions |
+| 5.1 | Desktop agent to parity: account provisioning, commands with TTL and ack, reminders, fullscreen window, tray, signed auto-update |
+| 5.2 | Flutter app to parity: account-wide PC list, command issue with live status, reminders with recurrence, biometric gate, sessions |
 | 5.3 | Web dashboard: devices, reminders, account, sessions |
 | 5.4 | Beta with real users on both platforms; fix what the telemetry shows |
 | 5.5 | GA: Play Store, App Store, signed Windows installer |

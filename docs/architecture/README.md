@@ -107,7 +107,7 @@ a command mailbox, so a shutdown queued at 09:00 executes when the laptop opens 
 | | Change | Closes |
 |---|---|---|
 | **C-1** | Three credentials — password (Argon2id, server-side), access token (15 min, scoped), refresh token (rotating, reuse-detected) — plus a separate per-device secret. No single credential does everything any more. | S1-03, S1-04, S1-05 |
-| **C-2** | Devices are **paired** with a user-confirmed code, not auto-registered from a self-asserted header. | S1-08 |
+| **C-2** | PCs are registered by signing in on that PC, not auto-registered from a self-asserted header or a code entered elsewhere. | S1-08 |
 | **C-3** | Commands become an append-only lifecycle with a **mandatory TTL** and per-command acknowledgement, replacing the mutable mailbox. | S2-03, S2-04, S2-05 |
 | **C-4** | Encryption is decoupled from authentication: AES-256-GCM envelope encryption with a per-user data key, so rotating a credential no longer destroys data. | S1-06, S1-07 |
 | **C-5** | The contract **is** the schema. Zod → runtime validation → OpenAPI → generated clients. Contract drift becomes a build failure. | §00.3 |

@@ -1,6 +1,7 @@
-# ADR-0011 — Risk-tiered step-up for destructive commands
+# ADR-0011 — Per-device step-up policy and destructive-command risk tiers
 
-**Status:** Accepted. The passkey method it allows for is implemented on Android
+**Status:** Accepted; amended 2026-09-14 so each PC can choose which commands ask.
+The passkey method it allows for is implemented on Android
 as of [ADR-0013](0013-device-provisioning-and-reminder-targets.md) §3; before
 that, only the password path existed on a client.
 **Date:** 2026-09-02
@@ -28,17 +29,17 @@ against someone using the app, not against someone using the API.
 
 ## Decision
 
-**Commands carry a risk tier, and the destructive tier requires a fresh, single-use,
-server-verified confirmation of the human.**
+**Commands carry a risk tier, while each PC independently chooses which command types
+require a fresh, single-use, server-verified confirmation of the human.** Destructive
+commands are selected by default. Their risk tier always remains destructive, even when
+the PC owner turns off password confirmation, so the tighter rate budget still applies.
 
 ```
-                          risk_tier
-     lock, sleep  ────▶   standard      ─────────────▶  the five checks
-                                                        (03 §3)
-
-  shutdown, restart,      destructive   ─────────────▶  the five checks
-  signout, hibernate                                    + a step-up token
-                                                        + a tighter rate budget
+     every command ─────▶ the five checks (03 §3)
+            │
+            ├─ listed in this PC's password policy ───▶ + a step-up token
+            │
+            └─ destructive risk tier ─────────────────▶ + a tighter rate budget
 ```
 
 ### The tiers
@@ -70,12 +71,12 @@ trail answers "was this confirmed, and how" and not merely "who asked".
 
 ### Enforced twice
 
-The service refuses a destructive command without a redeemed token. The database refuses
-one too:
+The service refuses a password-protected command without a redeemed token. The database
+refuses one too, using the policy snapshot recorded when the command is issued:
 
 ```sql
 CONSTRAINT ck_commands_stepup CHECK (
-  risk_tier <> 'destructive' OR step_up_verified_at IS NOT NULL)
+  NOT password_required OR step_up_verified_at IS NOT NULL)
 ```
 
 The constraint exists because this is the invariant that decides whether a stolen phone
@@ -93,7 +94,7 @@ so a probing attacker exhausts it rather than getting free attempts.
 
 | Option | Pros | Cons | Verdict |
 |---|---|---|---|
-| **Risk tiers with a server-verified step-up token** (chosen) | The check is on the server, so it binds an attacker with a token as well as a user with the app; single-use means one confirmation authorises one action | An extra round trip and an extra prompt for the commands people use most on a bad day | **Chosen** |
+| **Per-device policy with a server-verified step-up token** (chosen) | The check is on the server and follows the target PC's explicit settings; single-use means one confirmation authorises one action | Turning protection off trades convenience for less protection on that PC | **Chosen** |
 | Client-side biometric gate only (06 §3.3 as written) | No API change; no extra round trip | Enforced by the client, so an attacker calling the API directly is unaffected. Protects the app, not the account | Rejected as the primary control; **kept as an additional local gate** on Android and in the WPF companion |
 | Require step-up for every command | Uniform; nothing to classify | Locking a screen from a phone is the product's most-used action; a prompt every time would train people to approve reflexively — which is how confirmation dialogs stop working | Rejected |
 | Re-authenticate fully (sign in again) for destructive commands | No new token type | Ends every session on the device; far more disruptive than a confirmation | Rejected |
@@ -103,10 +104,9 @@ so a probing attacker exhausts it rather than getting free attempts.
 
 **Positive**
 
-- A stolen unlocked phone can no longer shut down the owner's PC: the token in memory is
-  not sufficient, and the step-up requires a passkey assertion with user verification or
-  the password.
-- Every destructive command carries a recorded confirmation and method, which makes the
+- On PCs using the secure defaults, a stolen unlocked phone cannot shut down the PC: the
+  token in memory is not sufficient.
+- Every password-protected command carries a recorded confirmation and method, which makes the
   audit trail answer the question that matters after the fact.
 - The invariant is enforced by the database as well as the service.
 - The tighter budget bounds how fast a compromised session can do damage before the
@@ -114,9 +114,8 @@ so a probing attacker exhausts it rather than getting free attempts.
 
 **Negative**
 
-- **An extra prompt on the commands people use in a hurry.** Someone leaving the house who
-  wants to shut a PC down now types a password or presents a fingerprint. That is a real
-  cost, paid every time, against a risk that materialises rarely.
+- **Protection can be disabled per command.** This is an explicit convenience/security
+  choice owned by the target PC and is visible in that PC's settings.
 - **The legacy shim cannot present a step-up token.** The installed VB.NET and Java clients
   have no concept of one, so the shim marks those commands `step_up_method='legacy_shim'`.
   That is a hole, it is confined to the shim, every such command is attributable, and it
@@ -131,13 +130,14 @@ so a probing attacker exhausts it rather than getting free attempts.
 
 **Neutral**
 
-- Standard commands are unchanged: same five checks, same latency, same UX.
+- Commands not listed in the target PC's password policy keep the same five checks and no
+  step-up round trip.
 - The step-up token is a JWT signed by the same key as an access token; it is
   distinguished by its `pur` claim and by being redeemed exactly once.
 
 ## Revisit when
 
-- Telemetry shows users abandoning destructive commands at the confirmation step, which
+- Telemetry shows users abandoning protected commands at the confirmation step, which
   would mean the prompt is costing more than it buys.
 - Passkeys become universal on this user base, at which point the password branch of
   step-up could be dropped and the flow becomes a single biometric tap.

@@ -61,6 +61,25 @@ public sealed class CommandService(
         var ttl = CommandTtl.Resolve(request.TtlSeconds);
         var riskTier = CommandTypes.RiskTierFor(commandType);
 
+        DeviceService.DeviceRow devicePolicy;
+        await using (var connection = await db.OpenAsync(ct))
+        {
+            // The target PC owns both command settings. Resolve those before
+            // asking for a password so a disabled command never opens a prompt.
+            devicePolicy = await DeviceService.LoadOwnedAsync(
+                connection, null, caller.UserId, devicePublicId, ct);
+        }
+
+        var allowedByDevice = DbJson.StringArray(devicePolicy.AllowedCommands);
+        if (allowedByDevice.Count > 0 && !allowedByDevice.Contains(commandType, StringComparer.Ordinal))
+        {
+            throw AppException.Forbidden(ErrorCodes.CommandTypeNotAllowed,
+                $"'{commandType}' is disabled for this device.");
+        }
+
+        var passwordRequired = DbJson.StringArray(devicePolicy.PasswordRequiredCommands)
+            .Contains(commandType, StringComparer.Ordinal);
+
         // 5. RATE — before the step-up round trip, so a flood costs an attacker a
         // 429 rather than a queue of pending confirmations.
         await limiter.ConsumeAsync(RateBudgets.CommandPerUser, caller.UserId.ToString(CultureInfo.InvariantCulture), ct);
@@ -74,15 +93,15 @@ public sealed class CommandService(
         string? stepUpMethod = null;
         DateTimeOffset? stepUpVerifiedAt = null;
 
-        if (riskTier == RiskTiers.Destructive && caller.ClientKind != ClientKinds.Legacy)
+        if (passwordRequired && caller.ClientKind != ClientKinds.Legacy)
         {
-            // ADR-0011: a session alone cannot power a machine off. The legacy
-            // shim is the documented exception — its clients cannot present one,
-            // and every such command is recorded as unconfirmed.
+            // The target PC decides which commands require fresh confirmation.
+            // The legacy shim cannot present one; every such exception remains
+            // explicitly recorded.
             stepUpMethod = await stepUp.RedeemAsync(caller, request.StepUpToken, ct);
             stepUpVerifiedAt = clock.UtcNow;
         }
-        else if (riskTier == RiskTiers.Destructive)
+        else if (passwordRequired)
         {
             stepUpMethod = "legacy_shim";
             stepUpVerifiedAt = clock.UtcNow;
@@ -130,10 +149,10 @@ public sealed class CommandService(
                 commandId = await connection.ExecuteScalarAsync<long>(new CommandDefinition("""
                     INSERT INTO commands
                         (public_id, device_id, issued_by_user_id, issued_by_client, command_type, params,
-                         risk_tier, step_up_verified_at, step_up_method, status, issued_at, expires_at)
+                         risk_tier, password_required, step_up_verified_at, step_up_method, status, issued_at, expires_at)
                     VALUES
                         (@PublicId, @DeviceId, @UserId, @Client, @Type, @Params::jsonb,
-                         @RiskTier, @StepUpAt, @StepUpMethod, 'issued', @IssuedAt, @ExpiresAt)
+                         @RiskTier, @PasswordRequired, @StepUpAt, @StepUpMethod, 'issued', @IssuedAt, @ExpiresAt)
                     RETURNING id
                     """,
                     new
@@ -145,6 +164,7 @@ public sealed class CommandService(
                         Type = commandType,
                         Params = request.Params is null ? null : DbJson.Serialise(request.Params),
                         RiskTier = riskTier,
+                        PasswordRequired = passwordRequired,
                         StepUpAt = stepUpVerifiedAt,
                         StepUpMethod = stepUpMethod,
                         IssuedAt = issuedAt,
@@ -161,7 +181,7 @@ public sealed class CommandService(
             }
 
             await WriteEventAsync(connection, tx, commandId, CommandEventNames.Issued, "user", ctx,
-                new { commandType, riskTier, stepUpMethod }, ct);
+                new { commandType, riskTier, passwordRequired, stepUpMethod }, ct);
 
             var row = await connection.QuerySingleAsync<CommandRow>(new CommandDefinition(
                 CommandSelectSql + " WHERE c.id = @Id", new { Id = commandId }, tx, cancellationToken: ct));

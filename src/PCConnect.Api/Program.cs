@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.HttpOverrides;
@@ -23,7 +23,7 @@ var builder = WebApplication.CreateBuilder(args);
 // Configuration comes from appsettings plus PCCONNECT_-prefixed environment
 // variables. Nothing reads a file of secrets from the repository (03 §7).
 builder.Configuration.AddEnvironmentVariables("PCCONNECT_");
-DevelopmentKeys.FillMissing(builder);
+DevelopmentKeys.FillMissing(builder.Configuration, builder.Environment.IsDevelopment());
 
 builder.Host.UseSerilog((context, services, configuration) => configuration
     .ReadFrom.Configuration(context.Configuration)
@@ -184,6 +184,27 @@ if (app.Configuration.GetValue("Database:MigrateOnStartup", false))
 }
 
 app.UseForwardedHeaders();
+
+// Outside the exception handler, deliberately, and after UseForwardedHeaders so
+// the client IP is the real one.
+//
+// The other way round — which this was — every handled AppException got logged
+// as a 500 at Error while the caller received the correct 4xx. The exception
+// travelled up through this middleware, which logs an escaping exception as a
+// 500 and rethrows, and only then reached the handler that turns it into a 400
+// or a 401. So a mistyped password read as a server fault in the log, and a
+// real 500 was indistinguishable from one. From out here the exception never
+// escapes: the handler has already written the status this records.
+//
+// Nothing is lost by not seeing the exception here. ErrorEnvelopeHandler logs
+// the code and message for a handled one and the full stack for an unhandled
+// one, and a genuine 500 still lands at Error because the status says so.
+app.UseSerilogRequestLogging(options => options.EnrichDiagnosticContext = (diagnostic, context) =>
+{
+    diagnostic.Set("RequestId", context.TraceIdentifier);
+    diagnostic.Set("ClientIp", context.Connection.RemoteIpAddress?.ToString());
+});
+
 app.UseMiddleware<RequestContextMiddleware>();
 app.UseExceptionHandler();
 
@@ -207,12 +228,6 @@ app.Use(async (context, next) =>
     }
 
     await next();
-});
-
-app.UseSerilogRequestLogging(options => options.EnrichDiagnosticContext = (diagnostic, context) =>
-{
-    diagnostic.Set("RequestId", context.TraceIdentifier);
-    diagnostic.Set("ClientIp", context.Connection.RemoteIpAddress?.ToString());
 });
 
 app.UseCors();

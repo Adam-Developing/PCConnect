@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 
 namespace PCConnect.Core;
 
@@ -44,9 +44,8 @@ public static class ErrorCodes
     public const string DeviceNotPaired = "device.not_paired";
     public const string DeviceRevoked = "device.revoked";
     public const string DeviceNameConflict = "device.name_conflict";
-    public const string PairingCodeInvalid = "device.pairing_code_invalid";
-    public const string PairingNotClaimed = "device.pairing_not_claimed";
-    public const string PairingAlreadyCollected = "device.pairing_already_collected";
+    public const string ProvisioningTicketInvalid = "device.provisioning_ticket_invalid";
+    public const string ProvisioningAlreadyCompleted = "device.provisioning_already_completed";
 
     // commands
     public const string CommandNotFound = "command.not_found";
@@ -60,6 +59,8 @@ public static class ErrorCodes
     public const string ReminderRruleInvalid = "reminder.rrule_invalid";
     public const string ReminderTimezoneInvalid = "reminder.timezone_invalid";
     public const string ReminderBodyTooLong = "reminder.body_too_long";
+    public const string ReminderTargetsEmpty = "reminder.targets_empty";
+    public const string ReminderTargetUnknown = "reminder.target_unknown";
 
     // platform
     public const string Internal = "server.internal_error";

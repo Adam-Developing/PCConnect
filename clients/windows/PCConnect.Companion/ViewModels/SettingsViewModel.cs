@@ -28,6 +28,9 @@ public sealed partial class SettingsViewModel(
 
     private DeviceItem? _thisPc;
 
+    /// <summary>The last locally saved name, which the box is compared against.</summary>
+    private string _savedPcName = string.Empty;
+
     [ObservableProperty]
     private string _reminderBackground = "#0B1120";
 
@@ -35,6 +38,7 @@ public sealed partial class SettingsViewModel(
     private string _reminderForeground = "#F8FAFC";
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsPcNameChanged))]
     private string _pcName = Environment.MachineName;
 
     [ObservableProperty]
@@ -46,9 +50,23 @@ public sealed partial class SettingsViewModel(
     [ObservableProperty]
     private string _statusMessage = string.Empty;
 
-    /// <summary>True once this PC has been recognised among the paired devices.</summary>
+    /// <summary>True once this PC has been recognised among the account's devices.</summary>
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsPcNameChanged))]
+    [NotifyPropertyChangedFor(nameof(DeviceSettingsStatus))]
     private bool _hasThisPc;
+
+    /// <summary>
+    /// True when the box holds a name worth saving. The save button is only
+    /// shown then, so an untouched name offers nothing to press.
+    /// </summary>
+    public bool IsPcNameChanged =>
+        !string.IsNullOrWhiteSpace(PcName) && PcName.Trim() != _savedPcName;
+
+    public string DeviceSettingsStatus =>
+        settings.PcNameNeedsSync || settings.AllowedCommandsNeedSync || settings.PasswordRequiredCommandsNeedSync
+            ? "Saved on this PC · sync pending"
+            : HasThisPc ? "Synced with your account" : "Saved on this PC";
 
     public ObservableCollection<Swatch> TextSwatches { get; } = [];
 
@@ -65,38 +83,85 @@ public sealed partial class SettingsViewModel(
     {
         ReminderBackground = settings.ReminderBackground;
         ReminderForeground = settings.ReminderForeground;
+        PcName = settings.PcName;
+        _savedPcName = settings.PcName;
         StartWithWindows = startup.IsEnabled;
 
         RebuildSwatches();
+        RebuildCommands(settings.AllowedCommands, settings.PasswordRequiredCommands);
     }
 
-    /// <summary>Binds the settings page to whichever paired device is this machine.</summary>
-    public void Attach(DeviceItem? thisPc)
+    /// <summary>Binds the settings page to whichever account device is this machine.</summary>
+    public async Task AttachAsync(DeviceItem? thisPc)
     {
         _thisPc = thisPc;
         HasThisPc = thisPc is not null;
-        PcName = thisPc?.DisplayName ?? Environment.MachineName;
 
+        if (thisPc is null)
+        {
+            PcName = settings.PcName;
+            _savedPcName = settings.PcName;
+            RebuildCommands(settings.AllowedCommands, settings.PasswordRequiredCommands);
+            OnPropertyChanged(nameof(IsPcNameChanged));
+            OnPropertyChanged(nameof(DeviceSettingsStatus));
+            RebuildActivity();
+            return;
+        }
+
+        var pendingName = settings.PcNameNeedsSync;
+        var pendingCommands = settings.AllowedCommandsNeedSync;
+        var pendingPasswords = settings.PasswordRequiredCommandsNeedSync;
+        IReadOnlyList<string> serverAllowed = thisPc.AllowedCommands.Count == 0
+            ? CommandTypes.All.ToArray()
+            : thisPc.AllowedCommands;
+
+        PcName = pendingName ? settings.PcName : thisPc.DisplayName;
+        _savedPcName = PcName;
+        var serverPasswords = thisPc.PasswordRequiredCommands;
+        RebuildCommands(
+            pendingCommands ? settings.AllowedCommands : serverAllowed,
+            pendingPasswords ? settings.PasswordRequiredCommands : serverPasswords);
+
+        if (!pendingName)
+        {
+            settings.SavePcName(PcName, needsSync: false);
+        }
+
+        if (!pendingCommands)
+        {
+            settings.SaveAllowedCommands(serverAllowed, needsSync: false);
+        }
+
+        if (!pendingPasswords)
+        {
+            settings.SavePasswordRequiredCommands(serverPasswords, needsSync: false);
+        }
+
+        if (pendingName || pendingCommands || pendingPasswords)
+        {
+            await SyncDeviceSettingsAsync(pendingName, pendingCommands, pendingPasswords);
+        }
+
+        OnPropertyChanged(nameof(IsPcNameChanged));
+        OnPropertyChanged(nameof(DeviceSettingsStatus));
+        RebuildActivity();
+    }
+
+    private void RebuildCommands(IReadOnlyList<string> allowed, IReadOnlyList<string> passwordRequired)
+    {
         Commands.Clear();
-
-        var allowed = thisPc?.AllowedCommands ?? [];
 
         foreach (var type in CommandTypes.All)
         {
-            var row = new CommandRow
+            Commands.Add(new CommandRow
             {
                 Type = type,
                 Name = ShellViewModel.Describe(type),
                 IconKey = ShellViewModel.IconFor(type),
-                // An empty allow-list from the server means "everything", which
-                // is what a freshly paired device has.
-                Accepted = allowed.Count == 0 || allowed.Contains(type),
-            };
-
-            Commands.Add(row);
+                Accepted = allowed.Contains(type),
+                AsksForPassword = passwordRequired.Contains(type),
+            });
         }
-
-        RebuildActivity();
     }
 
     public void RebuildActivity()
@@ -185,22 +250,24 @@ public sealed partial class SettingsViewModel(
     [RelayCommand]
     private async Task RenameThisPcAsync()
     {
-        if (_thisPc is null || string.IsNullOrWhiteSpace(PcName) || PcName.Trim() == _thisPc.DisplayName)
+        if (!IsPcNameChanged)
         {
             return;
         }
 
-        try
+        var name = PcName.Trim();
+        settings.SavePcName(name, needsSync: true);
+        _savedPcName = name;
+        OnPropertyChanged(nameof(IsPcNameChanged));
+        OnPropertyChanged(nameof(DeviceSettingsStatus));
+
+        if (_thisPc is null)
         {
-            await api.UpdateDeviceAsync(_thisPc.Id, new UpdateDeviceRequest(DisplayName: PcName.Trim()));
-            await devices.LoadAsync();
-            StatusMessage = "Renamed.";
+            StatusMessage = "Saved on this PC. It will sync when this PC is linked to the account.";
+            return;
         }
-        catch (Exception ex) when (ex is PcConnectApiException or HttpRequestException)
-        {
-            StatusMessage = "Could not rename this PC.";
-            logger.LogWarning(ex, "Rename failed");
-        }
+
+        await SyncDeviceSettingsAsync(syncName: true, syncCommands: false, syncPasswords: false);
     }
 
     /// <summary>
@@ -213,27 +280,98 @@ public sealed partial class SettingsViewModel(
     [RelayCommand]
     private async Task ToggleAcceptedAsync(CommandRow? row)
     {
-        if (row is null || _thisPc is null)
+        if (row is null)
         {
             return;
         }
 
         row.Accepted = !row.Accepted;
 
+        // A command this PC will not accept can never reach a password prompt.
+        // Clear the dependent setting as well as disabling its switch in the UI.
+        if (!row.Accepted)
+        {
+            row.AsksForPassword = false;
+        }
+
         var allowed = Commands.Where(c => c.Accepted).Select(c => c.Type).ToList();
+        var passwordRequired = Commands.Where(c => c.Accepted && c.AsksForPassword).Select(c => c.Type).ToList();
+        settings.SaveAllowedCommands(allowed, needsSync: true);
+        settings.SavePasswordRequiredCommands(passwordRequired, needsSync: true);
+        OnPropertyChanged(nameof(DeviceSettingsStatus));
+
+        if (_thisPc is null)
+        {
+            StatusMessage = "Saved on this PC. It will sync when this PC is linked to the account.";
+            return;
+        }
+
+        await SyncDeviceSettingsAsync(syncName: false, syncCommands: true, syncPasswords: true);
+    }
+
+    [RelayCommand]
+    private async Task TogglePasswordRequiredAsync(CommandRow? row)
+    {
+        if (row is null || !row.Accepted)
+        {
+            return;
+        }
+
+        row.AsksForPassword = !row.AsksForPassword;
+
+        var passwordRequired = Commands.Where(c => c.AsksForPassword).Select(c => c.Type).ToList();
+        settings.SavePasswordRequiredCommands(passwordRequired, needsSync: true);
+        OnPropertyChanged(nameof(DeviceSettingsStatus));
+
+        if (_thisPc is null)
+        {
+            StatusMessage = "Saved on this PC. It will sync when this PC is linked to the account.";
+            return;
+        }
+
+        await SyncDeviceSettingsAsync(syncName: false, syncCommands: false, syncPasswords: true);
+    }
+
+    private async Task SyncDeviceSettingsAsync(bool syncName, bool syncCommands, bool syncPasswords)
+    {
+        if (_thisPc is null)
+        {
+            return;
+        }
 
         try
         {
-            await api.UpdateDeviceAsync(_thisPc.Id, new UpdateDeviceRequest(AllowedCommands: allowed));
+            await api.UpdateDeviceAsync(_thisPc.Id, new UpdateDeviceRequest(
+                DisplayName: syncName ? settings.PcName : null,
+                AllowedCommands: syncCommands ? settings.AllowedCommands : null,
+                PasswordRequiredCommands: syncPasswords ? settings.PasswordRequiredCommands : null));
+
+            if (syncName)
+            {
+                settings.SavePcName(settings.PcName, needsSync: false);
+            }
+
+            if (syncCommands)
+            {
+                settings.SaveAllowedCommands(settings.AllowedCommands, needsSync: false);
+            }
+
+            if (syncPasswords)
+            {
+                settings.SavePasswordRequiredCommands(settings.PasswordRequiredCommands, needsSync: false);
+            }
+
             await devices.LoadAsync();
             StatusMessage = string.Empty;
         }
         catch (Exception ex) when (ex is PcConnectApiException or HttpRequestException)
         {
-            // Put the switch back: it must show what the server actually holds.
-            row.Accepted = !row.Accepted;
-            StatusMessage = "Could not change what this PC accepts.";
-            logger.LogWarning(ex, "Allowed-command update failed");
+            // Keep the local value. It remains editable and is retried the next
+            // time this PC is resolved instead of snapping the control back.
+            StatusMessage = "Saved on this PC. Account sync will retry when the connection returns.";
+            logger.LogWarning(ex, "Device settings sync failed");
         }
+
+        OnPropertyChanged(nameof(DeviceSettingsStatus));
     }
 }

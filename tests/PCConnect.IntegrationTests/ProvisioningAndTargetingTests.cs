@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Net.Http.Json;
 using Dapper;
 using Npgsql;
@@ -45,20 +45,20 @@ public class DeviceProvisioningTests(ApiFixture fixture)
         var devices = await user.Client.GetFromJsonAsync<Page<DeviceResponse>>("/v2/devices");
         devices!.Items.ShouldContain(d => d.Id == provisioned.DeviceId);
 
-        // The agent redeems the ticket through the ordinary poll, so the secret
+        // The agent redeems the ticket, so the secret
         // reaches the agent and never the app that asked for the ticket.
         var anonymous = fixture.CreateClient(ApiFixture.FreshIp());
-        var poll = await Read<PairPollResponse>(await anonymous.PostAsJsonAsync("/v2/devices/pair/poll",
-                new PairPollRequest(provisioned.ProvisioningTicket)));
+        var completed = await Read<DeviceProvisionCompleteResponse>(await anonymous.PostAsJsonAsync(
+            "/v2/devices/provision/complete",
+            new DeviceProvisionCompleteRequest(provisioned.ProvisioningTicket)));
 
-        poll.Status.ShouldBe("paired");
-        poll.DeviceId.ShouldBe(provisioned.DeviceId);
-        poll.DeviceSecret.ShouldNotBeNullOrWhiteSpace();
+        completed.DeviceId.ShouldBe(provisioned.DeviceId);
+        completed.DeviceSecret.ShouldNotBeNullOrWhiteSpace();
 
         // Exactly once. A ticket that could be replayed would be a device secret
         // anyone who saw it could collect.
-        var second = await anonymous.PostAsJsonAsync("/v2/devices/pair/poll",
-            new PairPollRequest(provisioned.ProvisioningTicket));
+        var second = await anonymous.PostAsJsonAsync("/v2/devices/provision/complete",
+            new DeviceProvisionCompleteRequest(provisioned.ProvisioningTicket));
 
         second.StatusCode.ShouldBe(HttpStatusCode.Conflict);
     }
@@ -72,6 +72,34 @@ public class DeviceProvisioningTests(ApiFixture fixture)
             new DeviceProvisionRequest("SOMEONE-ELSES-PC"));
 
         response.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
+    }
+
+    [Theory]
+    [InlineData("/v2/devices/pair/start")]
+    [InlineData("/v2/devices/pair/claim")]
+    [InlineData("/v2/devices/pair/poll")]
+    public async Task Pairing_code_endpoints_no_longer_exist(string endpoint)
+    {
+        var client = fixture.CreateClient(ApiFixture.FreshIp());
+        var response = await client.PostAsJsonAsync(endpoint, new { });
+
+        response.StatusCode.ShouldBe(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task Every_pc_provisioned_by_the_account_is_returned_to_the_phone()
+    {
+        var user = await fixture.RegisterUserAsync();
+
+        var first = await Read<DeviceProvisionResponse>(await user.Client.PostAsJsonAsync(
+            "/v2/devices/provision", new DeviceProvisionRequest("OFFICE-PC")));
+        var second = await Read<DeviceProvisionResponse>(await user.Client.PostAsJsonAsync(
+            "/v2/devices/provision", new DeviceProvisionRequest("LAPTOP")));
+
+        var devices = await user.Client.GetFromJsonAsync<Page<DeviceResponse>>("/v2/devices");
+
+        devices!.Items.Select(device => device.Id).ShouldContain(first.DeviceId);
+        devices.Items.Select(device => device.Id).ShouldContain(second.DeviceId);
     }
 
     [Fact]
@@ -223,7 +251,9 @@ public class ReminderTargetingTests(ApiFixture fixture)
         await using var connection = new NpgsqlConnection(fixture.ConnectionString);
         await connection.OpenAsync();
 
-        // ON DELETE CASCADE, so no row is left pointing at a device that is gone.
+        // Revoking marks the device rather than deleting it, so the join
+        // table's ON DELETE CASCADE never fires and RevokeAsync has to clear
+        // the targets itself.
         var remaining = await connection.ExecuteScalarAsync<long>("""
             SELECT count(*) FROM reminder_devices rd
               JOIN reminders r ON r.id = rd.reminder_id
@@ -231,6 +261,11 @@ public class ReminderTargetingTests(ApiFixture fixture)
             """, new { Id = Guid.Parse(created.Id) });
 
         remaining.ShouldBe(0);
+
+        // Which is the point: no targets means every PC, so the reminder shows
+        // up again instead of being aimed for ever at a machine that is gone.
+        var readBack = await user.Client.GetFromJsonAsync<ReminderResponse>($"/v2/reminders/{created.Id}");
+        readBack!.DeviceIds.ShouldBeNull();
     }
 
     [Fact]

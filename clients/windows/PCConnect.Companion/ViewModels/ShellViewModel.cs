@@ -49,6 +49,7 @@ public partial class ShellViewModel(
     /// <summary>The PC this app is running on, once it has been recognised.</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ThisPcName))]
+    [NotifyPropertyChangedFor(nameof(HasThisPc))]
     private DeviceItem? _thisPc;
 
     [ObservableProperty]
@@ -72,6 +73,8 @@ public partial class ShellViewModel(
     public ObservableCollection<DayColumn> Week { get; } = [];
 
     public string ThisPcName => ThisPc?.DisplayName ?? Environment.MachineName;
+
+    public bool HasThisPc => ThisPc is not null;
 
     public string Today => DateTime.Now.ToString("dddd d MMMM · HH:mm", CultureInfo.CurrentCulture);
 
@@ -222,7 +225,11 @@ public partial class ShellViewModel(
         }
 
         realtime.DevicePresenceChanged += presence =>
-            Application.Current.Dispatcher.InvokeAsync(() => devices.ApplyPresence(presence)).Task;
+            Application.Current.Dispatcher.InvokeAsync(() =>
+            {
+                devices.ApplyPresence(presence);
+                reminders.ApplyPresence(presence);
+            }).Task;
 
         realtime.CommandStatusChanged += status =>
             Application.Current.Dispatcher.InvokeAsync(() =>
@@ -247,11 +254,8 @@ public partial class ShellViewModel(
     ///
     /// The agent is asked rather than guessed at: it is the process that holds
     /// the device credential, so it is the only thing that actually knows. If it
-    /// is running and unclaimed, signing in here is the proof of ownership that
-    /// a typed pairing code used to carry, and the PC is added now (ADR-0013).
-    ///
-    /// Every step degrades to the old behaviour: no agent, or a refused ticket,
-    /// leaves the pairing code working exactly as before.
+    /// is running and unclaimed, signing in here proves ownership and adds the
+    /// PC now (ADR-0013). A PC can only be added by signing in on that PC.
     /// </summary>
     public async Task ResolveThisPcAsync()
     {
@@ -262,6 +266,18 @@ public partial class ShellViewModel(
             await ProvisionThisPcAsync();
             agent = await provisioning.WhoAmIAsync();
         }
+        else if (agent.DeviceId is { Length: > 0 } foreignId && !devices.Items.Any(d => d.Id == foreignId))
+        {
+            // The agent on this PC holds credentials for a device not in the signed-in user's account
+            // (e.g. from a previous test user or wiped DB). Since the user is interactively logged in,
+            // re-provision for this account.
+            logger.LogInformation("Agent has device {DeviceId} which does not belong to signed-in account. Re-provisioning.", foreignId);
+            if (await provisioning.UnregisterAsync())
+            {
+                await ProvisionThisPcAsync();
+                agent = await provisioning.WhoAmIAsync();
+            }
+        }
 
         if (agent.DeviceId is { Length: > 0 } identified)
         {
@@ -269,7 +285,7 @@ public partial class ShellViewModel(
         }
 
         ThisPc = devices.Items.FirstOrDefault(d => d.Id == settings.ThisDeviceId)
-            // Only as a fallback, and only for a PC paired before provisioning
+            // Only as a fallback for a PC registered before provisioning
             // existed: a name is a label, never an identity (S1-08).
             ?? devices.Items.FirstOrDefault(d =>
                 string.Equals(d.DisplayName, Environment.MachineName, StringComparison.OrdinalIgnoreCase));
@@ -280,8 +296,37 @@ public partial class ShellViewModel(
         }
 
         devices.SetThisPc(ThisPc?.Id);
-        appSettings.Attach(ThisPc);
+        await appSettings.AttachAsync(ThisPc);
         OnPropertyChanged(nameof(ThisPcName));
+        OnPropertyChanged(nameof(HasThisPc));
+    }
+
+    [RelayCommand]
+    public async Task JoinThisPcAsync()
+    {
+        if (IsBusy)
+        {
+            return;
+        }
+
+        IsBusy = true;
+        try
+        {
+            await provisioning.UnregisterAsync();
+            await ProvisionThisPcAsync();
+            await ResolveThisPcAsync();
+            reminders.RefreshTargets();
+            StatusMessage = HasThisPc ? "This PC was joined to your account." : "Could not join this PC.";
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to join this PC");
+            StatusMessage = "Failed to join this PC.";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
     }
 
     private async Task ProvisionThisPcAsync()
@@ -311,8 +356,6 @@ public partial class ShellViewModel(
         }
         catch (Exception ex) when (ex is PcConnectApiException or HttpRequestException)
         {
-            // The pairing code still works, so this is a note rather than a
-            // failure the person has to act on.
             logger.LogWarning(ex, "Could not add this PC automatically");
         }
     }
@@ -400,6 +443,8 @@ public partial class DevicesViewModel(
 {
     private string? _thisPcId;
 
+    public string? ThisPcId => _thisPcId;
+
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(SendCommand))]
     [NotifyPropertyChangedFor(nameof(SelectedDeviceStatus))]
@@ -407,9 +452,6 @@ public partial class DevicesViewModel(
 
     [ObservableProperty]
     private string _statusMessage = string.Empty;
-
-    [ObservableProperty]
-    private string _pairingCode = string.Empty;
 
     [ObservableProperty]
     private bool _isBusy;
@@ -421,7 +463,7 @@ public partial class DevicesViewModel(
     [ObservableProperty]
     private string _renameTo = string.Empty;
 
-    /// <summary>Every paired PC, including this one.</summary>
+    /// <summary>Every PC registered to the account, including this one.</summary>
     public ObservableCollection<DeviceItem> Items { get; } = [];
 
     /// <summary>Every PC but the one being sat at — this PC cannot control itself.</summary>
@@ -535,6 +577,7 @@ public partial class DevicesViewModel(
                 Name = ShellViewModel.Describe(type),
                 IconKey = ShellViewModel.IconFor(type),
                 Accepted = true,
+                AsksForPassword = SelectedDevice.PasswordRequiredCommands.Contains(type),
             });
         }
 
@@ -595,10 +638,10 @@ public partial class DevicesViewModel(
         {
             string? stepUpToken = null;
 
-            // Destructive commands are confirmed by the person, not by the
-            // session (ADR-0011). The prompt is raised before the request so the
-            // user sees one dialog rather than a failure followed by a dialog.
-            if (CommandTypes.Destructive.Contains(normalised) && RequestStepUpPassword is not null)
+            // The target PC decides which commands need fresh confirmation.
+            // Prompt before sending so the user sees one dialog rather than a
+            // rejected request followed by a dialog.
+            if (SelectedDevice.PasswordRequiredCommands.Contains(normalised) && RequestStepUpPassword is not null)
             {
                 var password = await RequestStepUpPassword(normalised, SelectedDevice.DisplayName);
                 if (password is null)
@@ -669,38 +712,6 @@ public partial class DevicesViewModel(
     [RelayCommand]
     private void CloseLog() => IsLogOpen = false;
 
-    [RelayCommand]
-    private async Task ClaimPairingAsync()
-    {
-        if (string.IsNullOrWhiteSpace(PairingCode))
-        {
-            StatusMessage = "Type the code the other PC is showing.";
-            return;
-        }
-
-        IsBusy = true;
-
-        try
-        {
-            var claimed = await api.ClaimPairingAsync(PairingCode.Trim());
-            StatusMessage = claimed is null ? "That code was not accepted." : $"Added {claimed.DisplayName}.";
-            PairingCode = string.Empty;
-            await LoadAsync();
-        }
-        catch (PcConnectApiException ex)
-        {
-            StatusMessage = ex.Message;
-        }
-        catch (HttpRequestException)
-        {
-            StatusMessage = "Could not reach the PCConnect server.";
-        }
-        finally
-        {
-            IsBusy = false;
-        }
-    }
-
     public void ApplyPresence(DevicePresenceEvent presence)
     {
         foreach (var item in Items.Where(i => i.Id == presence.DeviceId))
@@ -745,6 +756,8 @@ public partial class DeviceItem(DeviceResponse device) : ObservableObject
     public string OsVersion { get; } = device.OsVersion;
 
     public IReadOnlyList<string> AllowedCommands { get; } = device.AllowedCommands;
+
+    public IReadOnlyList<string> PasswordRequiredCommands { get; } = device.PasswordRequiredCommands;
 
     public DateTimeOffset? LastSeenAt { get; } = device.LastSeenAt;
 

@@ -164,9 +164,6 @@ class PcConnectApi(
 
     suspend fun revokeDevice(deviceId: String) = delete("/v2/devices/$deviceId")
 
-    suspend fun claimPairing(code: String): PairClaimResponse =
-        post("/v2/devices/pair/claim", PairClaimRequest(code))
-
     suspend fun issueCommand(deviceId: String, type: String, stepUpToken: String? = null): Command =
         post(
             "/v2/commands",
@@ -188,7 +185,12 @@ class PcConnectApi(
     suspend fun reminders(limit: Int = 100): List<Reminder> =
         get<Page<Reminder>>("/v2/reminders?limit=$limit").items
 
+    suspend fun reminder(reminderId: String): Reminder = get("/v2/reminders/$reminderId")
+
     suspend fun createReminder(request: CreateReminderRequest): Reminder = post("/v2/reminders", request)
+
+    suspend fun updateReminder(reminderId: String, request: UpdateReminderRequest): Reminder =
+        patch("/v2/reminders/$reminderId", request)
 
     suspend fun completeReminder(reminderId: String, completed: Boolean = true): Reminder =
         post("/v2/reminders/$reminderId/complete", CompleteReminderRequest(completed))

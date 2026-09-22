@@ -28,7 +28,7 @@ public static class Scopes
     ];
 
     /// <summary>
-    /// What a paired agent is granted. It cannot read a reminder, cannot rename a
+    /// What a registered agent is granted. It cannot read a reminder, cannot rename a
     /// device, cannot change the password, and cannot issue a command — including
     /// to itself.
     /// </summary>
@@ -142,66 +142,6 @@ public static class PasswordPolicy
     private static AppException Fail(string message) =>
         new(ErrorCodes.AuthPasswordPolicy, message, HttpStatusCode.UnprocessableEntity,
             [new ErrorDetail("password", "policy")]);
-}
-
-/// <summary>
-/// Pairing codes are read aloud and typed by a human, so the alphabet excludes
-/// the characters people confuse (0/O, 1/I/L, 2/Z, 5/S, 8/B). 8 characters over
-/// a 26-symbol alphabet is ~37.6 bits, which is only safe because claims are
-/// rate-limited and attempt-counted (03 §2.6).
-/// </summary>
-public static class PairingCode
-{
-    public const string Alphabet = "ACDEFGHJKMNPQRTUVWXY34679";
-    public const int Length = 8;
-
-    public static string Generate()
-    {
-        Span<char> buffer = stackalloc char[Length + 1];
-        var index = 0;
-        for (var i = 0; i < Length; i++)
-        {
-            if (i == Length / 2)
-            {
-                buffer[index++] = '-';
-            }
-
-            buffer[index++] = Alphabet[RandomNumberGenerator.GetInt32(Alphabet.Length)];
-        }
-
-        return new string(buffer[..index]);
-    }
-
-    /// <summary>
-    /// Accepts what a person actually types: lower case, missing or extra
-    /// hyphens, surrounding whitespace.
-    /// </summary>
-    public static string Normalise(string? code)
-    {
-        if (string.IsNullOrWhiteSpace(code))
-        {
-            return string.Empty;
-        }
-
-        var chars = new List<char>(Length);
-        foreach (var c in code.ToUpperInvariant())
-        {
-            if (Alphabet.Contains(c, StringComparison.Ordinal))
-            {
-                chars.Add(c);
-            }
-        }
-
-        if (chars.Count != Length)
-        {
-            return string.Empty;
-        }
-
-        return string.Concat(
-            new string(chars.ToArray()[..(Length / 2)]),
-            "-",
-            new string(chars.ToArray()[(Length / 2)..]));
-    }
 }
 
 /// <summary>Normalisation rules shared by registration, login and the importer.</summary>

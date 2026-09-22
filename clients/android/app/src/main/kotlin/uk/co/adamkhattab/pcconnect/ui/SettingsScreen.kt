@@ -175,9 +175,9 @@ private fun SecurityCard(
             icon = PcIcons.Fingerprint,
             title = if (passkeyRegistered) "Fingerprint confirmation is on" else "Confirm with a fingerprint",
             subtitle = if (passkeyRegistered) {
-                "Destructive commands ask this phone to confirm, instead of asking you to type your password."
+                "Protected commands ask this phone to confirm, instead of asking you to type your password."
             } else {
-                "Set up a passkey so destructive commands ask for your fingerprint instead of your password."
+                "Set up a passkey so protected commands ask for your fingerprint instead of your password."
             },
             onClick = onSetUpPasskey,
         )
@@ -197,7 +197,7 @@ private fun SecurityCard(
                 // and the label has to say which.
                 Text("Ask for a fingerprint too", color = PcColors.Ink, style = PcType.Body)
                 Caption(
-                    "Commands that ask for extra confirmation always need your password. " +
+                    "Commands protected in that PC's settings need your password. " +
                         "This adds a fingerprint check on this phone, so a stolen, unlocked " +
                         "one still can't send them.",
                 )
@@ -206,9 +206,8 @@ private fun SecurityCard(
             PcSwitch(checked = requireBiometric, onCheckedChange = onRequireBiometric)
         }
 
-        // Which commands ask is the server's policy, not a switch on this
-        // phone. Showing it read-only is honest; a toggle that cannot turn the
-        // requirement off would not be.
+        // Each PC chooses which commands ask. This phone only chooses how it
+        // confirms commands that the target PC protects.
         Column(Modifier.padding(start = 52.dp, end = 16.dp, bottom = 14.dp)) {
             Row(
                 Modifier.horizontalScroll(rememberScrollState()),
@@ -242,7 +241,7 @@ private fun SecurityCard(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 PcIcon(PcIcons.Sync, null, size = 15.dp, tint = PcColors.InkFaint)
-                Caption("These always ask, on every device signed in to this account.")
+                Caption("These are protected by default. You can change them in each PC's settings.")
             }
         }
 

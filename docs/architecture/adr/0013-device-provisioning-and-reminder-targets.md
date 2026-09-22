@@ -1,4 +1,4 @@
-# ADR-0013 — Signing in adds the PC, and a reminder can name its PCs
+﻿# ADR-0013 — Signing in adds the PC, and a reminder can name its PCs
 
 **Status:** Accepted
 **Date:** 2026-09-04
@@ -34,19 +34,11 @@ This ADR is the second response: building them.
 ### 1. A signed-in companion provisions the PC it is running on
 
 `POST /v2/devices/provision` takes an authenticated user and creates the device, its
-credential, and a **provisioning ticket**. The agent redeems the ticket through the
-existing `pair/poll`.
+credential, and a **provisioning ticket**. The local agent redeems the ticket through
+`POST /v2/devices/provision/complete`.
 
-This is the pairing handshake with its two halves collapsed, because the person proving
-ownership and the person at the keyboard are now the same request:
-
-| | Pairing code | Provisioning |
-|---|---|---|
-| Proof the owner is at this PC | A code shown on it, typed into the app | Signing in on it |
-| Who creates the device | The user, via `pair/claim` | The user, via `provision` |
-| Who receives the device secret | The agent, via `pair/poll` | The agent, via `pair/poll` |
-| Where the secret is stored | The machine's credential store | The machine's credential store |
-| Works with nobody signed in | Yes | No — the code is still there for that |
+The old human-entered code flow and its `pair/start`, `pair/claim`, and `pair/poll`
+endpoints are removed. Signing in on the PC is the only way to add it to an account.
 
 **The companion never holds the device secret.** It holds a ticket. The agent redeems it
 and writes the secret to Credential Manager under `CRED_PERSIST_LOCAL_MACHINE`, which is
@@ -67,10 +59,8 @@ What that widening costs, and what bounds it:
 - The pipe's ACL is SYSTEM and **`InteractiveSid`** — not `Users`. A service account or a
   remote session on this machine cannot reach it, and the flow only makes sense for
   somebody sitting at the PC.
-- **The agent refuses to provision when it is already paired.** The first person to sign in
-  claims the PC, which is exactly the property the pairing code had: whoever could read the
-  screen could claim it. Moving a PC to another account stays a deliberate un-pairing by
-  its current owner.
+- **The agent refuses to provision when it is already registered.** Moving a PC to another
+  account stays a deliberate removal by its current owner followed by a sign-in on that PC.
 - `WHOAMI` returns a device id to any interactive user. A device id is not a credential —
   it is a public identifier its owner already sees in the app — and it is what stops the
   companion guessing which device it is by machine name, which was a label and never an
@@ -94,7 +84,15 @@ the screen it is sitting on — which it can now do reliably, because `WHOAMI` t
 which device it is.
 
 The server still validates ownership on write: a reminder cannot name a device that is not
-the caller's, or the id would come straight back out on the reminder it was written to.
+the caller's, or the id would come straight back out on the reminder it was written to. It
+answers `422` with `reminder.target_unknown` — the same answer for "not yours" and "does
+not exist", so the endpoint cannot be used to test ids for existence.
+
+**Revoking a PC clears the targets naming it**, in `DeviceService.RevokeAsync` and not by
+the foreign key. Revoking marks the device rather than deleting the row, so `ON DELETE
+CASCADE` never fires; without the explicit delete a reminder would stay aimed at a machine
+that will never show it again, and one that named only that machine would fire nowhere at
+all. Clearing the targets sends it back to meaning every PC.
 
 ### 3. Android registers and asserts passkeys
 
@@ -114,7 +112,7 @@ sensor that will not read a wet finger must not be the only way to turn a comput
 | **Companion provisions, agent redeems a ticket** (chosen) | Chosen. The secret never leaves the process that must hold it. |
 | Companion fetches the secret and writes it for the agent | Rejected. `CRED_PERSIST_LOCAL_MACHINE` written from a user session lands in that user's vault, not the machine's; the service would never see it. It would also put a device secret in a process that has no business holding one. |
 | Agent watches for an interactive logon and pairs itself | Rejected. The agent holds no user credential and must not; it cannot prove the account is the one signed in. |
-| Reminder targets as a `jsonb` array on `reminders` | Rejected. It could not be a foreign key, so a revoked device would leave a dangling id nothing cleans up. |
+| Reminder targets as a `jsonb` array on `reminders` | Rejected. It could not be a foreign key, so a deleted device would leave a dangling id nothing cleans up. (The foreign key does not do the work on a *revoke*, which is a soft delete — that is handled explicitly above — but it is what makes a dangling id impossible.) |
 | Route due reminders to `device:{id}` groups | Rejected. The companion is a user connection; there is no device connection to send to. |
 
 ## Consequences
@@ -136,6 +134,9 @@ sensor that will not read a wet finger must not be the only way to turn a comput
   `/.well-known/assetlinks.json` naming the app's package and signing fingerprint, and
   `WebAuthn:AllowedOrigins` must include `android:apk-key-hash:<...>`. Until both are in
   place the fingerprint path fails at the platform and the app falls back to the password.
+- **A revoked PC widens the reminders that named it** rather than narrowing them. Someone
+  who aimed a reminder at one PC and then revoked that PC gets it on every remaining PC.
+  The alternative is a reminder that can never be seen, which is worse for a reminder.
 - **Reminder targeting is enforced on the client.** The server decides who is *told*; the
   PC decides whether to *show*. A modified client could show a reminder aimed elsewhere.
   Reminder bodies are already readable by every client on the account, so this leaks
@@ -144,8 +145,7 @@ sensor that will not read a wet finger must not be the only way to turn a comput
 
 **Neutral**
 
-- The pairing code remains, and is still the only way to add a PC that nobody is signed in
-  on. Both routes race safely: whichever completes first wins and the other stops.
+- A PC cannot be added remotely. Someone must sign in through the companion running on that PC.
 
 ## Revisit when
 

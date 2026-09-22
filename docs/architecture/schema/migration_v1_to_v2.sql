@@ -90,7 +90,7 @@ CREATE TABLE devices (
 
 -- ---------------------------------------------------------------- E4 --------
 -- The command lifecycle. See v2_target_schema.sql for the full definitions of
--- commands, command_events, device_credentials, device_pairings,
+-- commands, command_events, device_credentials, device_provisionings,
 -- refresh_tokens, auth_challenges, idempotency_keys and security_events.
 -- (Elided here to keep this file focused on the *migration*, not the DDL.)
 

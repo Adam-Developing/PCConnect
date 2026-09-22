@@ -20,6 +20,7 @@ android {
         versionName = "8.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        manifestPlaceholders["usesCleartextTraffic"] = "false"
 
         // The backend is a build-time default that is overridable at runtime
         // (06 §1). It is never a hardcoded absolute constant in six activities,
@@ -30,8 +31,12 @@ android {
 
     buildTypes {
         debug {
-            // The emulator reaches the host machine at 10.0.2.2.
-            buildConfigField("String", "DEFAULT_API_BASE_URL", "\"http://10.0.2.2:5080\"")
+            // The development launcher maps this device-side loopback port to
+            // the API on the workstation with `adb reverse`.
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-debug"
+            buildConfigField("String", "DEFAULT_API_BASE_URL", "\"http://127.0.0.1:5080\"")
+            manifestPlaceholders["usesCleartextTraffic"] = "true"
         }
 
         release {

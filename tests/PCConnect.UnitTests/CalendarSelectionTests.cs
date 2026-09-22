@@ -216,37 +216,39 @@ public sealed class CalendarSelectionTests : IDisposable
     [Fact]
     public void Shift_click_selection_and_control_click_selection_can_be_combined_and_extended()
     {
+        var baseDay = _calendar.Days[2].Date;
+
         // 1. Select initial range: 2..5
-        Click(_month.AddDays(2));
-        Click(_month.AddDays(5), extend: true);
-        SelectedDays().ShouldBe(Enumerable.Range(2, 4).Select(_month.AddDays));
+        Click(baseDay.AddDays(2));
+        Click(baseDay.AddDays(5), extend: true);
+        SelectedDays().ShouldBe(Enumerable.Range(2, 4).Select(baseDay.AddDays));
 
         // 2. Ctrl+click 10: anchor becomes 10, range base captures 2..5 and 10
-        Click(_month.AddDays(10), toggle: true);
+        Click(baseDay.AddDays(10), toggle: true);
         SelectedDays().ShouldBe([
-            _month.AddDays(2), _month.AddDays(3), _month.AddDays(4), _month.AddDays(5),
-            _month.AddDays(10)
+            baseDay.AddDays(2), baseDay.AddDays(3), baseDay.AddDays(4), baseDay.AddDays(5),
+            baseDay.AddDays(10)
         ]);
 
         // 3. Shift+click 14: extends from 10 to 14 while preserving 2..5
-        Click(_month.AddDays(14), extend: true);
+        Click(baseDay.AddDays(14), extend: true);
         SelectedDays().ShouldBe([
-            _month.AddDays(2), _month.AddDays(3), _month.AddDays(4), _month.AddDays(5),
-            _month.AddDays(10), _month.AddDays(11), _month.AddDays(12), _month.AddDays(13), _month.AddDays(14)
+            baseDay.AddDays(2), baseDay.AddDays(3), baseDay.AddDays(4), baseDay.AddDays(5),
+            baseDay.AddDays(10), baseDay.AddDays(11), baseDay.AddDays(12), baseDay.AddDays(13), baseDay.AddDays(14)
         ]);
 
         // 4. Shift+click 12: adjusts the second range to 10..12 while preserving 2..5
-        Click(_month.AddDays(12), extend: true);
+        Click(baseDay.AddDays(12), extend: true);
         SelectedDays().ShouldBe([
-            _month.AddDays(2), _month.AddDays(3), _month.AddDays(4), _month.AddDays(5),
-            _month.AddDays(10), _month.AddDays(11), _month.AddDays(12)
+            baseDay.AddDays(2), baseDay.AddDays(3), baseDay.AddDays(4), baseDay.AddDays(5),
+            baseDay.AddDays(10), baseDay.AddDays(11), baseDay.AddDays(12)
         ]);
 
         // 5. Ctrl+click 4: toggles 4 off from selection
-        Click(_month.AddDays(4), toggle: true);
+        Click(baseDay.AddDays(4), toggle: true);
         SelectedDays().ShouldBe([
-            _month.AddDays(2), _month.AddDays(3), _month.AddDays(5),
-            _month.AddDays(10), _month.AddDays(11), _month.AddDays(12)
+            baseDay.AddDays(2), baseDay.AddDays(3), baseDay.AddDays(5),
+            baseDay.AddDays(10), baseDay.AddDays(11), baseDay.AddDays(12)
         ]);
     }
 
@@ -255,11 +257,17 @@ public sealed class CalendarSelectionTests : IDisposable
     {
         _calendar.IsCurrentMonth.ShouldBeTrue();
 
+        Click(_month.AddDays(5));
+        _calendar.HasSelection.ShouldBeTrue();
+        SelectedDays().ShouldBe([_month.AddDays(5)]);
+
         _calendar.NextMonthCommand.Execute(null);
         _calendar.IsCurrentMonth.ShouldBeFalse();
 
         _calendar.GoToTodayCommand.Execute(null);
         _calendar.IsCurrentMonth.ShouldBeTrue();
+        _calendar.HasSelection.ShouldBeFalse();
+        SelectedDays().ShouldBeEmpty();
     }
 
     [Fact]

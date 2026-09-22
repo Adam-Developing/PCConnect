@@ -1,12 +1,21 @@
 package uk.co.adamkhattab.pcconnect.ui
 
 import androidx.annotation.DrawableRes
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -34,6 +43,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.VisualTransformation
@@ -128,13 +138,19 @@ fun InfoNote(
  */
 @Composable
 fun ConnectionPill(connected: Boolean, modifier: Modifier = Modifier) {
-    StatusPill(
-        text = if (connected) "Connected" else "Reconnecting",
-        ink = if (connected) PcColors.OnlineInk else PcColors.WarnInk,
-        background = if (connected) PcColors.OnlineBg else PcColors.WarnBg,
-        modifier = modifier,
-        dot = if (connected) PcColors.OnlineDot else PcColors.WarnDot,
-    )
+    AnimatedContent(
+        targetState = connected,
+        transitionSpec = { fadeIn(tween(150)) togetherWith fadeOut(tween(120)) },
+        label = "ConnectionPillTransition",
+    ) { isConnected ->
+        StatusPill(
+            text = if (isConnected) "Connected" else "Reconnecting",
+            ink = if (isConnected) PcColors.OnlineInk else PcColors.WarnInk,
+            background = if (isConnected) PcColors.OnlineBg else PcColors.WarnBg,
+            modifier = modifier,
+            dot = if (isConnected) PcColors.OnlineDot else PcColors.WarnDot,
+        )
+    }
 }
 
 @Composable
@@ -203,16 +219,39 @@ fun PrimaryButton(
     height: Dp = 50.dp,
     container: Color = PcColors.Primary,
 ) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed && enabled) 0.97f else 1.0f,
+        animationSpec = spring(dampingRatio = 0.6f, stiffness = 600f),
+        label = "primaryBtnScale",
+    )
+    val bgColor by animateColorAsState(
+        targetValue = if (enabled) container else PcColors.InkDisabled,
+        animationSpec = tween(150),
+        label = "primaryBtnBg",
+    )
+
     Box(
         modifier
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
             .fillMaxWidth()
             .height(height)
             .clip(PcShapes.Control)
-            .background(if (enabled) container else PcColors.InkDisabled)
-            .clickable(enabled = enabled, onClick = onClick),
+            .background(bgColor)
+            .clickable(enabled = enabled, interactionSource = interactionSource, indication = null, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Text(text, color = Color.White, style = PcType.Button)
+        AnimatedContent(
+            targetState = text,
+            transitionSpec = { fadeIn(tween(140)) togetherWith fadeOut(tween(100)) },
+            label = "primaryBtnText",
+        ) { labelText ->
+            Text(labelText, color = Color.White, style = PcType.Button)
+        }
     }
 }
 
@@ -228,15 +267,32 @@ fun QuietButton(
     contentColour: Color = PcColors.Ink,
     iconTint: Color = PcColors.InkSoft,
 ) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed && enabled) 0.97f else 1.0f,
+        animationSpec = spring(dampingRatio = 0.6f, stiffness = 600f),
+        label = "quietBtnScale",
+    )
+    val alpha by animateFloatAsState(
+        targetValue = if (enabled) 1f else 0.5f,
+        animationSpec = tween(150),
+        label = "quietBtnAlpha",
+    )
+
     Row(
         modifier
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
             .fillMaxWidth()
             .height(height)
             .clip(PcShapes.Control)
             .background(PcColors.Surface)
             .border(1.dp, PcColors.Border, PcShapes.Control)
-            .clickable(enabled = enabled, onClick = onClick)
-            .alpha(if (enabled) 1f else 0.5f),
+            .clickable(enabled = enabled, interactionSource = interactionSource, indication = null, onClick = onClick)
+            .alpha(alpha),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center,
     ) {
@@ -434,11 +490,27 @@ fun PcSwitch(
     enabled: Boolean = true,
 ) {
     val interaction = remember { MutableInteractionSource() }
+    val isPressed by interaction.collectIsPressedAsState()
     val track by animateColorAsState(
         if (checked) PcColors.Primary else PcColors.InkDisabled,
+        animationSpec = tween(durationMillis = 180, easing = FastOutSlowInEasing),
         label = "switchTrack",
     )
-    val offset by animateDpAsState(if (checked) 23.dp else 3.dp, label = "switchKnob")
+    val knobWidth by animateDpAsState(
+        targetValue = if (isPressed) 26.dp else 22.dp,
+        animationSpec = spring(dampingRatio = 0.75f, stiffness = 600f),
+        label = "switchKnobWidth",
+    )
+    val targetOffset = when {
+        checked && isPressed -> 19.dp
+        checked -> 23.dp
+        else -> 3.dp
+    }
+    val offset by animateDpAsState(
+        targetValue = targetOffset,
+        animationSpec = spring(dampingRatio = 0.75f, stiffness = 600f),
+        label = "switchKnob",
+    )
 
     Box(
         modifier
@@ -455,8 +527,8 @@ fun PcSwitch(
         Box(
             Modifier
                 .padding(start = offset, top = 3.dp)
-                .size(22.dp)
-                .clip(CircleShape)
+                .size(width = knobWidth, height = 22.dp)
+                .clip(PcShapes.Pill)
                 .background(Color.White),
         )
     }
@@ -472,22 +544,36 @@ fun PcCheck(
     onClick: (() -> Unit)? = null,
 ) {
     val shape = if (round) CircleShape else RoundedCornerShape(6.dp)
+    val targetBg = if (checked) (if (round) PcColors.OnlineDot else PcColors.Primary) else Color.Transparent
+    val bg by animateColorAsState(targetBg, animationSpec = tween(140), label = "checkBg")
+    val borderCol by animateColorAsState(
+        if (checked) Color.Transparent else PcColors.InkDisabled,
+        animationSpec = tween(140),
+        label = "checkBorder",
+    )
+    val checkScale by animateFloatAsState(
+        targetValue = if (checked) 1f else 0f,
+        animationSpec = spring(dampingRatio = 0.6f, stiffness = 500f),
+        label = "checkScale",
+    )
 
     Box(
         modifier
             .size(size)
             .clip(shape)
-            .then(
-                if (checked) {
-                    Modifier.background(if (round) PcColors.OnlineDot else PcColors.Primary)
-                } else {
-                    Modifier.border(1.5.dp, PcColors.InkDisabled, shape)
-                },
-            )
+            .background(bg)
+            .border(1.5.dp, borderCol, shape)
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
         contentAlignment = Alignment.Center,
     ) {
-        if (checked) PcIcon(PcIcons.Check, null, size = size * 0.7f, tint = Color.White)
+        if (checkScale > 0f) {
+            Box(Modifier.graphicsLayer {
+                scaleX = checkScale
+                scaleY = checkScale
+            }) {
+                PcIcon(PcIcons.Check, null, size = size * 0.7f, tint = Color.White)
+            }
+        }
     }
 }
 
@@ -509,19 +595,29 @@ fun SegmentedPair(
     ) {
         options.forEachIndexed { index, label ->
             val selected = index == selectedIndex
+            val bg by animateColorAsState(
+                targetValue = if (selected) PcColors.Surface else Color.Transparent,
+                animationSpec = tween(150),
+                label = "segBg",
+            )
+            val textColor by animateColorAsState(
+                targetValue = if (selected) PcColors.Ink else PcColors.InkSoft,
+                animationSpec = tween(150),
+                label = "segText",
+            )
 
             Box(
                 Modifier
                     .weight(1f)
                     .height(38.dp)
                     .clip(RoundedCornerShape(9.dp))
-                    .background(if (selected) PcColors.Surface else Color.Transparent)
+                    .background(bg)
                     .clickable { onSelect(index) },
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
                     label,
-                    color = if (selected) PcColors.Ink else PcColors.InkSoft,
+                    color = textColor,
                     style = PcType.BodySmall.copy(
                         fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
                     ),
@@ -548,7 +644,17 @@ fun PcTopBar(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        ScreenTitle(title, Modifier.weight(1f))
+        AnimatedContent(
+            targetState = title,
+            transitionSpec = {
+                fadeIn(tween(180, easing = FastOutSlowInEasing)) togetherWith
+                    fadeOut(tween(130, easing = FastOutSlowInEasing))
+            },
+            label = "PcTopBarTitle",
+            modifier = Modifier.weight(1f),
+        ) { titleText ->
+            ScreenTitle(titleText)
+        }
         trailing?.invoke(this)
     }
 }

@@ -25,13 +25,16 @@ public static class ProvisioningPipe
 {
     public const string PipeName = "PCConnect.Provisioning";
 
-    /// <summary>Asks which device this agent is, or <c>UNPAIRED</c>.</summary>
+    /// <summary>Asks which device this agent is, or <c>UNREGISTERED</c>.</summary>
     public const string WhoAmIVerb = "WHOAMI";
 
     /// <summary>Followed by a space and the provisioning ticket.</summary>
     public const string ProvisionVerb = "PROVISION";
 
-    public const string Unpaired = "UNPAIRED";
+    public const string Unregistered = "UNREGISTERED";
+
+    /// <summary>Asks the agent to forget its credential and become unregistered.</summary>
+    public const string UnregisterVerb = "UNREGISTER";
 
     internal static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(5);
 
@@ -40,12 +43,13 @@ public static class ProvisioningPipe
 }
 
 /// <summary>
-/// The agent's side: a pipe server that answers the two verbs above.
+/// The agent's side: a pipe server that answers the verbs above.
 /// </summary>
 public sealed class ProvisioningPipeServer(
     ILogger<ProvisioningPipeServer> logger,
     Func<string?> currentDeviceId,
-    Func<string, CancellationToken, Task<string?>> provision)
+    Func<string, CancellationToken, Task<string?>> provision,
+    Func<CancellationToken, Task<bool>>? unregister = null)
 {
     public async Task RunAsync(CancellationToken ct)
     {
@@ -83,7 +87,16 @@ public sealed class ProvisioningPipeServer(
     {
         if (line == ProvisioningPipe.WhoAmIVerb)
         {
-            return currentDeviceId() ?? ProvisioningPipe.Unpaired;
+            return currentDeviceId() ?? ProvisioningPipe.Unregistered;
+        }
+
+        if (line == ProvisioningPipe.UnregisterVerb)
+        {
+            if (unregister is not null)
+            {
+                await unregister(ct);
+            }
+            return "OK";
         }
 
         if (!line.StartsWith(ProvisioningPipe.ProvisionVerb + " ", StringComparison.Ordinal))
@@ -91,15 +104,12 @@ public sealed class ProvisioningPipeServer(
             return "FAILED unknown_verb";
         }
 
-        // Already paired means already claimed. Refusing here is what stops a
-        // second user on a shared PC from quietly moving it to their own
-        // account: the first person to sign in owns it, which is the same
-        // property the pairing code had, and un-pairing is a deliberate act by
-        // the owner.
+        // Refusing an already registered PC stops a second user on a shared PC
+        // from quietly moving it to another account. Its owner must remove it.
         if (currentDeviceId() is not null)
         {
             logger.LogWarning("Refused a provisioning ticket: this PC is already on an account");
-            return "FAILED already_paired";
+            return "FAILED already_registered";
         }
 
         var ticket = line[(ProvisioningPipe.ProvisionVerb.Length + 1)..].Trim();
@@ -159,7 +169,7 @@ public sealed record AgentIdentity(bool IsRunning, string? DeviceId)
 {
     public static readonly AgentIdentity NotRunning = new(false, null);
 
-    public static readonly AgentIdentity Unpaired = new(true, null);
+    public static readonly AgentIdentity Unregistered = new(true, null);
 
     /// <summary>Only then is provisioning both possible and needed.</summary>
     public bool NeedsProvisioning => IsRunning && DeviceId is null;
@@ -173,7 +183,7 @@ public sealed class ProvisioningPipeClient(ILogger<ProvisioningPipeClient> logge
     /// <summary>
     /// What the agent says it is.
     ///
-    /// "Not running" and "running but unpaired" have to be different answers.
+    /// "Not running" and "running but unregistered" have to be different answers.
     /// Collapsing them into null once meant a PC with no agent installed would
     /// have a device provisioned for it that nothing could ever hold the
     /// credential for — a row on the account that is permanently offline.
@@ -187,8 +197,8 @@ public sealed class ProvisioningPipeClient(ILogger<ProvisioningPipeClient> logge
             return AgentIdentity.NotRunning;
         }
 
-        return response == ProvisioningPipe.Unpaired
-            ? AgentIdentity.Unpaired
+        return response == ProvisioningPipe.Unregistered
+            ? AgentIdentity.Unregistered
             : new AgentIdentity(true, response);
     }
 
@@ -204,6 +214,13 @@ public sealed class ProvisioningPipeClient(ILogger<ProvisioningPipeClient> logge
         }
 
         return response[3..].Trim();
+    }
+
+    /// <summary>Asks the agent to clear its stored credentials and unregister.</summary>
+    public async Task<bool> UnregisterAsync(CancellationToken ct = default)
+    {
+        var response = await SendAsync(ProvisioningPipe.UnregisterVerb, ct);
+        return response == "OK";
     }
 
     private async Task<string?> SendAsync(string line, CancellationToken ct)
@@ -226,7 +243,6 @@ public sealed class ProvisioningPipeClient(ILogger<ProvisioningPipeClient> logge
         catch (TimeoutException)
         {
             // The service is not installed or not running. The companion falls
-            // back to the pairing code, which needs no service to be reachable.
             logger.LogInformation("The PCConnect agent is not running on this PC");
             return null;
         }

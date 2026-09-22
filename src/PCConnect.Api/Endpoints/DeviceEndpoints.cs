@@ -27,7 +27,7 @@ public static class DeviceEndpoints
             Results.Ok(await devices.UpdateAsync(await http.CallerAsync(ct), deviceId, request, ct)))
             .RequireAuthorization()
             .WithName("updateDevice")
-            .WithSummary("Rename a device or change which commands it accepts.");
+            .WithSummary("Change a device's name, accepted commands, or password-confirmation rules.");
 
         group.MapDelete("/{deviceId:guid}", async (
             Guid deviceId, DeviceService devices, HttpContext http, CancellationToken ct) =>
@@ -39,39 +39,19 @@ public static class DeviceEndpoints
             .WithName("revokeDevice")
             .WithSummary("Unpair a device: its credential, sessions and pending commands all end.");
 
-        // ── pairing ──────────────────────────────────────────────────────────
-        // There is no POST /v2/devices. A device comes into being only through a
-        // code the account owner confirms (C-2, closes S1-08).
-
-        group.MapPost("/pair/start", async (
-            PairStartRequest request, DeviceService devices, HttpContext http, CancellationToken ct) =>
-            Results.Ok(await devices.StartPairingAsync(request, http.RequestContext(), ct)))
-            .AllowAnonymous()
-            .WithName("startPairing")
-            .WithSummary("Agent-initiated. Returns a code for the user to confirm in the app.");
-
-        group.MapPost("/pair/claim", async (
-            PairClaimRequest request, DeviceService devices, HttpContext http, CancellationToken ct) =>
-            Results.Ok(await devices.ClaimPairingAsync(await http.CallerAsync(ct), request, http.RequestContext(), ct)))
-            .RequireAuthorization()
-            .WithName("claimPairing")
-            .WithSummary("User-initiated. Confirms the code and creates the device.");
-
         group.MapPost("/provision", async (
             DeviceProvisionRequest request, DeviceService devices, HttpContext http, CancellationToken ct) =>
             Results.Ok(await devices.ProvisionAsync(await http.CallerAsync(ct), request, http.RequestContext(), ct)))
             .RequireAuthorization()
             .WithName("provisionDevice")
-            .WithSummary(
-                "Adds the PC the caller is signed in on. Returns a ticket the agent redeems through " +
-                "pair/poll, so the device secret reaches the agent and nothing else.");
+            .WithSummary("Adds the PC the caller is signed in on and returns a one-time ticket for its local agent.");
 
-        group.MapPost("/pair/poll", async (
-            PairPollRequest request, DeviceService devices, HttpContext http, CancellationToken ct) =>
-            Results.Ok(await devices.PollPairingAsync(request, http.RequestContext(), ct)))
+        group.MapPost("/provision/complete", async (
+            DeviceProvisionCompleteRequest request, DeviceService devices, HttpContext http, CancellationToken ct) =>
+            Results.Ok(await devices.CompleteProvisioningAsync(request, http.RequestContext(), ct)))
             .AllowAnonymous()
-            .WithName("pollPairing")
-            .WithSummary("Agent collects its device id and secret. The secret is returned exactly once.");
+            .WithName("completeDeviceProvisioning")
+            .WithSummary("The local agent redeems its one-time ticket and collects its credential.");
 
         group.MapPost("/token", async (
             DeviceTokenRequest request, DeviceService devices, HttpContext http, CancellationToken ct) =>

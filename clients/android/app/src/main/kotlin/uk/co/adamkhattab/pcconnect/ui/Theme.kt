@@ -111,7 +111,7 @@ object PcType {
     val Button = TextStyle(fontFamily = Sans, fontSize = 15.5f.sp, lineHeight = 20.sp, fontWeight = FontWeight.SemiBold)
     val NavLabel = TextStyle(fontFamily = Sans, fontSize = 12.sp, lineHeight = 15.sp, fontWeight = FontWeight.Medium)
 
-    /** Times, pairing codes and log lines line up under each other. */
+    /** Times and log lines line up under each other. */
     val MonoTime = TextStyle(fontFamily = Mono, fontSize = 13.5f.sp, lineHeight = 18.sp)
     val MonoSmall = TextStyle(fontFamily = Mono, fontSize = 12.sp, lineHeight = 16.sp)
 }

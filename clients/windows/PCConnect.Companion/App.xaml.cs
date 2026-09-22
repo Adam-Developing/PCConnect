@@ -15,7 +15,7 @@ namespace PCConnect.Companion;
 
 /// <summary>
 /// The companion runs in the user's own session. It is the half of the Windows
-/// client that a person interacts with: signing in, pairing a PC, issuing
+/// client that a person interacts with: signing in, registering a PC, issuing
 /// commands, and seeing reminders (ADR-0012).
 ///
 /// It also serves the two session-bound commands — lock and sign out — that the

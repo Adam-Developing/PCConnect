@@ -36,7 +36,7 @@ public sealed class CredentialManagerTokenStore(ILogger<CredentialManagerTokenSt
         }
         catch (JsonException ex)
         {
-            logger.LogWarning(ex, "The stored credential could not be read; treating the agent as unpaired");
+            logger.LogWarning(ex, "The stored credential could not be read; treating the agent as unregistered");
             return Task.FromResult<StoredTokens?>(null);
         }
     }

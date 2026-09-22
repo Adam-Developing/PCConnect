@@ -1,5 +1,14 @@
 package uk.co.adamkhattab.pcconnect.ui
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -66,24 +75,42 @@ fun SignInScreen(
 
         Box(Modifier.height(20.dp))
 
-        Text(
-            if (registering) "Create an account" else "Sign in",
-            color = PcColors.Ink,
-            style = PcType.Display,
-        )
+        AnimatedContent(
+            targetState = registering,
+            transitionSpec = {
+                fadeIn(tween(200, easing = FastOutSlowInEasing)) togetherWith
+                    fadeOut(tween(140, easing = FastOutSlowInEasing))
+            },
+            label = "AuthTitle",
+        ) { isRegistering ->
+            Text(
+                if (isRegistering) "Create an account" else "Sign in",
+                color = PcColors.Ink,
+                style = PcType.Display,
+            )
+        }
 
         Box(Modifier.height(8.dp))
 
-        Text(
-            if (registering) {
-                "One account for every PC you sign in on, and for this phone."
-            } else {
-                "Change your PC's state from your phone, and set reminders that " +
-                    "appear on the screen you're sitting at."
+        AnimatedContent(
+            targetState = registering,
+            transitionSpec = {
+                fadeIn(tween(200, easing = FastOutSlowInEasing)) togetherWith
+                    fadeOut(tween(140, easing = FastOutSlowInEasing))
             },
-            color = PcColors.InkSoft,
-            style = PcType.BodySmall.copy(fontSize = 14.5.sp, lineHeight = 21.sp),
-        )
+            label = "AuthSubtitle",
+        ) { isRegistering ->
+            Text(
+                if (isRegistering) {
+                    "One account for every PC you sign in on, and for this phone."
+                } else {
+                    "Change your PC's state from your phone, and set reminders that " +
+                        "appear on the screen you're sitting at."
+                },
+                color = PcColors.InkSoft,
+                style = PcType.BodySmall.copy(fontSize = 14.5.sp, lineHeight = 21.sp),
+            )
+        }
 
         Box(Modifier.height(28.dp))
 
@@ -94,14 +121,20 @@ fun SignInScreen(
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
         )
 
-        if (registering) {
-            Box(Modifier.height(14.dp))
-            PcTextField(
-                value = email,
-                onValueChange = { email = it },
-                label = "Email",
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
-            )
+        AnimatedVisibility(
+            visible = registering,
+            enter = expandVertically(tween(220, easing = FastOutSlowInEasing)) + fadeIn(tween(180)),
+            exit = shrinkVertically(tween(180, easing = FastOutSlowInEasing)) + fadeOut(tween(140)),
+        ) {
+            Column {
+                Box(Modifier.height(14.dp))
+                PcTextField(
+                    value = email,
+                    onValueChange = { email = it },
+                    label = "Email",
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
+                )
+            }
         }
 
         Box(Modifier.height(14.dp))
@@ -150,11 +183,17 @@ fun SignInScreen(
             Modifier.fillMaxWidth().height(46.dp),
             contentAlignment = Alignment.Center,
         ) {
-            TextLink(
-                text = if (registering) "I already have an account" else "Create an account",
-                onClick = { registering = !registering },
-                style = PcType.BodySmall.copy(fontSize = 14.5.sp),
-            )
+            AnimatedContent(
+                targetState = registering,
+                transitionSpec = { fadeIn(tween(180)) togetherWith fadeOut(tween(120)) },
+                label = "AuthToggleLink",
+            ) { isRegistering ->
+                TextLink(
+                    text = if (isRegistering) "I already have an account" else "Create an account",
+                    onClick = { registering = !registering },
+                    style = PcType.BodySmall.copy(fontSize = 14.5.sp),
+                )
+            }
         }
 
         Box(Modifier.height(20.dp))

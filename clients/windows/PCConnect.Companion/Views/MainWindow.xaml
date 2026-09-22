@@ -27,25 +27,99 @@
     <vm:BoolToDimConverter x:Key="Dim" />
     <vm:BoolToStrikethroughConverter x:Key="Strike" />
 
-    <!-- One reminder row, shared by This PC and Reminders. -->
+    <!-- One reminder row in Reminders list. -->
     <DataTemplate x:Key="ReminderRowTemplate">
-      <StackPanel Margin="0,7" Opacity="{Binding IsPast, Converter={StaticResource Dim}}">
-        <StackPanel Orientation="Horizontal">
-          <TextBlock Text="{Binding Time}" Style="{StaticResource Mono}" FontSize="12"
-                     Foreground="{StaticResource InkSoft}" />
-          <TextBlock Text="{Binding DayLabel}" Style="{StaticResource Caption}" FontSize="12"
-                     Foreground="{StaticResource InkSoft}" Margin="8,0,0,0" />
-          <TextBlock Text="Done" FontSize="12" FontWeight="Medium" Margin="8,0,0,0"
-                     Foreground="{StaticResource OnlineInk}"
-                     Visibility="{Binding IsCompleted, Converter={StaticResource BoolToVis}}" />
-        </StackPanel>
-        <TextBlock Text="{Binding Body}" Style="{StaticResource Body}" TextTrimming="CharacterEllipsis"
-                   TextWrapping="NoWrap"
-                   TextDecorations="{Binding IsCompleted, Converter={StaticResource Strike}}" />
-        <TextBlock Text="{Binding Detail}" Style="{StaticResource Caption}" TextWrapping="NoWrap"
-                   TextTrimming="CharacterEllipsis"
-                   Visibility="{Binding Detail, Converter={StaticResource TextToVis}}" />
-      </StackPanel>
+      <Border Padding="6,6" Margin="0,2" CornerRadius="8" Background="Transparent">
+        <Border.Style>
+          <Style TargetType="Border">
+            <Setter Property="Background" Value="Transparent" />
+            <Style.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter Property="Background" Value="{StaticResource Track}" />
+              </Trigger>
+            </Style.Triggers>
+          </Style>
+        </Border.Style>
+        <Grid Opacity="{Binding IsPast, Converter={StaticResource Dim}}">
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="Auto" />
+          </Grid.ColumnDefinitions>
+
+          <StackPanel Grid.Column="0">
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+              <TextBlock Text="{Binding Time}" Style="{StaticResource Mono}" FontSize="12"
+                         Foreground="{StaticResource InkSoft}" VerticalAlignment="Center" />
+              <TextBlock Text="{Binding DayLabel}" Style="{StaticResource Caption}" FontSize="12"
+                         Foreground="{StaticResource InkSoft}" Margin="8,0,0,0" VerticalAlignment="Center" />
+              <TextBlock Text="Done" FontSize="12" FontWeight="Medium" Margin="8,0,0,0"
+                         Foreground="{StaticResource OnlineInk}" VerticalAlignment="Center"
+                         Visibility="{Binding IsCompleted, Converter={StaticResource BoolToVis}}" />
+              <Border Background="{StaticResource DangerTint}" BorderBrush="{StaticResource Danger}"
+                      BorderThickness="1" CornerRadius="4" Padding="5,1" Margin="8,0,0,0"
+                      VerticalAlignment="Center"
+                      Visibility="{Binding IsOverdue, Converter={StaticResource BoolToVis}}">
+                <TextBlock Text="Overdue" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource DangerInk}" />
+              </Border>
+            </StackPanel>
+            <TextBlock Text="{Binding Body}" Style="{StaticResource Body}" TextTrimming="CharacterEllipsis"
+                       TextWrapping="NoWrap" Margin="0,2,0,0"
+                       TextDecorations="{Binding IsCompleted, Converter={StaticResource Strike}}" />
+            <TextBlock Text="{Binding Detail}" Style="{StaticResource Caption}" TextWrapping="NoWrap"
+                       TextTrimming="CharacterEllipsis" Margin="0,1,0,0"
+                       Visibility="{Binding Detail, Converter={StaticResource TextToVis}}" />
+          </StackPanel>
+
+          <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="8,0,0,0">
+            <!-- Toggle Complete Button -->
+            <Button Command="{Binding DataContext.CompleteCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                    CommandParameter="{Binding}"
+                    Width="28" Height="28" Padding="0" Margin="0,0,4,0"
+                    Background="Transparent" BorderThickness="0" Cursor="Hand">
+              <Button.Style>
+                <Style TargetType="Button">
+                  <Setter Property="ToolTip" Value="Mark as completed" />
+                  <Style.Triggers>
+                    <DataTrigger Binding="{Binding IsCompleted}" Value="True">
+                      <Setter Property="ToolTip" Value="Reopen reminder" />
+                    </DataTrigger>
+                  </Style.Triggers>
+                </Style>
+              </Button.Style>
+              <Path Data="{StaticResource Icon.CheckCircle}" Width="15" Height="15" Stretch="Uniform">
+                <Path.Style>
+                  <Style TargetType="Path">
+                    <Setter Property="Fill" Value="{StaticResource InkDisabled}" />
+                    <Style.Triggers>
+                      <DataTrigger Binding="{Binding IsCompleted}" Value="True">
+                        <Setter Property="Fill" Value="{StaticResource OnlineDot}" />
+                      </DataTrigger>
+                    </Style.Triggers>
+                  </Style>
+                </Path.Style>
+              </Path>
+            </Button>
+
+            <!-- Edit Button -->
+            <Button Command="{Binding DataContext.StartEditCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                    CommandParameter="{Binding}"
+                    ToolTip="Edit reminder" Width="28" Height="28" Padding="0" Margin="0,0,4,0"
+                    Background="Transparent" BorderThickness="0" Cursor="Hand">
+              <Path Data="{StaticResource Icon.Edit}" Fill="{StaticResource InkSoft}"
+                    Width="14" Height="14" Stretch="Uniform" />
+            </Button>
+
+            <!-- Delete Button -->
+            <Button Command="{Binding DataContext.DeleteCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                    CommandParameter="{Binding}"
+                    ToolTip="Delete reminder" Width="28" Height="28" Padding="0"
+                    Background="Transparent" BorderThickness="0" Cursor="Hand">
+              <Path Data="{StaticResource Icon.Delete}" Fill="{StaticResource DangerInk}"
+                    Width="14" Height="14" Stretch="Uniform" />
+            </Button>
+          </StackPanel>
+        </Grid>
+      </Border>
     </DataTemplate>
 
     <!-- One line of an activity log. -->
@@ -112,6 +186,15 @@
                 <Setter TargetName="Num" Property="FontWeight" Value="SemiBold" />
                 <Setter TargetName="Dot" Property="Fill" Value="White" />
               </DataTrigger>
+              <MultiDataTrigger>
+                <MultiDataTrigger.Conditions>
+                  <Condition Binding="{Binding IsSelected}" Value="True" />
+                  <Condition Binding="{Binding IsMouseOver, RelativeSource={RelativeSource Self}}" Value="True" />
+                </MultiDataTrigger.Conditions>
+                <Setter TargetName="Bd" Property="Background" Value="#1D4FD8" />
+                <Setter TargetName="Num" Property="Foreground" Value="White" />
+                <Setter TargetName="Dot" Property="Fill" Value="White" />
+              </MultiDataTrigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>
         </Button.Template>
@@ -186,6 +269,7 @@
           <!-- account, pinned to the bottom -->
           <Grid DockPanel.Dock="Bottom">
             <Popup IsOpen="{Binding IsAccountMenuOpen}" Placement="Top" AllowsTransparency="True"
+                   PopupAnimation="Fade"
                    StaysOpen="False" HorizontalOffset="0" VerticalOffset="-6" Width="192">
               <Border Background="{StaticResource Surface}" BorderBrush="{StaticResource Border}"
                       BorderThickness="1" CornerRadius="12" Padding="6">
@@ -251,52 +335,65 @@
 
           <Border DockPanel.Dock="Bottom" Style="{StaticResource Hairline}" Margin="0,6" />
 
-          <!-- the four pages -->
-          <StackPanel DockPanel.Dock="Top">
-            <RadioButton Style="{StaticResource NavItem}" GroupName="Nav"
-                         Command="{Binding NavigateCommand}" CommandParameter="{x:Static vm:CompanionPage.ThisPc}"
-                         IsChecked="{Binding Page, Converter={StaticResource EnumToBool}, ConverterParameter=ThisPc, Mode=OneWay}">
-              <StackPanel Orientation="Horizontal">
-                <Path Data="{StaticResource Icon.DesktopWindows}" Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}"
-                      Width="20" Height="20" Stretch="Uniform" VerticalAlignment="Center" />
-                <TextBlock Text="This PC" Margin="10,0,0,0" VerticalAlignment="Center"
-                           Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}" />
-              </StackPanel>
-            </RadioButton>
+          <!-- the four pages with animated sliding indicator pill -->
+          <Grid DockPanel.Dock="Top" x:Name="NavContainer">
+            <!-- Animated sliding background pill -->
+            <Border x:Name="NavHighlightPill" Height="38"
+                    Background="{StaticResource PrimaryTint}"
+                    CornerRadius="{StaticResource ControlRadius}"
+                    VerticalAlignment="Top" HorizontalAlignment="Stretch"
+                    IsHitTestVisible="False" Opacity="0">
+              <Border.RenderTransform>
+                <TranslateTransform x:Name="NavHighlightTransform" Y="0" />
+              </Border.RenderTransform>
+            </Border>
 
-            <RadioButton Style="{StaticResource NavItem}" GroupName="Nav"
-                         Command="{Binding NavigateCommand}" CommandParameter="{x:Static vm:CompanionPage.OtherPcs}"
-                         IsChecked="{Binding Page, Converter={StaticResource EnumToBool}, ConverterParameter=OtherPcs, Mode=OneWay}">
-              <StackPanel Orientation="Horizontal">
-                <Path Data="{StaticResource Icon.Devices}" Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}"
-                      Width="20" Height="20" Stretch="Uniform" VerticalAlignment="Center" />
-                <TextBlock Text="Other PCs" Margin="10,0,0,0" VerticalAlignment="Center"
-                           Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}" />
-              </StackPanel>
-            </RadioButton>
+            <StackPanel>
+              <RadioButton x:Name="NavThisPc" Style="{StaticResource NavItem}" GroupName="Nav"
+                           Command="{Binding NavigateCommand}" CommandParameter="{x:Static vm:CompanionPage.ThisPc}"
+                           IsChecked="{Binding Page, Converter={StaticResource EnumToBool}, ConverterParameter=ThisPc, Mode=OneWay}">
+                <StackPanel Orientation="Horizontal">
+                  <Path Data="{StaticResource Icon.DesktopWindows}" Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}"
+                        Width="20" Height="20" Stretch="Uniform" VerticalAlignment="Center" />
+                  <TextBlock Text="This PC" Margin="10,0,0,0" VerticalAlignment="Center"
+                             Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}" />
+                </StackPanel>
+              </RadioButton>
 
-            <RadioButton Style="{StaticResource NavItem}" GroupName="Nav"
-                         Command="{Binding NavigateCommand}" CommandParameter="{x:Static vm:CompanionPage.Reminders}"
-                         IsChecked="{Binding Page, Converter={StaticResource EnumToBool}, ConverterParameter=Reminders, Mode=OneWay}">
-              <StackPanel Orientation="Horizontal">
-                <Path Data="{StaticResource Icon.Notifications}" Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}"
-                      Width="20" Height="20" Stretch="Uniform" VerticalAlignment="Center" />
-                <TextBlock Text="Reminders" Margin="10,0,0,0" VerticalAlignment="Center"
-                           Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}" />
-              </StackPanel>
-            </RadioButton>
+              <RadioButton x:Name="NavOtherPcs" Style="{StaticResource NavItem}" GroupName="Nav"
+                           Command="{Binding NavigateCommand}" CommandParameter="{x:Static vm:CompanionPage.OtherPcs}"
+                           IsChecked="{Binding Page, Converter={StaticResource EnumToBool}, ConverterParameter=OtherPcs, Mode=OneWay}">
+                <StackPanel Orientation="Horizontal">
+                  <Path Data="{StaticResource Icon.Devices}" Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}"
+                        Width="20" Height="20" Stretch="Uniform" VerticalAlignment="Center" />
+                  <TextBlock Text="Other PCs" Margin="10,0,0,0" VerticalAlignment="Center"
+                             Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}" />
+                </StackPanel>
+              </RadioButton>
 
-            <RadioButton Style="{StaticResource NavItem}" GroupName="Nav"
-                         Command="{Binding NavigateCommand}" CommandParameter="{x:Static vm:CompanionPage.Settings}"
-                         IsChecked="{Binding Page, Converter={StaticResource EnumToBool}, ConverterParameter=Settings, Mode=OneWay}">
-              <StackPanel Orientation="Horizontal">
-                <Path Data="{StaticResource Icon.Settings}" Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}"
-                      Width="20" Height="20" Stretch="Uniform" VerticalAlignment="Center" />
-                <TextBlock Text="Settings" Margin="10,0,0,0" VerticalAlignment="Center"
-                           Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}" />
-              </StackPanel>
-            </RadioButton>
-          </StackPanel>
+              <RadioButton x:Name="NavReminders" Style="{StaticResource NavItem}" GroupName="Nav"
+                           Command="{Binding NavigateCommand}" CommandParameter="{x:Static vm:CompanionPage.Reminders}"
+                           IsChecked="{Binding Page, Converter={StaticResource EnumToBool}, ConverterParameter=Reminders, Mode=OneWay}">
+                <StackPanel Orientation="Horizontal">
+                  <Path Data="{StaticResource Icon.Notifications}" Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}"
+                        Width="20" Height="20" Stretch="Uniform" VerticalAlignment="Center" />
+                  <TextBlock Text="Reminders" Margin="10,0,0,0" VerticalAlignment="Center"
+                             Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}" />
+                </StackPanel>
+              </RadioButton>
+
+              <RadioButton x:Name="NavSettings" Style="{StaticResource NavItem}" GroupName="Nav"
+                           Command="{Binding NavigateCommand}" CommandParameter="{x:Static vm:CompanionPage.Settings}"
+                           IsChecked="{Binding Page, Converter={StaticResource EnumToBool}, ConverterParameter=Settings, Mode=OneWay}">
+                <StackPanel Orientation="Horizontal">
+                  <Path Data="{StaticResource Icon.Settings}" Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}"
+                        Width="20" Height="20" Stretch="Uniform" VerticalAlignment="Center" />
+                  <TextBlock Text="Settings" Margin="10,0,0,0" VerticalAlignment="Center"
+                             Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}" />
+                </StackPanel>
+              </RadioButton>
+            </StackPanel>
+          </Grid>
 
           <Grid />
         </DockPanel>
@@ -313,7 +410,8 @@
         </Border>
 
         <!-- ═══ This PC ═══ -->
-        <Grid Visibility="{Binding Page, Converter={StaticResource EnumToVis}, ConverterParameter=ThisPc}">
+        <Grid x:Name="ThisPcPageGrid" Style="{StaticResource AnimatedPageGrid}"
+              Visibility="{Binding Page, Converter={StaticResource EnumToVis}, ConverterParameter=ThisPc}">
           <Grid Margin="32,28">
             <Grid.RowDefinitions>
               <RowDefinition Height="Auto" />
@@ -331,11 +429,32 @@
                          VerticalAlignment="Bottom" />
             </DockPanel>
 
-            <Grid Grid.Row="1" Margin="0,18,0,0">
-              <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="*" />
-              </Grid.ColumnDefinitions>
+            <StackPanel Grid.Row="1" Margin="0,18,0,0">
+              <Border BorderBrush="{StaticResource WarnDot}" BorderThickness="1"
+                      Background="{StaticResource WarnTint}" CornerRadius="10"
+                      Padding="16,12" Margin="0,0,0,16"
+                      Visibility="{Binding HasThisPc, Converter={StaticResource NotBoolToVis}}">
+                <DockPanel LastChildFill="True">
+                  <Button DockPanel.Dock="Right" Command="{Binding JoinThisPcCommand}"
+                          Content="Join This PC" Style="{StaticResource PrimaryButton}"
+                          Height="34" Padding="14,0" VerticalAlignment="Center" Margin="14,0,0,0" />
+                  <Path Data="{StaticResource Icon.AddAlert}" Fill="{StaticResource WarnInk}"
+                        Width="20" Height="20" Stretch="Uniform" DockPanel.Dock="Left"
+                        VerticalAlignment="Center" Margin="0,0,12,0" />
+                  <StackPanel VerticalAlignment="Center">
+                    <TextBlock Text="This PC is not joined to your account" FontWeight="SemiBold"
+                               FontSize="13.5" Foreground="{StaticResource WarnInk}" />
+                    <TextBlock Text="Join this PC to control it from your phone and choose it for reminders."
+                               FontSize="12" Foreground="{StaticResource WarnInk}" Margin="0,2,0,0" TextWrapping="Wrap" />
+                  </StackPanel>
+                </DockPanel>
+              </Border>
+
+              <Grid>
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="*" />
+                  <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
 
               <Border Style="{StaticResource Card}" Margin="0,0,8,0" VerticalAlignment="Top">
                 <StackPanel>
@@ -413,6 +532,7 @@
                 </StackPanel>
               </Border>
             </Grid>
+            </StackPanel>
 
             <Border Grid.Row="2" Style="{StaticResource Card}" Margin="0,16,0,0">
               <DockPanel>
@@ -480,7 +600,8 @@
         </Grid>
 
         <!-- ═══ Other PCs ═══ -->
-        <Grid Visibility="{Binding Page, Converter={StaticResource EnumToVis}, ConverterParameter=OtherPcs}">
+        <Grid x:Name="OtherPcsPageGrid" Style="{StaticResource AnimatedPageGrid}"
+              Visibility="{Binding Page, Converter={StaticResource EnumToVis}, ConverterParameter=OtherPcs}">
           <Grid DataContext="{Binding Devices}" Margin="32,28">
             <Grid.RowDefinitions>
               <RowDefinition Height="Auto" />
@@ -661,18 +782,38 @@
         </Grid>
 
         <!-- ═══ Reminders ═══ -->
-        <Grid Visibility="{Binding Page, Converter={StaticResource EnumToVis}, ConverterParameter=Reminders}">
+        <Grid x:Name="RemindersPageGrid" Style="{StaticResource AnimatedPageGrid}"
+              Visibility="{Binding Page, Converter={StaticResource EnumToVis}, ConverterParameter=Reminders}">
           <Grid DataContext="{Binding Reminders}" Margin="32,28">
             <Grid.RowDefinitions>
               <RowDefinition Height="Auto" />
               <RowDefinition Height="*" />
             </Grid.RowDefinitions>
 
-            <StackPanel>
-              <TextBlock Text="Reminders" Style="{StaticResource PageTitle}" />
-              <TextBlock Style="{StaticResource Subtle}" Margin="0,6,0,0"
-                         Text="Shown full-screen on the PCs you choose, at the time you choose. Encrypted on the server." />
-            </StackPanel>
+            <DockPanel LastChildFill="True">
+              <Button DockPanel.Dock="Right" Command="{Binding RefreshCommand}"
+                      ToolTip="Refresh reminders and device status"
+                      VerticalAlignment="Center" Cursor="Hand"
+                      Padding="12,0" Height="34" Background="{StaticResource Surface}"
+                      BorderBrush="{StaticResource Border}" BorderThickness="1"
+                      IsEnabled="{Binding IsRefreshing, Converter={StaticResource NotBool}}">
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                  <Path x:Name="RefreshIcon" Data="{StaticResource Icon.Refresh}" Fill="{StaticResource InkSoft}"
+                        Width="14" Height="14" Stretch="Uniform" VerticalAlignment="Center"
+                        RenderTransformOrigin="0.5,0.5">
+                    <Path.RenderTransform>
+                      <RotateTransform x:Name="RefreshRotateTransform" Angle="0" />
+                    </Path.RenderTransform>
+                  </Path>
+                  <TextBlock Text="Refresh" Margin="7,0,0,0" VerticalAlignment="Center" FontSize="13" FontWeight="Medium" Foreground="{StaticResource Ink}" />
+                </StackPanel>
+              </Button>
+              <StackPanel>
+                <TextBlock Text="Reminders" Style="{StaticResource PageTitle}" />
+                <TextBlock Style="{StaticResource Subtle}" Margin="0,6,0,0"
+                           Text="Shown full-screen on the PCs you choose, at the time you choose. Encrypted on the server." />
+              </StackPanel>
+            </DockPanel>
 
             <Grid Grid.Row="1" Margin="0,18,0,0">
               <Grid.ColumnDefinitions>
@@ -713,9 +854,9 @@
                             <Border x:Name="Bd" Background="{TemplateBinding Background}"
                                     CornerRadius="8" Padding="12,0">
                               <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
-                                <Path Data="{StaticResource Icon.CheckCircle}" Fill="{StaticResource InkSoft}"
+                                <Path x:Name="Ico" Data="{StaticResource Icon.CheckCircle}" Fill="{StaticResource InkSoft}"
                                       Width="14" Height="14" Stretch="Uniform" Margin="0,0,6,0" VerticalAlignment="Center" />
-                                <TextBlock Text="{Binding DataContext.CompletedRemindersButtonText, RelativeSource={RelativeSource AncestorType=Button}}"
+                                <TextBlock x:Name="Txt" Text="{Binding DataContext.CompletedRemindersButtonText, RelativeSource={RelativeSource AncestorType=Button}}"
                                            FontSize="12.5" FontWeight="Medium"
                                            Foreground="{StaticResource InkSoft}" VerticalAlignment="Center" />
                               </StackPanel>
@@ -723,6 +864,8 @@
                             <ControlTemplate.Triggers>
                               <Trigger Property="IsMouseOver" Value="True">
                                 <Setter TargetName="Bd" Property="Background" Value="{StaticResource PrimaryTint}" />
+                                <Setter TargetName="Txt" Property="Foreground" Value="{StaticResource Primary}" />
+                                <Setter TargetName="Ico" Property="Fill" Value="{StaticResource Primary}" />
                               </Trigger>
                             </ControlTemplate.Triggers>
                           </ControlTemplate>
@@ -782,142 +925,197 @@
                       </Button>
                     </Grid>
 
-                    <!-- Year selector panel -->
-                    <StackPanel Visibility="{Binding IsYearsView, Converter={StaticResource BoolToVis}}" Margin="0,4,0,0">
-                      <!-- 12 Years Grid: 3 columns x 4 rows -->
-                      <ItemsControl ItemsSource="{Binding YearOptions}">
-                        <ItemsControl.ItemsPanel>
-                          <ItemsPanelTemplate>
-                            <UniformGrid Columns="3" />
-                          </ItemsPanelTemplate>
-                        </ItemsControl.ItemsPanel>
-                        <ItemsControl.ItemTemplate>
-                          <DataTemplate>
-                            <Button Command="{Binding DataContext.SelectYearCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
-                                    CommandParameter="{Binding Year}"
-                                    Margin="2" Height="32" Padding="0" Cursor="Hand">
-                              <Button.Style>
-                                <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
-                                  <Setter Property="Background" Value="Transparent" />
-                                  <Setter Property="BorderThickness" Value="1" />
-                                  <Setter Property="BorderBrush" Value="Transparent" />
-                                  <Setter Property="FontSize" Value="12" />
-                                  <Style.Triggers>
-                                    <DataTrigger Binding="{Binding IsCurrent}" Value="True">
-                                      <Setter Property="BorderBrush" Value="{StaticResource Primary}" />
-                                      <Setter Property="FontWeight" Value="SemiBold" />
-                                    </DataTrigger>
-                                    <DataTrigger Binding="{Binding IsSelected}" Value="True">
-                                      <Setter Property="Background" Value="{StaticResource Primary}" />
-                                      <Setter Property="BorderBrush" Value="{StaticResource Primary}" />
-                                      <Setter Property="Foreground" Value="White" />
-                                      <Setter Property="FontWeight" Value="SemiBold" />
-                                    </DataTrigger>
-                                  </Style.Triggers>
-                                </Style>
-                              </Button.Style>
-                              <TextBlock Text="{Binding Year}"
-                                         Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
-                                         HorizontalAlignment="Center" VerticalAlignment="Center" />
-                            </Button>
-                          </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                      </ItemsControl>
+                    <!-- Calendar views host with animated opening zoom and closing shrink -->
+                    <Grid x:Name="CalendarViewsHost" Margin="0,4,0,0">
+                      <!-- Year selector panel -->
+                      <StackPanel x:Name="CalendarYearsPanel"
+                                  RenderTransformOrigin="0.5,0.5"
+                                  Visibility="Collapsed">
+                        <StackPanel.RenderTransform>
+                          <ScaleTransform x:Name="YearsScale" ScaleX="1.0" ScaleY="1.0" />
+                        </StackPanel.RenderTransform>
+                        <!-- 12 Years Grid: 3 columns x 4 rows -->
+                        <ItemsControl ItemsSource="{Binding YearOptions}">
+                          <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                              <UniformGrid Columns="3" />
+                            </ItemsPanelTemplate>
+                          </ItemsControl.ItemsPanel>
+                          <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                              <Button Command="{Binding DataContext.SelectYearCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                      CommandParameter="{Binding Year}"
+                                      Margin="2" Height="32" Padding="0" Cursor="Hand">
+                                <Button.Template>
+                                  <ControlTemplate TargetType="Button">
+                                    <Border x:Name="Bd" CornerRadius="6" BorderThickness="1"
+                                            BorderBrush="Transparent" Background="Transparent">
+                                      <TextBlock x:Name="Txt" Text="{Binding Year}" FontSize="12"
+                                                 FontWeight="Medium" Foreground="{StaticResource Ink}"
+                                                 HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                    </Border>
+                                    <ControlTemplate.Triggers>
+                                      <Trigger Property="IsMouseOver" Value="True">
+                                        <Setter TargetName="Bd" Property="Background" Value="{StaticResource Track}" />
+                                        <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource Border}" />
+                                        <Setter TargetName="Txt" Property="Foreground" Value="{StaticResource Ink}" />
+                                        <Setter TargetName="Txt" Property="FontWeight" Value="SemiBold" />
+                                      </Trigger>
+                                      <DataTrigger Binding="{Binding IsCurrent}" Value="True">
+                                        <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource Primary}" />
+                                        <Setter TargetName="Bd" Property="BorderThickness" Value="1.5" />
+                                        <Setter TargetName="Txt" Property="FontWeight" Value="SemiBold" />
+                                      </DataTrigger>
+                                      <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                                        <Setter TargetName="Bd" Property="Background" Value="{StaticResource Primary}" />
+                                        <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource Primary}" />
+                                        <Setter TargetName="Txt" Property="Foreground" Value="White" />
+                                        <Setter TargetName="Txt" Property="FontWeight" Value="SemiBold" />
+                                      </DataTrigger>
+                                      <MultiDataTrigger>
+                                        <MultiDataTrigger.Conditions>
+                                          <Condition Binding="{Binding IsSelected}" Value="True" />
+                                          <Condition Binding="{Binding IsMouseOver, RelativeSource={RelativeSource Self}}" Value="True" />
+                                        </MultiDataTrigger.Conditions>
+                                        <Setter TargetName="Bd" Property="Background" Value="#1D4FD8" />
+                                        <Setter TargetName="Bd" Property="BorderBrush" Value="#1D4FD8" />
+                                        <Setter TargetName="Txt" Property="Foreground" Value="White" />
+                                        <Setter TargetName="Txt" Property="FontWeight" Value="SemiBold" />
+                                      </MultiDataTrigger>
+                                    </ControlTemplate.Triggers>
+                                  </ControlTemplate>
+                                </Button.Template>
+                              </Button>
+                            </DataTemplate>
+                          </ItemsControl.ItemTemplate>
+                        </ItemsControl>
 
-                      <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,8,0,0">
-                        <Button Command="{Binding GoToTodayCommand}" Content="Go to Today"
-                                Height="28" Padding="12,0" FontSize="12" FontWeight="Medium"
-                                Margin="0,0,8,0" ToolTip="Go to current month" />
-                        <Button Command="{Binding BackToCalendarCommand}" Content="Back to calendar"
-                                Style="{StaticResource LinkButton}" FontSize="11.5" Padding="6,2" />
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,8,0,0">
+                          <Button Command="{Binding GoToTodayCommand}" Content="Go to Today"
+                                  Height="28" Padding="12,0" FontSize="12" FontWeight="Medium"
+                                  Margin="0,0,8,0" ToolTip="Go to current month" />
+                          <Button Command="{Binding BackToCalendarCommand}" Content="Back to calendar"
+                                  Style="{StaticResource LinkButton}" FontSize="11.5" Padding="6,2" />
+                        </StackPanel>
                       </StackPanel>
-                    </StackPanel>
 
-                    <!-- Month selector panel -->
-                    <StackPanel Visibility="{Binding IsMonthsView, Converter={StaticResource BoolToVis}}" Margin="0,4,0,0">
-                      <!-- 12 Months Grid: 3 columns x 4 rows -->
-                      <ItemsControl ItemsSource="{Binding MonthOptions}">
-                        <ItemsControl.ItemsPanel>
-                          <ItemsPanelTemplate>
-                            <UniformGrid Columns="3" />
-                          </ItemsPanelTemplate>
-                        </ItemsControl.ItemsPanel>
-                        <ItemsControl.ItemTemplate>
-                          <DataTemplate>
-                            <Button Command="{Binding DataContext.SelectMonthCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
-                                    CommandParameter="{Binding MonthNumber}"
-                                    Margin="2" Height="32" Padding="0" Cursor="Hand">
-                              <Button.Style>
-                                <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
-                                  <Setter Property="Background" Value="Transparent" />
-                                  <Setter Property="BorderThickness" Value="1" />
-                                  <Setter Property="BorderBrush" Value="Transparent" />
-                                  <Setter Property="FontSize" Value="12" />
-                                  <Style.Triggers>
-                                    <DataTrigger Binding="{Binding IsCurrent}" Value="True">
-                                      <Setter Property="BorderBrush" Value="{StaticResource Primary}" />
-                                      <Setter Property="FontWeight" Value="SemiBold" />
-                                    </DataTrigger>
-                                    <DataTrigger Binding="{Binding IsSelected}" Value="True">
-                                      <Setter Property="Background" Value="{StaticResource Primary}" />
-                                      <Setter Property="BorderBrush" Value="{StaticResource Primary}" />
-                                      <Setter Property="Foreground" Value="White" />
-                                      <Setter Property="FontWeight" Value="SemiBold" />
-                                    </DataTrigger>
-                                  </Style.Triggers>
-                                </Style>
-                              </Button.Style>
-                              <TextBlock Text="{Binding ShortName}"
-                                         Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
-                                         HorizontalAlignment="Center" VerticalAlignment="Center" />
-                            </Button>
-                          </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                      </ItemsControl>
+                      <!-- Month selector panel -->
+                      <StackPanel x:Name="CalendarMonthsPanel"
+                                  RenderTransformOrigin="0.5,0.5"
+                                  Visibility="Collapsed">
+                        <StackPanel.RenderTransform>
+                          <ScaleTransform x:Name="MonthsScale" ScaleX="1.0" ScaleY="1.0" />
+                        </StackPanel.RenderTransform>
+                        <!-- 12 Months Grid: 3 columns x 4 rows -->
+                        <ItemsControl ItemsSource="{Binding MonthOptions}">
+                          <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                              <UniformGrid Columns="3" />
+                            </ItemsPanelTemplate>
+                          </ItemsControl.ItemsPanel>
+                          <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                              <Button Command="{Binding DataContext.SelectMonthCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                      CommandParameter="{Binding MonthNumber}"
+                                      Margin="2" Height="32" Padding="0" Cursor="Hand">
+                                <Button.Template>
+                                  <ControlTemplate TargetType="Button">
+                                    <Border x:Name="Bd" CornerRadius="6" BorderThickness="1"
+                                            BorderBrush="Transparent" Background="Transparent">
+                                      <TextBlock x:Name="Txt" Text="{Binding ShortName}" FontSize="12"
+                                                 FontWeight="Medium" Foreground="{StaticResource Ink}"
+                                                 HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                    </Border>
+                                    <ControlTemplate.Triggers>
+                                      <Trigger Property="IsMouseOver" Value="True">
+                                        <Setter TargetName="Bd" Property="Background" Value="{StaticResource Track}" />
+                                        <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource Border}" />
+                                        <Setter TargetName="Txt" Property="Foreground" Value="{StaticResource Ink}" />
+                                        <Setter TargetName="Txt" Property="FontWeight" Value="SemiBold" />
+                                      </Trigger>
+                                      <DataTrigger Binding="{Binding IsCurrent}" Value="True">
+                                        <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource Primary}" />
+                                        <Setter TargetName="Bd" Property="BorderThickness" Value="1.5" />
+                                        <Setter TargetName="Txt" Property="FontWeight" Value="SemiBold" />
+                                      </DataTrigger>
+                                      <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                                        <Setter TargetName="Bd" Property="Background" Value="{StaticResource Primary}" />
+                                        <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource Primary}" />
+                                        <Setter TargetName="Txt" Property="Foreground" Value="White" />
+                                        <Setter TargetName="Txt" Property="FontWeight" Value="SemiBold" />
+                                      </DataTrigger>
+                                      <MultiDataTrigger>
+                                        <MultiDataTrigger.Conditions>
+                                          <Condition Binding="{Binding IsSelected}" Value="True" />
+                                          <Condition Binding="{Binding IsMouseOver, RelativeSource={RelativeSource Self}}" Value="True" />
+                                        </MultiDataTrigger.Conditions>
+                                        <Setter TargetName="Bd" Property="Background" Value="#1D4FD8" />
+                                        <Setter TargetName="Bd" Property="BorderBrush" Value="#1D4FD8" />
+                                        <Setter TargetName="Txt" Property="Foreground" Value="White" />
+                                        <Setter TargetName="Txt" Property="FontWeight" Value="SemiBold" />
+                                      </MultiDataTrigger>
+                                    </ControlTemplate.Triggers>
+                                  </ControlTemplate>
+                                </Button.Template>
+                              </Button>
+                            </DataTemplate>
+                          </ItemsControl.ItemTemplate>
+                        </ItemsControl>
 
-                      <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,8,0,0">
-                        <Button Command="{Binding GoToTodayCommand}" Content="Go to Today"
-                                Height="28" Padding="12,0" FontSize="12" FontWeight="Medium"
-                                Margin="0,0,8,0" ToolTip="Go to current month" />
-                        <Button Command="{Binding BackToCalendarCommand}" Content="Back to calendar"
-                                Style="{StaticResource LinkButton}" FontSize="11.5" Padding="6,2" />
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,8,0,0">
+                          <Button Command="{Binding GoToTodayCommand}" Content="Go to Today"
+                                  Height="28" Padding="12,0" FontSize="12" FontWeight="Medium"
+                                  Margin="0,0,8,0" ToolTip="Go to current month" />
+                          <Button Command="{Binding BackToCalendarCommand}" Content="Back to calendar"
+                                  Style="{StaticResource LinkButton}" FontSize="11.5" Padding="6,2" />
+                        </StackPanel>
                       </StackPanel>
-                    </StackPanel>
 
-                    <!-- Days calendar view -->
-                    <StackPanel Visibility="{Binding IsDaysView, Converter={StaticResource BoolToVis}}">
-                      <UniformGrid Columns="7" Margin="0,8,0,4">
-                        <TextBlock Text="MO" Style="{StaticResource WeekdayHeader}" />
-                        <TextBlock Text="TU" Style="{StaticResource WeekdayHeader}" />
-                        <TextBlock Text="WE" Style="{StaticResource WeekdayHeader}" />
-                        <TextBlock Text="TH" Style="{StaticResource WeekdayHeader}" />
-                        <TextBlock Text="FR" Style="{StaticResource WeekdayHeader}" />
-                        <TextBlock Text="SA" Style="{StaticResource WeekdayHeader}" />
-                        <TextBlock Text="SU" Style="{StaticResource WeekdayHeader}" />
-                      </UniformGrid>
+                      <!-- Days calendar view -->
+                      <StackPanel x:Name="CalendarDaysPanel"
+                                  RenderTransformOrigin="0.5,0.5"
+                                  Visibility="Visible">
+                        <StackPanel.RenderTransform>
+                          <ScaleTransform x:Name="DaysScale" ScaleX="1.0" ScaleY="1.0" />
+                        </StackPanel.RenderTransform>
+                        <UniformGrid Columns="7" Margin="0,4,0,4">
+                          <TextBlock Text="MO" Style="{StaticResource WeekdayHeader}" />
+                          <TextBlock Text="TU" Style="{StaticResource WeekdayHeader}" />
+                          <TextBlock Text="WE" Style="{StaticResource WeekdayHeader}" />
+                          <TextBlock Text="TH" Style="{StaticResource WeekdayHeader}" />
+                          <TextBlock Text="FR" Style="{StaticResource WeekdayHeader}" />
+                          <TextBlock Text="SA" Style="{StaticResource WeekdayHeader}" />
+                          <TextBlock Text="SU" Style="{StaticResource WeekdayHeader}" />
+                        </UniformGrid>
 
-                      <ItemsControl ItemsSource="{Binding Days}" ItemTemplate="{StaticResource DayCellTemplate}"
-                                    PreviewMouseLeftButtonDown="OnCalendarMouseDown"
-                                    PreviewMouseMove="OnCalendarMouseMove"
-                                    PreviewMouseLeftButtonUp="OnCalendarMouseUp"
-                                    LostMouseCapture="OnCalendarLostMouseCapture">
-                        <ItemsControl.ItemsPanel>
-                          <ItemsPanelTemplate>
-                            <UniformGrid Columns="7" />
-                          </ItemsPanelTemplate>
-                        </ItemsControl.ItemsPanel>
-                      </ItemsControl>
+                        <Border x:Name="DaysGridContainer">
+                          <Border.RenderTransform>
+                            <TranslateTransform x:Name="DaysSlideTransform" X="0" />
+                          </Border.RenderTransform>
+                          <ItemsControl ItemsSource="{Binding Days}" ItemTemplate="{StaticResource DayCellTemplate}"
+                                        PreviewMouseLeftButtonDown="OnCalendarMouseDown"
+                                        PreviewMouseMove="OnCalendarMouseMove"
+                                        PreviewMouseLeftButtonUp="OnCalendarMouseUp"
+                                        LostMouseCapture="OnCalendarLostMouseCapture">
+                            <ItemsControl.ItemsPanel>
+                              <ItemsPanelTemplate>
+                                <UniformGrid Columns="7" />
+                              </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                          </ItemsControl>
+                        </Border>
 
-                      <!-- Dedicated Go to Today button below calendar days -->
-                      <Button Command="{Binding GoToTodayCommand}" Content="Go to Today"
-                              Height="28" Padding="14,0" FontSize="12" FontWeight="Medium"
-                              HorizontalAlignment="Center" Margin="0,8,0,0"
-                              ToolTip="Go to current month" />
+                        <!-- Dedicated Go to Today button below calendar days -->
+                        <Button Command="{Binding GoToTodayCommand}" Content="Go to Today"
+                                Height="28" Padding="14,0" FontSize="12" FontWeight="Medium"
+                                HorizontalAlignment="Center" Margin="0,8,0,0"
+                                ToolTip="Go to current month" />
 
-                      <TextBlock Style="{StaticResource Caption}" Margin="0,4,0,0" FontSize="11.5"
-                                 TextWrapping="Wrap" LineHeight="17"
-                                 Text="Click a day to filter. Drag or Shift-click for a range. Ctrl-click to add or remove days. Show all or Esc clears the selection." />
-                    </StackPanel>
+                        <TextBlock Style="{StaticResource Caption}" Margin="0,4,0,0" FontSize="11.5"
+                                   TextWrapping="Wrap" LineHeight="17"
+                                   Text="Click a day to filter. Drag or Shift-click for a range. Ctrl-click to add or remove days. Show all or Esc clears the selection." />
+                      </StackPanel>
+                    </Grid>
                   </StackPanel>
                 </Grid>
               </Border>
@@ -925,18 +1123,139 @@
               <!-- new reminder -->
               <Border Grid.Column="1" Style="{StaticResource Card}" Padding="0">
                 <DockPanel>
-                  <TextBlock DockPanel.Dock="Top" Text="New reminder" Style="{StaticResource CardTitle}"
-                             Margin="20,16,20,0" />
+                  <DockPanel DockPanel.Dock="Top" Margin="20,16,20,0" LastChildFill="False">
+                    <TextBlock DockPanel.Dock="Left" Text="{Binding FormTitle}" Style="{StaticResource CardTitle}" />
+                    <Button DockPanel.Dock="Right" Command="{Binding CancelEditCommand}"
+                            Content="Cancel" Style="{StaticResource LinkButton}"
+                            Visibility="{Binding IsEditing, Converter={StaticResource BoolToVis}}"
+                            FontSize="12.5" VerticalAlignment="Center" />
+                  </DockPanel>
 
                   <Border DockPanel.Dock="Bottom" BorderBrush="{StaticResource Divider}" BorderThickness="0,1,0,0"
                           Padding="20,12,20,16">
                     <StackPanel>
-                      <Button Content="Save reminder" Command="{Binding AddCommand}"
-                              Style="{StaticResource PrimaryButton}" Height="40"
-                              IsEnabled="{Binding IsBusy, Converter={StaticResource NotBool}}" />
-                      <TextBlock Text="{Binding StatusMessage}" Style="{StaticResource Caption}"
-                                 Margin="0,8,0,0" TextWrapping="Wrap"
-                                 Visibility="{Binding StatusMessage, Converter={StaticResource TextToVis}}" />
+                      <Grid>
+                        <Grid.ColumnDefinitions>
+                          <ColumnDefinition Width="*" />
+                          <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+
+                        <Button Grid.Column="0" Content="{Binding SaveButtonText}" Command="{Binding AddCommand}"
+                                Style="{StaticResource PrimaryButton}" Height="40"
+                                IsEnabled="{Binding IsBusy, Converter={StaticResource NotBool}}" />
+
+                        <Button Grid.Column="1" Command="{Binding DeleteCommand}"
+                                Visibility="{Binding IsEditing, Converter={StaticResource BoolToVis}}"
+                                ToolTip="Delete this reminder"
+                                Height="40" Width="40" Margin="8,0,0,0" Padding="0"
+                                Background="{StaticResource DangerTint}" BorderBrush="{StaticResource Danger}"
+                                Cursor="Hand">
+                          <Path Data="{StaticResource Icon.Delete}" Fill="{StaticResource DangerInk}"
+                                Width="18" Height="18" Stretch="Uniform" />
+                        </Button>
+                      </Grid>
+
+                      <Border CornerRadius="8" Margin="0,10,0,0" ClipToBounds="True"
+                              MouseEnter="StatusBanner_MouseEnter" MouseLeave="StatusBanner_MouseLeave"
+                              Visibility="{Binding StatusMessage, Converter={StaticResource TextToVis}}">
+                        <Border.Style>
+                          <Style TargetType="Border">
+                            <Setter Property="Background" Value="{StaticResource OnlineTint}" />
+                            <Setter Property="BorderBrush" Value="{StaticResource OnlineDot}" />
+                            <Setter Property="BorderThickness" Value="1" />
+                            <Style.Triggers>
+                              <DataTrigger Binding="{Binding IsStatusError}" Value="True">
+                                <Setter Property="Background" Value="{StaticResource DangerTint}" />
+                                <Setter Property="BorderBrush" Value="{StaticResource Danger}" />
+                              </DataTrigger>
+                            </Style.Triggers>
+                          </Style>
+                        </Border.Style>
+                        <Grid>
+                          <Grid.RowDefinitions>
+                            <RowDefinition Height="*" />
+                            <RowDefinition Height="Auto" />
+                          </Grid.RowDefinitions>
+
+                          <DockPanel Grid.Row="0" Margin="12,9" LastChildFill="True">
+                            <Button DockPanel.Dock="Right" Command="{Binding DismissStatusCommand}"
+                                    ToolTip="Dismiss" Cursor="Hand" Background="Transparent"
+                                    BorderThickness="0" Padding="4,2" Margin="6,0,0,0"
+                                    VerticalAlignment="Center">
+                              <Button.Template>
+                                <ControlTemplate TargetType="Button">
+                                  <Border Background="Transparent" Padding="{TemplateBinding Padding}">
+                                    <Path Data="{StaticResource Icon.Close}" Width="11" Height="11" Stretch="Uniform">
+                                      <Path.Style>
+                                        <Style TargetType="Path">
+                                          <Setter Property="Fill" Value="{StaticResource OnlineInk}" />
+                                          <Setter Property="Opacity" Value="0.6" />
+                                          <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsStatusError}" Value="True">
+                                              <Setter Property="Fill" Value="{StaticResource DangerInk}" />
+                                            </DataTrigger>
+                                            <Trigger Property="IsMouseOver" Value="True">
+                                              <Setter Property="Opacity" Value="1.0" />
+                                            </Trigger>
+                                          </Style.Triggers>
+                                        </Style>
+                                      </Path.Style>
+                                    </Path>
+                                  </Border>
+                                </ControlTemplate>
+                              </Button.Template>
+                            </Button>
+
+                            <Path DockPanel.Dock="Left" Width="16" Height="16" Stretch="Uniform"
+                                  Margin="0,0,8,0" VerticalAlignment="Center">
+                              <Path.Style>
+                                <Style TargetType="Path">
+                                  <Setter Property="Data" Value="{StaticResource Icon.CheckCircle}" />
+                                  <Setter Property="Fill" Value="{StaticResource OnlineInk}" />
+                                  <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsStatusError}" Value="True">
+                                      <Setter Property="Data" Value="{StaticResource Icon.Close}" />
+                                      <Setter Property="Fill" Value="{StaticResource DangerInk}" />
+                                    </DataTrigger>
+                                  </Style.Triggers>
+                                </Style>
+                              </Path.Style>
+                            </Path>
+
+                            <TextBlock Text="{Binding StatusMessage}" FontSize="13" FontWeight="SemiBold"
+                                       VerticalAlignment="Center" TextWrapping="Wrap">
+                              <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                  <Setter Property="Foreground" Value="{StaticResource OnlineInk}" />
+                                  <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsStatusError}" Value="True">
+                                      <Setter Property="Foreground" Value="{StaticResource DangerInk}" />
+                                    </DataTrigger>
+                                  </Style.Triggers>
+                                </Style>
+                              </TextBlock.Style>
+                            </TextBlock>
+                          </DockPanel>
+
+                          <!-- Countdown loading bar shrinking from right to left over 5 seconds -->
+                          <Border Grid.Row="1" Height="3" HorizontalAlignment="Stretch"
+                                  CornerRadius="0,0,7,7" RenderTransformOrigin="0,0.5">
+                            <Border.RenderTransform>
+                              <ScaleTransform ScaleX="{Binding StatusProgress}" />
+                            </Border.RenderTransform>
+                            <Border.Style>
+                              <Style TargetType="Border">
+                                <Setter Property="Background" Value="{StaticResource OnlineDot}" />
+                                <Style.Triggers>
+                                  <DataTrigger Binding="{Binding IsStatusError}" Value="True">
+                                    <Setter Property="Background" Value="{StaticResource Danger}" />
+                                  </DataTrigger>
+                                </Style.Triggers>
+                              </Style>
+                            </Border.Style>
+                          </Border>
+                        </Grid>
+                      </Border>
                     </StackPanel>
                   </Border>
 
@@ -998,20 +1317,42 @@
                         <ItemsControl.ItemTemplate>
                           <DataTemplate>
                             <Button Command="{Binding DataContext.ChooseRepeatCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
-                                    CommandParameter="{Binding}" Margin="0,0,6,6" Height="30" Padding="12,0"
-                                    FontSize="12.5">
-                              <Button.Style>
-                                <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
-                                  <Style.Triggers>
+                                    CommandParameter="{Binding}" Margin="0,0,6,6" Height="30" Padding="0"
+                                    Cursor="Hand">
+                              <Button.Template>
+                                <ControlTemplate TargetType="Button">
+                                  <Border x:Name="Bd" CornerRadius="8" BorderThickness="1"
+                                          BorderBrush="{StaticResource Border}" Background="{StaticResource Surface}"
+                                          Padding="12,0">
+                                    <TextBlock x:Name="Txt" Text="{Binding Label}" FontSize="12.5"
+                                               FontWeight="Medium" Foreground="{StaticResource Ink}"
+                                               HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                  </Border>
+                                  <ControlTemplate.Triggers>
+                                    <Trigger Property="IsMouseOver" Value="True">
+                                      <Setter TargetName="Bd" Property="Background" Value="{StaticResource Track}" />
+                                      <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource InkFaint}" />
+                                      <Setter TargetName="Txt" Property="Foreground" Value="{StaticResource Ink}" />
+                                    </Trigger>
                                     <DataTrigger Binding="{Binding IsSelected}" Value="True">
-                                      <Setter Property="Background" Value="{StaticResource Ink}" />
-                                      <Setter Property="Foreground" Value="White" />
-                                      <Setter Property="BorderBrush" Value="{StaticResource Ink}" />
+                                      <Setter TargetName="Bd" Property="Background" Value="{StaticResource Ink}" />
+                                      <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource Ink}" />
+                                      <Setter TargetName="Txt" Property="Foreground" Value="White" />
+                                      <Setter TargetName="Txt" Property="FontWeight" Value="SemiBold" />
                                     </DataTrigger>
-                                  </Style.Triggers>
-                                </Style>
-                              </Button.Style>
-                              <TextBlock Text="{Binding Label}" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
+                                    <MultiDataTrigger>
+                                      <MultiDataTrigger.Conditions>
+                                        <Condition Binding="{Binding IsSelected}" Value="True" />
+                                        <Condition Binding="{Binding IsMouseOver, RelativeSource={RelativeSource Self}}" Value="True" />
+                                      </MultiDataTrigger.Conditions>
+                                      <Setter TargetName="Bd" Property="Background" Value="#1E293B" />
+                                      <Setter TargetName="Bd" Property="BorderBrush" Value="#334155" />
+                                      <Setter TargetName="Txt" Property="Foreground" Value="White" />
+                                      <Setter TargetName="Txt" Property="FontWeight" Value="SemiBold" />
+                                    </MultiDataTrigger>
+                                  </ControlTemplate.Triggers>
+                                </ControlTemplate>
+                              </Button.Template>
                             </Button>
                           </DataTemplate>
                         </ItemsControl.ItemTemplate>
@@ -1032,7 +1373,7 @@
                             <ItemsControl.ItemTemplate>
                               <DataTemplate>
                                 <Button Command="{Binding DataContext.ToggleRepeatDayCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
-                                        CommandParameter="{Binding}" Margin="1" Padding="0" Height="30">
+                                        CommandParameter="{Binding}" Margin="1" Padding="0" Height="30" Cursor="Hand">
                                   <Button.Template>
                                     <ControlTemplate TargetType="Button">
                                       <Border x:Name="Bd" CornerRadius="15" BorderThickness="1"
@@ -1042,12 +1383,27 @@
                                                    HorizontalAlignment="Center" VerticalAlignment="Center" />
                                       </Border>
                                       <ControlTemplate.Triggers>
+                                        <Trigger Property="IsMouseOver" Value="True">
+                                          <Setter TargetName="Bd" Property="Background" Value="{StaticResource Track}" />
+                                          <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource Primary}" />
+                                          <Setter TargetName="Initial" Property="Foreground" Value="{StaticResource Ink}" />
+                                        </Trigger>
                                         <DataTrigger Binding="{Binding IsOn}" Value="True">
                                           <Setter TargetName="Bd" Property="Background" Value="{StaticResource Primary}" />
                                           <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource Primary}" />
                                           <Setter TargetName="Initial" Property="Foreground" Value="White" />
                                           <Setter TargetName="Initial" Property="FontWeight" Value="SemiBold" />
                                         </DataTrigger>
+                                        <MultiDataTrigger>
+                                          <MultiDataTrigger.Conditions>
+                                            <Condition Binding="{Binding IsOn}" Value="True" />
+                                            <Condition Binding="{Binding IsMouseOver, RelativeSource={RelativeSource Self}}" Value="True" />
+                                          </MultiDataTrigger.Conditions>
+                                          <Setter TargetName="Bd" Property="Background" Value="#1D4FD8" />
+                                          <Setter TargetName="Bd" Property="BorderBrush" Value="#1D4FD8" />
+                                          <Setter TargetName="Initial" Property="Foreground" Value="White" />
+                                          <Setter TargetName="Initial" Property="FontWeight" Value="SemiBold" />
+                                        </MultiDataTrigger>
                                       </ControlTemplate.Triggers>
                                     </ControlTemplate>
                                   </Button.Template>
@@ -1185,7 +1541,8 @@
         </Grid>
 
         <!-- ═══ Settings ═══ -->
-        <Grid Visibility="{Binding Page, Converter={StaticResource EnumToVis}, ConverterParameter=Settings}">
+        <Grid x:Name="SettingsPageGrid" Style="{StaticResource AnimatedPageGrid}"
+              Visibility="{Binding Page, Converter={StaticResource EnumToVis}, ConverterParameter=Settings}">
           <Grid DataContext="{Binding AppSettings}" Margin="32,28">
             <Grid.RowDefinitions>
               <RowDefinition Height="Auto" />

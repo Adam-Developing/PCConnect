@@ -5,7 +5,36 @@
         Style="{StaticResource AppWindow}" Background="{StaticResource Surface}"
         WindowStartupLocation="CenterOwner" ResizeMode="NoResize" ShowInTaskbar="False">
 
-  <StackPanel Margin="24">
+  <StackPanel Margin="24" RenderTransformOrigin="0.5,0.5">
+    <StackPanel.RenderTransform>
+      <ScaleTransform ScaleX="0.96" ScaleY="0.96" />
+    </StackPanel.RenderTransform>
+    <StackPanel.Triggers>
+      <EventTrigger RoutedEvent="FrameworkElement.Loaded">
+        <BeginStoryboard>
+          <Storyboard>
+            <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                             From="0" To="1" Duration="0:0:0.18">
+              <DoubleAnimation.EasingFunction>
+                <CubicEase EasingMode="EaseOut" />
+              </DoubleAnimation.EasingFunction>
+            </DoubleAnimation>
+            <DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)"
+                             From="0.96" To="1" Duration="0:0:0.18">
+              <DoubleAnimation.EasingFunction>
+                <CubicEase EasingMode="EaseOut" />
+              </DoubleAnimation.EasingFunction>
+            </DoubleAnimation>
+            <DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleY)"
+                             From="0.96" To="1" Duration="0:0:0.18">
+              <DoubleAnimation.EasingFunction>
+                <CubicEase EasingMode="EaseOut" />
+              </DoubleAnimation.EasingFunction>
+            </DoubleAnimation>
+          </Storyboard>
+        </BeginStoryboard>
+      </EventTrigger>
+    </StackPanel.Triggers>
     <StackPanel Orientation="Horizontal">
       <Border Width="44" Height="44" CornerRadius="12" Background="{StaticResource DangerTint}"
               VerticalAlignment="Top">

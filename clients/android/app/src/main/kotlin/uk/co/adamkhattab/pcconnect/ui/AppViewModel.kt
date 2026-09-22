@@ -33,7 +33,7 @@ import java.time.format.DateTimeFormatter
 import java.time.format.TextStyle
 import java.util.Locale
 
-/** A destructive command waiting for the person to confirm it (ADR-0011). */
+    /** A command whose target PC requires the person to confirm it. */
 data class PendingCommand(val deviceId: String, val deviceName: String, val type: String)
 
 data class AppState(
@@ -89,12 +89,19 @@ class AppViewModel(
 
         viewModelScope.launch {
             realtime.presence.collect { event ->
-                _state.update { state ->
-                    state.copy(
-                        devices = state.devices.map {
-                            if (it.id == event.deviceId) it.copy(isOnline = event.isOnline) else it
-                        },
-                    )
+                if (_state.value.devices.none { it.id == event.deviceId }) {
+                    // A PC signed in while this phone was already open. Presence
+                    // is the first event the new agent emits, so reload the account
+                    // list instead of silently discarding an unknown device id.
+                    runCatching { refreshAll() }
+                } else {
+                    _state.update { state ->
+                        state.copy(
+                            devices = state.devices.map {
+                                if (it.id == event.deviceId) it.copy(isOnline = event.isOnline) else it
+                            },
+                        )
+                    }
                 }
             }
         }
@@ -254,24 +261,13 @@ class AppViewModel(
         _state.update { it.copy(message = "That PC has been removed.") }
     }
 
-    fun claimPairing(code: String) = launchWithMessage {
-        val claimed = api.claimPairing(code.trim().uppercase())
-        refreshAll()
-        AppLog.i(TAG, "Added ${claimed.displayName}")
-        _state.update { it.copy(message = "Added ${claimed.displayName}.") }
-    }
-
     // ── commands ─────────────────────────────────────────────────────────────
 
-    /**
-     * Standard commands go straight through. Destructive ones are held until
-     * the person confirms them, because a valid session is not enough to power
-     * a machine off (ADR-0011).
-     */
+    /** Commands that the target PC marks as protected wait for confirmation. */
     fun requestCommand(deviceId: String, type: String) {
         val device = device(deviceId) ?: return
 
-        if (type in CommandTypes.DESTRUCTIVE) {
+        if (type in device.passwordRequiredCommands) {
             _state.update {
                 it.copy(
                     pendingCommand = PendingCommand(deviceId, device.displayName, type),

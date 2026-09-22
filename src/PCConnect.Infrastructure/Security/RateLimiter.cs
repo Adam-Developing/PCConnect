@@ -16,8 +16,7 @@ public static class RateBudgets
     public static readonly RateBudget LoginPerAccount = new("login.account", 5, TimeSpan.FromMinutes(15));
     public static readonly RateBudget LoginPerIp = new("login.ip", 20, TimeSpan.FromMinutes(15));
     public static readonly RateBudget RefreshPerFamily = new("refresh.family", 60, TimeSpan.FromHours(1));
-    public static readonly RateBudget PairClaimPerUser = new("pair.claim", 5, TimeSpan.FromMinutes(10));
-    public static readonly RateBudget PairStartPerIp = new("pair.start", 10, TimeSpan.FromMinutes(10));
+    public static readonly RateBudget ProvisionPerUser = new("device.provision", 5, TimeSpan.FromMinutes(10));
     public static readonly RateBudget CommandPerUser = new("command.user", 30, TimeSpan.FromMinutes(1));
     public static readonly RateBudget CommandPerDevice = new("command.device", 10, TimeSpan.FromMinutes(1));
     public static readonly RateBudget DestructiveCommand = new("command.destructive", 3, TimeSpan.FromMinutes(1));

@@ -1,5 +1,10 @@
 package uk.co.adamkhattab.pcconnect.ui
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -14,13 +19,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -44,52 +44,57 @@ fun DevicesScreen(
     onOpenDevice: (String) -> Unit,
     onCommand: (String, String) -> Unit,
     onNewReminder: (String?) -> Unit,
-    onPair: (String) -> Unit,
     onShareDownloadLink: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    if (state.devices.isEmpty()) {
-        NoDevicesYet(
-            username = state.profile?.username ?: state.profile?.displayName ?: "your account",
-            onPair = onPair,
-            onShareDownloadLink = onShareDownloadLink,
-            modifier = modifier,
-        )
-        return
-    }
-
-    LazyColumn(
-        modifier.fillMaxSize(),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(
-            start = 16.dp,
-            end = 16.dp,
-            top = 6.dp,
-            bottom = 24.dp,
-        ),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        item {
-            QuietButton(
-                text = if (state.remindersTargetable) "Reminder for all PCs" else "New reminder",
-                onClick = { onNewReminder(null) },
-                icon = PcIcons.AddAlert,
-                iconTint = PcColors.Primary,
+    AnimatedContent(
+        targetState = state.devices.isEmpty(),
+        transitionSpec = { fadeIn(tween(200)) togetherWith fadeOut(tween(180)) },
+        label = "DevicesEmptyState",
+        modifier = modifier.fillMaxSize(),
+    ) { isEmpty ->
+        if (isEmpty) {
+            NoDevicesYet(
+                username = state.profile?.username ?: state.profile?.displayName ?: "your account",
+                onShareDownloadLink = onShareDownloadLink,
+                modifier = Modifier.fillMaxSize(),
             )
-        }
+        } else {
+            LazyColumn(
+                Modifier.fillMaxSize(),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                    start = 16.dp,
+                    end = 16.dp,
+                    top = 6.dp,
+                    bottom = 24.dp,
+                ),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                item {
+                    QuietButton(
+                        text = if (state.remindersTargetable) "Reminder for all PCs" else "New reminder",
+                        onClick = { onNewReminder(null) },
+                        icon = PcIcons.AddAlert,
+                        iconTint = PcColors.Primary,
+                    )
+                }
 
-        items(state.devices, key = { it.id }) { device ->
-            DeviceCard(
-                device = device,
-                showReminderCount = state.remindersTargetable,
-                onOpen = { onOpenDevice(device.id) },
-                onCommand = { type -> onCommand(device.id, type) },
-                onNewReminder = { onNewReminder(device.id) },
-            )
-        }
+                items(state.devices, key = { it.id }) { device ->
+                    DeviceCard(
+                        device = device,
+                        showReminderCount = state.remindersTargetable,
+                        onOpen = { onOpenDevice(device.id) },
+                        onCommand = { type -> onCommand(device.id, type) },
+                        onNewReminder = { onNewReminder(device.id) },
+                        modifier = Modifier.animateItem(),
+                    )
+                }
 
-        item {
-            Spacer(Modifier.height(2.dp))
-            AddAPcCard(onPair = onPair)
+                item {
+                    Spacer(Modifier.height(2.dp))
+                    AddAPcCard()
+                }
+            }
         }
     }
 }
@@ -101,8 +106,9 @@ private fun DeviceCard(
     onOpen: () -> Unit,
     onCommand: (String) -> Unit,
     onNewReminder: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    PcCard(Modifier.fillMaxWidth(), onClick = onOpen) {
+    PcCard(modifier.fillMaxWidth(), onClick = onOpen) {
         Column(Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
@@ -170,7 +176,6 @@ private fun describeDevice(device: Device, showReminderCount: Boolean): String =
 @Composable
 private fun NoDevicesYet(
     username: String,
-    onPair: (String) -> Unit,
     onShareDownloadLink: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -200,7 +205,7 @@ private fun NoDevicesYet(
                 Spacer(Modifier.height(8.dp))
                 Text(
                     "Install PCConnect on a Windows PC and sign in there as $username. " +
-                        "It shows a code; type it below and the PC is yours to control.",
+                        "The PC will appear here automatically.",
                     color = PcColors.InkSoft,
                     style = PcType.BodySmall,
                     textAlign = TextAlign.Center,
@@ -211,8 +216,7 @@ private fun NoDevicesYet(
                 Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     listOf(
                         "Download PCConnect for Windows",
-                        "Sign in with this account",
-                        "Type the code it shows",
+                        "Sign in with this account on the PC",
                     ).forEachIndexed { index, step ->
                         Row(
                             horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -233,8 +237,6 @@ private fun NoDevicesYet(
                     }
                 }
 
-                Spacer(Modifier.height(20.dp))
-                PairingEntry(onPair = onPair)
                 Spacer(Modifier.height(12.dp))
 
                 QuietButton(
@@ -247,50 +249,14 @@ private fun NoDevicesYet(
     }
 }
 
-/** The same pairing entry, offered again once at least one PC exists. */
+/** Explains the only supported way to add another PC. */
 @Composable
-private fun AddAPcCard(onPair: (String) -> Unit) {
+private fun AddAPcCard() {
     PcCard(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp)) {
             Text("Add another PC", color = PcColors.Ink, style = PcType.BodyStrong)
             Spacer(Modifier.height(4.dp))
-            Caption("Sign in to PCConnect on that PC and type the code it shows.")
-            Spacer(Modifier.height(12.dp))
-            PairingEntry(onPair = onPair)
+            Caption("Install PCConnect there and sign in with this account. It will appear in this list automatically.")
         }
-    }
-}
-
-@Composable
-private fun PairingEntry(onPair: (String) -> Unit) {
-    var code by rememberSaveable { mutableStateOf("") }
-
-    Column(Modifier.fillMaxWidth()) {
-        PcTextField(
-            value = code,
-            // Upper case as it is typed: the codes are shown in capitals and a
-            // lower-case one that silently fails to match reads as a broken code.
-            onValueChange = { code = it.uppercase() },
-            label = "Code from that PC",
-            placeholder = "7KQ4-M2XA",
-            height = 48.dp,
-            textStyle = PcType.MonoTime.copy(fontSize = 17.sp, letterSpacing = 1.sp),
-            keyboardOptions = KeyboardOptions(
-                keyboardType = androidx.compose.ui.text.input.KeyboardType.Ascii,
-                autoCorrectEnabled = false,
-            ),
-        )
-
-        Spacer(Modifier.height(10.dp))
-
-        PrimaryButton(
-            text = "Add this PC",
-            onClick = {
-                onPair(code)
-                code = ""
-            },
-            enabled = code.isNotBlank(),
-            height = 46.dp,
-        )
     }
 }

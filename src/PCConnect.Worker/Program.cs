@@ -4,6 +4,7 @@ using PCConnect.Core.Contracts;
 using PCConnect.Infrastructure;
 using PCConnect.Infrastructure.Jobs;
 using PCConnect.Infrastructure.Realtime;
+using PCConnect.Infrastructure.Security;
 using Serilog;
 using Serilog.Formatting.Compact;
 
@@ -17,6 +18,11 @@ using Serilog.Formatting.Compact;
 var builder = Host.CreateApplicationBuilder(args);
 
 builder.Configuration.AddEnvironmentVariables("PCCONNECT_");
+
+// The same keys the API uses, read from the same per-user file. The worker
+// decrypts what the API encrypted, so a key invented per process would be no
+// use to it (see DevelopmentKeys).
+DevelopmentKeys.FillMissing(builder.Configuration, builder.Environment.IsDevelopment());
 
 builder.Services.AddSerilog((services, configuration) => configuration
     .ReadFrom.Configuration(builder.Configuration)

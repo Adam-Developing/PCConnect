@@ -75,12 +75,12 @@
              │  scope: user:*     │                    │  family reuse-detect│
              └────────────────────┘                    └─────────────────────┘
 
-   ┌──────────────┐  pairing code (user-confirmed, 10 min, single use)
-   │  PC Agent    │──────────────────────────┐
-   └──────────────┘                          ▼
-                                  ┌──────────────────────┐
-                                  │ POST /v2/devices/pair │
-                                  └──────────┬───────────┘
+   ┌──────────────┐  signed-in companion + single-use local ticket
+   │  PC Agent    │◀─────────────────────────┐
+   └──────────────┘                          │
+                                  ┌──────────────────────────┐
+                                  │ /v2/devices/provision    │
+                                  └──────────┬───────────────┘
                                              │ issues
                                              ▼
                                   ┌──────────────────────────┐
@@ -159,40 +159,34 @@ Removing the client-side hash is not optional and is not cosmetic: while the cli
 *is* the password, so no server-side improvement can help. Migration path in
 [02 §6](02-data-architecture.md).
 
-### 2.6 Device pairing
+### 2.6 Device provisioning
 
 ```
- Agent                          Server                      User (mobile/web)
-   │                              │                              │
-   │─ POST /v2/devices/pair/start─▶                              │
-   │   {requested_name, platform} │                              │
-   │◀─ {pairing_code:"K7M2-9QXB", │                              │
-   │    expires_in:600} ──────────│                              │
-   │                              │                              │
-   │  [displays code to the user] │                              │
-   │                              │◀─ POST /v2/devices/pair/claim │
-   │                              │   {code} + user access token │
-   │                              │──────────────────────────────▶
-   │                              │   creates devices row,       │
-   │                              │   device_credentials row     │
-   │─ POST /v2/devices/pair/poll ─▶                              │
-   │◀─ {device_id, device_secret} │  (returned exactly once)     │
-   │   [store in Credential Mgr]  │                              │
+ Companion                     Server                     Local agent
+   │                              │                             │
+   │─ POST /v2/devices/provision ─▶                             │
+   │  user token + machine details │                             │
+   │◀─ {provisioning_ticket} ──────│                             │
+   │                                                            │
+   │──────── local named pipe: ticket ──────────────────────────▶│
+   │                              │◀─ POST /provision/complete ──│
+   │                              │   {provisioning_ticket}      │
+   │                              │─ {device_id, device_secret} ▶│
+   │                              │   (returned exactly once)    │
 ```
 
-Properties: the code is user-confirmed (so `PCName` is no longer self-asserting, closing S1-08);
-it is single-use and expires in 10 minutes; it is rate-limited and attempt-counted, so the 8-character
-alphabet is not brute-forceable; and the device secret crosses the wire exactly once, at pairing.
+Properties: signing in on the PC is the proof of account ownership, so `PCName` remains only a
+label (closing S1-08). The provisioning ticket is opaque, single-use, expires in 10 minutes, and
+travels only over a local ACL-restricted pipe. The device secret crosses the wire exactly once.
 
 ---
 
 ## 3. Authorising a command
 
-> **Extended by [ADR-0011](adr/0011-risk-tiered-step-up.md).** The five checks below
-> are all satisfied by holding a valid access token, which is the right bar for
-> locking a screen and not for powering a machine off. Commands now carry a risk tier,
-> and the destructive tier — `shutdown`, `restart`, `signout`, `hibernate` — requires
-> a fresh, single-use, server-verified step-up in addition to all five.
+> **Extended by [ADR-0011](adr/0011-risk-tiered-step-up.md).** Each PC stores which
+> command types require a fresh, single-use, server-verified step-up in addition to
+> the five checks below. Destructive commands are protected by default. Risk tier
+> remains independent and always drives the tighter destructive-command rate budget.
 
 Five checks, in order, all server-side, before a command is ever issued:
 
@@ -230,7 +224,7 @@ bounds how long a stolen or replayed command remains useful.
 | Passwords | Argon2id (m=19 MiB, t=2, p=1) | n/a |
 | Device secrets | Argon2id | n/a |
 | Refresh tokens | SHA-256 of a 256-bit random value | n/a (hash only stored) |
-| Pairing / reset codes | SHA-256 | single-use, TTL |
+| Provisioning tickets / reset codes | SHA-256 | single-use, TTL |
 | Access tokens | Ed25519 (EdDSA) | JWKS, 90-day rotation, overlap window |
 | Reminder text | **AES-256-GCM** | Envelope: per-user DEK, wrapped by a KEK held outside the DB |
 | Backups | `age` (X25519 + ChaCha20-Poly1305) | Recipient key offline |
@@ -289,7 +283,7 @@ Enforced in Valkey (sliding window), plus Cloudflare rules in front.
 |---|---|---|
 | `POST /v2/auth/login` | 5 / 15 min per account **and** 20 / 15 min per IP | 429 + exponential account lockout |
 | `POST /v2/auth/refresh` | 60 / hour per family | 429; reuse detection may revoke the family |
-| `POST /v2/devices/pair/claim` | 5 / 10 min per user, 10 attempts per code | 429 + invalidate the code |
+| `POST /v2/devices/provision` | 5 / 10 min per user | 429 |
 | `POST /v2/commands` | 30 / min per user; 10 / min per device; **3 / min** for `shutdown`/`restart` | 429 |
 | Password reset request | 3 / hour per account, 10 / hour per IP | 429; response is identical whether or not the account exists |
 | Everything else | 300 / min per token | 429 with `Retry-After` |
@@ -332,7 +326,7 @@ and reviewable as diffs, with no external secret-manager service to run or pay f
 ## 8. Logging and privacy
 
 Never logged, at any level: passwords, password hashes, tokens (access, refresh, device secret),
-pairing codes, reset codes, DEKs, KEK, decrypted reminder text.
+provisioning tickets, reset codes, DEKs, KEK, decrypted reminder text.
 
 Always logged: `requestId`, `userId` (internal id, not email), `deviceId`, route, status, latency,
 and for security events the outcome and source IP.
@@ -374,7 +368,7 @@ That last one is the highest-value test in the codebase and does not exist today
 | S1-05 static API key | Token pair with scopes and expiry | §2.1–2.3 |
 | S1-06 API key as AES key | Envelope encryption, per-user DEK | §4.1 |
 | S1-07 unauthenticated CBC | AES-256-GCM | §4 |
-| S1-08 self-asserted PCName | Device pairing + authenticated `device_id` | §2.6, §3 |
+| S1-08 self-asserted PCName | Signed-in device provisioning + authenticated `device_id` | §2.6, §3 |
 | S1-09 RCE on a bearer token | Five server checks + three agent checks + TTL + tight rate limit | §3, §6 |
 | S1-10 unenforced password policy | One `PasswordPolicy` module on all three paths | §2.5 |
 | S1-11 permissive CORS | Explicit origin allow-list; bearer-only API | §5 |

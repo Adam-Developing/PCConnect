@@ -94,6 +94,6 @@ class MainActivity : FragmentActivity() {
     }
 
     private companion object {
-        const val DOWNLOAD_URL = "https://pcconnect.adamkhattab.co.uk/download.html"
+        const val DOWNLOAD_URL = "https://pcconnect.adamdeveloping.co.uk/download"
     }
 }

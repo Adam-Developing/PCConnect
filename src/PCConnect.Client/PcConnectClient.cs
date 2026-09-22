@@ -234,16 +234,6 @@ public sealed class PcConnectClient(HttpClient http, PcConnectClientOptions opti
         }
     }
 
-    // ── pairing ──────────────────────────────────────────────────────────────
-
-    public Task<PairStartResponse?> StartPairingAsync(string requestedName, CancellationToken ct = default) =>
-        SendAsync<PairStartResponse>(HttpMethod.Post, "/v2/devices/pair/start",
-            new PairStartRequest(requestedName, "windows", options.ClientVersion), authenticated: false, ct);
-
-    public Task<PairPollResponse?> PollPairingAsync(string pollToken, CancellationToken ct = default) =>
-        SendAsync<PairPollResponse>(HttpMethod.Post, "/v2/devices/pair/poll",
-            new PairPollRequest(pollToken), authenticated: false, ct);
-
     /// <summary>
     /// Adds the PC this app is running on to the signed-in account, and returns
     /// the ticket the agent redeems for its own credential (ADR-0013).
@@ -253,9 +243,10 @@ public sealed class PcConnectClient(HttpClient http, PcConnectClientOptions opti
         SendAsync<DeviceProvisionResponse>(HttpMethod.Post, "/v2/devices/provision",
             new DeviceProvisionRequest(requestedName, "windows", agentVersion), authenticated: true, ct);
 
-    public Task<PairClaimResponse?> ClaimPairingAsync(string code, string? displayName = null, CancellationToken ct = default) =>
-        SendAsync<PairClaimResponse>(HttpMethod.Post, "/v2/devices/pair/claim",
-            new PairClaimRequest(code, displayName), authenticated: true, ct);
+    public Task<DeviceProvisionCompleteResponse?> CompleteDeviceProvisioningAsync(
+        string provisioningTicket, CancellationToken ct = default) =>
+        SendAsync<DeviceProvisionCompleteResponse>(HttpMethod.Post, "/v2/devices/provision/complete",
+            new DeviceProvisionCompleteRequest(provisioningTicket), authenticated: false, ct);
 
     // ── devices, commands, reminders ─────────────────────────────────────────
 
@@ -299,6 +290,15 @@ public sealed class PcConnectClient(HttpClient http, PcConnectClientOptions opti
 
     public Task<ReminderResponse?> CreateReminderAsync(CreateReminderRequest request, CancellationToken ct = default) =>
         SendAsync<ReminderResponse>(HttpMethod.Post, "/v2/reminders", request, true, ct);
+
+    public Task<ReminderResponse?> GetReminderAsync(string reminderId, CancellationToken ct = default) =>
+        SendAsync<ReminderResponse>(HttpMethod.Get, $"/v2/reminders/{reminderId}", null, true, ct);
+
+    public Task<ReminderResponse?> UpdateReminderAsync(string reminderId, UpdateReminderRequest request, CancellationToken ct = default) =>
+        SendAsync<ReminderResponse>(HttpMethod.Patch, $"/v2/reminders/{reminderId}", request, true, ct);
+
+    public async Task DeleteReminderAsync(string reminderId, CancellationToken ct = default) =>
+        await SendAsync<object>(HttpMethod.Delete, $"/v2/reminders/{reminderId}", null, true, ct);
 
     public Task<ReminderResponse?> CompleteReminderAsync(string reminderId, bool completed = true, CancellationToken ct = default) =>
         SendAsync<ReminderResponse>(HttpMethod.Post, $"/v2/reminders/{reminderId}/complete",

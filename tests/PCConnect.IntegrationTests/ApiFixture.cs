@@ -105,44 +105,37 @@ public sealed class ApiFixture : WebApplicationFactory<ApiEntryPoint>, IAsyncLif
         return new TestUser(credentials.Username, credentials.Email, credentials.Password, tokens, client);
     }
 
-    /// <summary>Pairs a device end to end and returns a client carrying its device token.</summary>
+    /// <summary>Provisions a device end to end and returns a client carrying its device token.</summary>
     public async Task<TestDevice> PairDeviceAsync(TestUser user, string name = "Test-PC")
     {
         var anonymous = CreateClient(FreshIp());
 
-        var start = await ReadAsync<PairStartResponse>(
-            await anonymous.PostAsJsonAsync("/v2/devices/pair/start", new PairStartRequest(name, "windows", "5.0.0")),
-            "pair/start");
+        var provisioned = await ReadAsync<DeviceProvisionResponse>(
+            await user.Client.PostAsJsonAsync("/v2/devices/provision",
+                new DeviceProvisionRequest(name, "windows", "5.0.0")),
+            "devices/provision");
 
-        _ = await ReadAsync<PairClaimResponse>(
-            await user.Client.PostAsJsonAsync("/v2/devices/pair/claim", new PairClaimRequest(start.PairingCode)),
-            "pair/claim");
-
-        var poll = await ReadAsync<PairPollResponse>(
-            await anonymous.PostAsJsonAsync("/v2/devices/pair/poll", new PairPollRequest(start.PollToken)),
-            "pair/poll");
-
-        if (poll.Status != "paired" || poll.DeviceId is null || poll.DeviceSecret is null)
-        {
-            throw new InvalidOperationException($"Pairing did not complete: status was '{poll.Status}'.");
-        }
+        var completed = await ReadAsync<DeviceProvisionCompleteResponse>(
+            await anonymous.PostAsJsonAsync("/v2/devices/provision/complete",
+                new DeviceProvisionCompleteRequest(provisioned.ProvisioningTicket)),
+            "devices/provision/complete");
 
         var tokens = await ReadAsync<TokenPairResponse>(
             await anonymous.PostAsJsonAsync("/v2/devices/token",
-                new DeviceTokenRequest(poll.DeviceId, poll.DeviceSecret, "5.0.0", "Windows 11")),
+                new DeviceTokenRequest(completed.DeviceId, completed.DeviceSecret, "5.0.0", "Windows 11")),
             "devices/token");
 
         var deviceClient = CreateClient(FreshIp());
         deviceClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", tokens.AccessToken);
 
-        return new TestDevice(poll.DeviceId, poll.DeviceSecret, tokens, deviceClient);
+        return new TestDevice(completed.DeviceId, completed.DeviceSecret, tokens, deviceClient);
     }
 
     /// <summary>
     /// A client that presents a distinct caller IP.
     ///
     /// Every test would otherwise share one address and exhaust the per-IP
-    /// budgets that 03 §6 puts on pairing and login — the rate limiter doing its
+    /// budgets that 03 §6 puts on provisioning and login — the rate limiter doing its
     /// job would look like an authorisation failure. Tests that mean to exercise
     /// a limit ask for one address deliberately.
     /// </summary>

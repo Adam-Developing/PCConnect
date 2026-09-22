@@ -29,11 +29,23 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.window.Dialog
 import uk.co.adamkhattab.pcconnect.data.CommandTypes
 
 /**
- * The confirmation a destructive command needs (ADR-0011).
+ * The confirmation a target PC's password policy requires (ADR-0011).
  *
  * It names the actual consequence — "Shut down Study PC?" — rather than asking
  * someone to confirm an abstraction. A dialog that says "Are you sure?" teaches
@@ -65,8 +77,28 @@ fun ConfirmCommandDialog(
     var usePassword by remember(pending) { mutableStateOf(!passkeyAvailable) }
 
     Dialog(onDismissRequest = onDismiss) {
+        var visible by remember { mutableStateOf(false) }
+        LaunchedEffect(Unit) {
+            visible = true
+        }
+        val scale by animateFloatAsState(
+            targetValue = if (visible) 1f else 0.88f,
+            animationSpec = spring(dampingRatio = 0.76f, stiffness = 600f),
+            label = "dialogScale",
+        )
+        val alpha by animateFloatAsState(
+            targetValue = if (visible) 1f else 0f,
+            animationSpec = tween(160, easing = FastOutSlowInEasing),
+            label = "dialogAlpha",
+        )
+
         Column(
             Modifier
+                .graphicsLayer {
+                    scaleX = scale
+                    scaleY = scale
+                    this.alpha = alpha
+                }
                 .fillMaxWidth()
                 .clip(PcShapes.Dialog)
                 .background(PcColors.Surface)
@@ -89,105 +121,123 @@ fun ConfirmCommandDialog(
                 style = PcType.Heading.copy(fontSize = 21.sp),
             )
 
-            if (usePassword) {
-                Text(
-                    buildAnnotatedString {
-                        append(
-                            "This ends whatever is running there. Because you're already " +
-                                "signed in, it still needs your ",
+            AnimatedContent(
+                targetState = usePassword,
+                transitionSpec = {
+                    if (targetState) {
+                        (slideInHorizontally(tween(200, easing = FastOutSlowInEasing)) { it / 4 } + fadeIn(tween(180))) togetherWith
+                            (slideOutHorizontally(tween(160, easing = FastOutSlowInEasing)) { -it / 4 } + fadeOut(tween(140)))
+                    } else {
+                        (slideInHorizontally(tween(200, easing = FastOutSlowInEasing)) { -it / 4 } + fadeIn(tween(180))) togetherWith
+                            (slideOutHorizontally(tween(160, easing = FastOutSlowInEasing)) { it / 4 } + fadeOut(tween(140)))
+                    }
+                },
+                label = "DialogAuthModeTransition",
+            ) { isPassword ->
+                if (isPassword) {
+                    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                        Text(
+                            buildAnnotatedString {
+                                append(
+                                    "This ends whatever is running there. Because you're already " +
+                                        "signed in, it still needs your ",
+                                )
+                                withStyle(SpanStyle(fontWeight = FontWeight.SemiBold, color = PcColors.Ink)) {
+                                    append("PCConnect password")
+                                }
+                                append(" — not the PC's Windows password.")
+                            },
+                            color = PcColors.InkSoft,
+                            style = PcType.BodySmall.copy(lineHeight = 21.sp),
                         )
-                        withStyle(SpanStyle(fontWeight = FontWeight.SemiBold, color = PcColors.Ink)) {
-                            append("PCConnect password")
+
+                        PcTextField(
+                            value = password,
+                            onValueChange = { password = it },
+                            label = "PCConnect password",
+                            height = 50.dp,
+                            isError = error != null,
+                            // The mask hides it on screen; the password keyboard type
+                            // keeps it out of the suggestion strip and the learned-words
+                            // dictionary, where it would outlive the dialog.
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                            visualTransformation = PasswordVisualTransformation(),
+                        )
+
+                        if (error != null) {
+                            Text(error, color = PcColors.DangerInk, style = PcType.Caption)
                         }
-                        append(" — not the PC's Windows password.")
-                    },
-                    color = PcColors.InkSoft,
-                    style = PcType.BodySmall.copy(lineHeight = 21.sp),
-                )
 
-                PcTextField(
-                    value = password,
-                    onValueChange = { password = it },
-                    label = "PCConnect password",
-                    height = 50.dp,
-                    isError = error != null,
-                    // The mask hides it on screen; the password keyboard type
-                    // keeps it out of the suggestion strip and the learned-words
-                    // dictionary, where it would outlive the dialog.
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                    visualTransformation = PasswordVisualTransformation(),
-                )
+                        if (biometricGate) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            ) {
+                                PcIcon(PcIcons.Fingerprint, null, size = 16.dp, tint = PcColors.InkFaint)
+                                Caption("This phone will ask for your fingerprint as well.")
+                            }
+                        }
 
-                if (error != null) {
-                    Text(error, color = PcColors.DangerInk, style = PcType.Caption)
-                }
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            QuietButton("Cancel", onDismiss, Modifier.weight(1f), height = 48.dp)
 
-                if (biometricGate) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
-                        PcIcon(PcIcons.Fingerprint, null, size = 16.dp, tint = PcColors.InkFaint)
-                        Caption("This phone will ask for your fingerprint as well.")
+                            Box(Modifier.weight(1f)) {
+                                PrimaryButton(
+                                    text = CommandTypes.label(pending.type),
+                                    onClick = { onConfirm(password) },
+                                    enabled = password.isNotEmpty() && !busy,
+                                    height = 48.dp,
+                                    container = PcColors.Danger,
+                                )
+                            }
+                        }
                     }
-                }
-
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    QuietButton("Cancel", onDismiss, Modifier.weight(1f), height = 48.dp)
-
-                    Box(Modifier.weight(1f)) {
-                        PrimaryButton(
-                            text = CommandTypes.label(pending.type),
-                            onClick = { onConfirm(password) },
-                            enabled = password.isNotEmpty() && !busy,
-                            height = 48.dp,
-                            container = PcColors.Danger,
+                } else {
+                    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                        Text(
+                            "This ends whatever is running there. Confirm it's you with your fingerprint.",
+                            color = PcColors.InkSoft,
+                            style = PcType.BodySmall.copy(lineHeight = 21.sp),
                         )
+
+                        Column(
+                            Modifier.fillMaxWidth().padding(top = 14.dp, bottom = 6.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            Box(
+                                Modifier
+                                    .size(72.dp)
+                                    .clip(CircleShape)
+                                    .background(PcColors.PrimaryTint)
+                                    .clickable(enabled = !busy, onClick = onConfirmWithPasskey),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                PcIcon(PcIcons.Fingerprint, "Confirm with a fingerprint", size = 40.dp, tint = PcColors.Primary)
+                            }
+
+                            Text(
+                                if (busy) "Waiting for the sensor" else "Touch the sensor",
+                                color = PcColors.Ink,
+                                style = PcType.Label.copy(fontSize = 13.5.sp),
+                            )
+                        }
+
+                        if (error != null) {
+                            Text(error, color = PcColors.DangerInk, style = PcType.Caption)
+                        }
+
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            QuietButton("Cancel", onDismiss, Modifier.weight(1f), height = 48.dp)
+                            QuietButton(
+                                text = "Use password",
+                                onClick = { usePassword = true },
+                                modifier = Modifier.weight(1f),
+                                icon = PcIcons.Key,
+                                height = 48.dp,
+                            )
+                        }
                     }
-                }
-            } else {
-                Text(
-                    "This ends whatever is running there. Confirm it's you with your fingerprint.",
-                    color = PcColors.InkSoft,
-                    style = PcType.BodySmall.copy(lineHeight = 21.sp),
-                )
-
-                Column(
-                    Modifier.fillMaxWidth().padding(top = 14.dp, bottom = 6.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    Box(
-                        Modifier
-                            .size(72.dp)
-                            .clip(CircleShape)
-                            .background(PcColors.PrimaryTint)
-                            .clickable(enabled = !busy, onClick = onConfirmWithPasskey),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        PcIcon(PcIcons.Fingerprint, "Confirm with a fingerprint", size = 40.dp, tint = PcColors.Primary)
-                    }
-
-                    Text(
-                        if (busy) "Waiting for the sensor" else "Touch the sensor",
-                        color = PcColors.Ink,
-                        style = PcType.Label.copy(fontSize = 13.5.sp),
-                    )
-                }
-
-                if (error != null) {
-                    Text(error, color = PcColors.DangerInk, style = PcType.Caption)
-                }
-
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    QuietButton("Cancel", onDismiss, Modifier.weight(1f), height = 48.dp)
-                    QuietButton(
-                        text = "Use password",
-                        onClick = { usePassword = true },
-                        modifier = Modifier.weight(1f),
-                        icon = PcIcons.Key,
-                        height = 48.dp,
-                    )
                 }
             }
         }

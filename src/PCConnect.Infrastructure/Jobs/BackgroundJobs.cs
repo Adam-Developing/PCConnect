@@ -292,13 +292,13 @@ public sealed class VerificationJob(
         }
 
         var unconfirmed = await connection.ExecuteScalarAsync<long>(new CommandDefinition("""
-            SELECT count(*) FROM commands WHERE risk_tier = 'destructive' AND step_up_verified_at IS NULL
+            SELECT count(*) FROM commands WHERE password_required AND step_up_verified_at IS NULL
             """, cancellationToken: ct));
 
         if (unconfirmed > 0)
         {
             logger.LogCritical(
-                "VERIFICATION V6 FAILED: {Count} destructive command(s) exist with no recorded step-up.",
+                "VERIFICATION V6 FAILED: {Count} password-protected command(s) exist with no recorded step-up.",
                 unconfirmed);
         }
     }

@@ -185,7 +185,7 @@ public static class AuthEndpoints
         })
             .RequireAuthorization()
             .WithName("beginStepUp")
-            .WithSummary("Start a confirmation challenge for a destructive command.");
+            .WithSummary("Start a confirmation challenge for a password-protected command.");
 
         stepUp.MapPost("/verify", async (
             StepUpVerifyRequest request, StepUpService service, HttpContext http, CancellationToken ct) =>

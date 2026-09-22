@@ -1,5 +1,4 @@
-using System.Security.Cryptography;
-using System.Text;
+﻿using System.Security.Cryptography;
 using Dapper;
 using Microsoft.Extensions.Logging;
 using Npgsql;
@@ -14,7 +13,7 @@ using PCConnect.Infrastructure.Security;
 namespace PCConnect.Infrastructure.Contexts.Devices;
 
 /// <summary>
-/// The devices bounded context: the device registry, pairing, presence and
+/// The devices bounded context: account provisioning, the device registry, presence and
 /// heartbeat. It owns the answer to "does this user own this device", and it
 /// executes nothing (01 §3.2).
 /// </summary>
@@ -32,155 +31,16 @@ public sealed class DeviceService(
     IdentityService identity,
     ILogger<DeviceService> logger)
 {
-    private static readonly TimeSpan PairingTtl = TimeSpan.FromMinutes(10);
+    private static readonly TimeSpan ProvisioningTtl = TimeSpan.FromMinutes(10);
     private static readonly TimeSpan PresenceTtl = TimeSpan.FromSeconds(90);
     private static readonly TimeSpan HeartbeatCoalesce = TimeSpan.FromMinutes(1);
-    private const int MaxPairingAttempts = 10;
-
-    // ── pairing ──────────────────────────────────────────────────────────────
-
-    /// <summary>
-    /// Step 1, from the agent, unauthenticated. Nothing is created here except a
-    /// pending pairing: an unclaimed code is not a device and grants nothing.
-    /// </summary>
-    public async Task<PairStartResponse> StartPairingAsync(PairStartRequest request, RequestContext ctx, CancellationToken ct = default)
-    {
-        await limiter.ConsumeAsync(RateBudgets.PairStartPerIp, ctx.IpAddress ?? "unknown", ct);
-
-        var requestedName = (request.RequestedName ?? string.Empty).Trim();
-        if (requestedName.Length is 0 or > 128)
-        {
-            throw AppException.Validation("requestedName must be 1-128 characters.",
-                new ErrorDetail("requestedName", "length"));
-        }
-
-        var platform = NormalisePlatform(request.Platform);
-        var code = PairingCode.Generate();
-        var (pollToken, pollHash) = tokens.CreateOpaqueToken();
-
-        await using var connection = await db.OpenAsync(ct);
-        await connection.ExecuteAsync(new CommandDefinition("""
-            INSERT INTO device_pairings (code_hash, poll_token_hash, requested_name, platform, expires_at)
-            VALUES (@CodeHash, @PollHash, @Name, @Platform, @ExpiresAt)
-            """,
-            new
-            {
-                CodeHash = Sha256(code),
-                PollHash = pollHash,
-                Name = requestedName,
-                Platform = platform,
-                ExpiresAt = clock.UtcNow.Add(PairingTtl),
-            }, cancellationToken: ct));
-
-        await audit.WriteAsync(null, SecurityEventNames.DevicePairingStarted, true, ctx,
-            new { requestedName, platform }, ct);
-
-        return new PairStartResponse(code, pollToken, (int)PairingTtl.TotalSeconds);
-    }
-
-    /// <summary>
-    /// Step 2, from the user's phone or the web dashboard. This is the moment the
-    /// device becomes real, and it is the check that replaces "any PCName header
-    /// auto-registers a device" (S1-08).
-    /// </summary>
-    public async Task<PairClaimResponse> ClaimPairingAsync(
-        CallerIdentity caller, PairClaimRequest request, RequestContext ctx, CancellationToken ct = default)
-    {
-        caller.Require(Scopes.DeviceManage);
-        await limiter.ConsumeAsync(RateBudgets.PairClaimPerUser, caller.UserId.ToString(System.Globalization.CultureInfo.InvariantCulture), ct);
-
-        var code = PairingCode.Normalise(request.PairingCode);
-        if (code.Length == 0)
-        {
-            throw AppException.NotFound(ErrorCodes.PairingCodeInvalid, "That pairing code is not valid.");
-        }
-
-        var codeHash = Sha256(code);
-
-        // Per-code attempt budget: with 25^8 combinations and ten attempts, the
-        // code is not brute-forceable inside its ten-minute life.
-        var attempts = await cache.IncrementAsync(CacheKeys.PairingAttempts(Convert.ToHexString(codeHash)), PairingTtl, ct);
-        if (attempts > MaxPairingAttempts)
-        {
-            throw AppException.TooManyRequests("Too many attempts for that pairing code.", PairingTtl);
-        }
-
-        return await db.InTransactionAsync(async (connection, tx) =>
-        {
-            var pairing = await connection.QuerySingleOrDefaultAsync<PairingRow>(new CommandDefinition("""
-                SELECT id, requested_name AS RequestedName, platform, expires_at AS ExpiresAt,
-                       claimed_at AS ClaimedAt, device_id AS DeviceId
-                  FROM device_pairings
-                 WHERE code_hash = @CodeHash
-                 FOR UPDATE
-                """, new { CodeHash = codeHash }, tx, cancellationToken: ct));
-
-            if (pairing is null || pairing.ExpiresAt <= clock.UtcNow)
-            {
-                throw AppException.NotFound(ErrorCodes.PairingCodeInvalid,
-                    "That pairing code is not valid or has expired. Generate a new one on the PC.");
-            }
-
-            if (pairing.ClaimedAt is not null)
-            {
-                throw AppException.Conflict(ErrorCodes.PairingCodeInvalid, "That pairing code has already been used.");
-            }
-
-            var displayName = string.IsNullOrWhiteSpace(request.DisplayName)
-                ? pairing.RequestedName
-                : request.DisplayName.Trim();
-
-            displayName = await DeduplicateNameAsync(connection, tx, caller.UserId, displayName, ct);
-
-            var deviceId = await connection.ExecuteScalarAsync<long>(new CommandDefinition("""
-                INSERT INTO devices (user_id, display_name, platform)
-                VALUES (@UserId, @DisplayName, @Platform)
-                RETURNING id
-                """,
-                new { UserId = caller.UserId, DisplayName = displayName, Platform = pairing.Platform },
-                tx, cancellationToken: ct));
-
-            // The secret is generated here, hashed for storage, and held wrapped
-            // under the KEK until the agent collects it exactly once.
-            var secret = Base64Url(RandomNumberGenerator.GetBytes(32));
-            var (wrapped, kekId) = WrapSecret(secret);
-
-            await connection.ExecuteAsync(new CommandDefinition("""
-                INSERT INTO device_credentials (device_id, secret_hash) VALUES (@DeviceId, @Hash)
-                """, new { DeviceId = deviceId, Hash = hasher.Hash(secret) }, tx, cancellationToken: ct));
-
-            await connection.ExecuteAsync(new CommandDefinition("""
-                UPDATE device_pairings
-                   SET claimed_by_user_id = @UserId, device_id = @DeviceId, claimed_at = now(),
-                       secret_wrapped = @Wrapped, secret_kek_id = @KekId
-                 WHERE id = @Id
-                """,
-                new { UserId = caller.UserId, DeviceId = deviceId, Wrapped = wrapped, KekId = kekId, pairing.Id },
-                tx, cancellationToken: ct));
-
-            var publicId = await connection.ExecuteScalarAsync<Guid>(new CommandDefinition(
-                "SELECT public_id FROM devices WHERE id = @Id", new { Id = deviceId }, tx, cancellationToken: ct));
-
-            await audit.WriteInTransactionAsync(connection, tx, caller.UserId,
-                SecurityEventNames.DevicePairingClaimed, true, ctx, new { deviceId = publicId, displayName }, ct);
-
-            return new PairClaimResponse(publicId.ToString(), displayName);
-        }, ct);
-    }
-
     /// <summary>
     /// Adds the PC the caller is sitting at, without a code being read off the
     /// screen and typed into a phone.
     ///
-    /// This is the same handshake as <see cref="ClaimPairingAsync"/> with the two
-    /// halves collapsed: the pairing is created already claimed, because the
-    /// person proving they own the account and the person at the keyboard are
-    /// the same request. Signing in on the PC with the account password is the
-    /// proof; the code was only ever a way to carry that proof from one device
-    /// to another.
-    ///
-    /// The ticket returned is a poll token and nothing more. It is redeemed by
-    /// <see cref="PollPairingAsync"/>, so the device secret still crosses the
+    /// Signing in on the PC with the account password proves account ownership.
+    /// The opaque ticket returned is redeemed by <see cref="CompleteProvisioningAsync"/>,
+    /// so the device secret still crosses the
     /// wire exactly once, to the agent, and never through the app that asked for
     /// the ticket (ADR-0013).
     /// </summary>
@@ -188,7 +48,7 @@ public sealed class DeviceService(
         CallerIdentity caller, DeviceProvisionRequest request, RequestContext ctx, CancellationToken ct = default)
     {
         caller.Require(Scopes.DeviceManage);
-        await limiter.ConsumeAsync(RateBudgets.PairClaimPerUser, caller.UserId.ToString(System.Globalization.CultureInfo.InvariantCulture), ct);
+        await limiter.ConsumeAsync(RateBudgets.ProvisionPerUser, caller.UserId.ToString(System.Globalization.CultureInfo.InvariantCulture), ct);
 
         var requestedName = (request.RequestedName ?? string.Empty).Trim();
         if (requestedName.Length is 0 or > 128)
@@ -224,26 +84,15 @@ public sealed class DeviceService(
                 INSERT INTO device_credentials (device_id, secret_hash) VALUES (@DeviceId, @Hash)
                 """, new { DeviceId = deviceId, Hash = hasher.Hash(secret) }, tx, cancellationToken: ct));
 
-            // code_hash is NOT NULL and unique, and this flow has no human code.
-            // A random value keeps the column meaningful — there is no code that
-            // could ever match it, so this pairing cannot be claimed a second
-            // time through the code path.
             await connection.ExecuteAsync(new CommandDefinition("""
-                INSERT INTO device_pairings
-                    (code_hash, poll_token_hash, requested_name, platform, expires_at,
-                     claimed_by_user_id, device_id, claimed_at, secret_wrapped, secret_kek_id)
-                VALUES
-                    (@CodeHash, @TicketHash, @Name, @Platform, @ExpiresAt,
-                     @UserId, @DeviceId, now(), @Wrapped, @KekId)
+                INSERT INTO device_provisionings
+                    (ticket_hash, device_id, expires_at, secret_wrapped, secret_kek_id)
+                VALUES (@TicketHash, @DeviceId, @ExpiresAt, @Wrapped, @KekId)
                 """,
                 new
                 {
-                    CodeHash = RandomNumberGenerator.GetBytes(32),
                     TicketHash = ticketHash,
-                    Name = displayName,
-                    Platform = platform,
-                    ExpiresAt = clock.UtcNow.Add(PairingTtl),
-                    UserId = caller.UserId,
+                    ExpiresAt = clock.UtcNow.Add(ProvisioningTtl),
                     DeviceId = deviceId,
                     Wrapped = wrapped,
                     KekId = kekId,
@@ -256,61 +105,62 @@ public sealed class DeviceService(
                 SecurityEventNames.DeviceProvisioned, true, ctx, new { deviceId = publicId, displayName }, ct);
 
             return new DeviceProvisionResponse(
-                publicId.ToString(), displayName, ticket, (int)PairingTtl.TotalSeconds);
+                publicId.ToString(), displayName, ticket, (int)ProvisioningTtl.TotalSeconds);
         }, ct);
     }
 
     /// <summary>
-    /// Step 3, from the agent. The device secret crosses the wire exactly once,
+    /// From the local agent. The device secret crosses the wire exactly once,
     /// here, and the wrapped copy is destroyed as it is released.
     /// </summary>
-    public async Task<PairPollResponse> PollPairingAsync(PairPollRequest request, RequestContext ctx, CancellationToken ct = default)
+    public async Task<DeviceProvisionCompleteResponse> CompleteProvisioningAsync(
+        DeviceProvisionCompleteRequest request, RequestContext ctx, CancellationToken ct = default)
     {
-        var hash = tokens.HashOpaqueToken(request.PollToken ?? string.Empty);
+        var hash = tokens.HashOpaqueToken(request.ProvisioningTicket ?? string.Empty);
 
         return await db.InTransactionAsync(async (connection, tx) =>
         {
-            var row = await connection.QuerySingleOrDefaultAsync<PollRow>(new CommandDefinition("""
-                SELECT p.id, p.expires_at AS ExpiresAt, p.claimed_at AS ClaimedAt,
+            var row = await connection.QuerySingleOrDefaultAsync<ProvisioningRow>(new CommandDefinition("""
+                SELECT p.id, p.expires_at AS ExpiresAt,
                        p.secret_wrapped AS SecretWrapped, p.secret_kek_id AS SecretKekId,
                        p.secret_released_at AS SecretReleasedAt,
                        d.public_id AS DevicePublicId, d.display_name AS DisplayName
-                  FROM device_pairings p
-                  LEFT JOIN devices d ON d.id = p.device_id
-                 WHERE p.poll_token_hash = @Hash
+                  FROM device_provisionings p
+                  JOIN devices d ON d.id = p.device_id
+                 WHERE p.ticket_hash = @Hash
                  FOR UPDATE OF p
                 """, new { Hash = hash }, tx, cancellationToken: ct));
 
             if (row is null)
             {
-                throw AppException.NotFound(ErrorCodes.PairingCodeInvalid, "That pairing session is not recognised.");
+                throw AppException.NotFound(ErrorCodes.ProvisioningTicketInvalid,
+                    "That provisioning ticket is not recognised.");
             }
 
-            if (row.ClaimedAt is null)
+            if (row.ExpiresAt <= clock.UtcNow)
             {
-                return row.ExpiresAt <= clock.UtcNow
-                    ? new PairPollResponse("expired", null, null, null)
-                    : new PairPollResponse("pending", null, null, null);
+                throw AppException.NotFound(ErrorCodes.ProvisioningTicketInvalid,
+                    "That provisioning ticket has expired. Sign in on the PC again.");
             }
 
             if (row.SecretReleasedAt is not null || row.SecretWrapped is null)
             {
-                throw AppException.Conflict(ErrorCodes.PairingAlreadyCollected,
-                    "That device secret has already been collected. Pair again to issue a new one.");
+                throw AppException.Conflict(ErrorCodes.ProvisioningAlreadyCompleted,
+                    "That provisioning ticket has already been used.");
             }
 
             var secret = UnwrapSecret(row.SecretWrapped, row.SecretKekId!);
 
             await connection.ExecuteAsync(new CommandDefinition("""
-                UPDATE device_pairings
+                UPDATE device_provisionings
                    SET secret_released_at = now(), secret_wrapped = NULL, secret_kek_id = NULL
                  WHERE id = @Id
                 """, new { row.Id }, tx, cancellationToken: ct));
 
             await audit.WriteInTransactionAsync(connection, tx, null,
-                SecurityEventNames.DevicePairingCollected, true, ctx, new { deviceId = row.DevicePublicId }, ct);
+                SecurityEventNames.DeviceProvisioningCompleted, true, ctx, new { deviceId = row.DevicePublicId }, ct);
 
-            return new PairPollResponse("paired", row.DevicePublicId?.ToString(), secret, row.DisplayName);
+            return new DeviceProvisionCompleteResponse(row.DevicePublicId.ToString(), secret, row.DisplayName);
         }, ct);
     }
 
@@ -347,7 +197,7 @@ public sealed class DeviceService(
             if (row.Status != "active")
             {
                 throw AppException.Forbidden(ErrorCodes.DeviceRevoked,
-                    "This device has been removed from the account. Pair it again to reconnect.");
+                    "This device has been removed from the account. Sign in on this PC again to reconnect it.");
             }
 
             await connection.ExecuteAsync(new CommandDefinition("""
@@ -415,6 +265,18 @@ public sealed class DeviceService(
             }
         }
 
+        if (request.PasswordRequiredCommands is { } passwordRequired)
+        {
+            foreach (var type in passwordRequired)
+            {
+                if (!CommandTypes.All.Contains(type))
+                {
+                    throw AppException.Validation($"'{type}' is not a known command type.",
+                        new ErrorDetail("passwordRequiredCommands", "unknown_type"));
+                }
+            }
+        }
+
         return await db.InTransactionAsync(async (connection, tx) =>
         {
             var row = await LoadOwnedAsync(connection, tx, caller.UserId, deviceId, ct);
@@ -431,19 +293,35 @@ public sealed class DeviceService(
                 }
             }
 
+            var allowedCommands = request.AllowedCommands ?? DbJson.StringArray(row.AllowedCommands);
+            var passwordRequiredCommands = request.PasswordRequiredCommands
+                ?? DbJson.StringArray(row.PasswordRequiredCommands);
+
+            // A disabled command cannot ask for a password because it can never
+            // be issued. An empty allow-list retains the API's legacy meaning of
+            // "all commands".
+            if (allowedCommands.Count > 0)
+            {
+                passwordRequiredCommands = passwordRequiredCommands
+                    .Where(allowedCommands.Contains)
+                    .ToList();
+            }
+
             try
             {
                 await connection.ExecuteAsync(new CommandDefinition("""
                     UPDATE devices
                        SET display_name = @DisplayName,
-                           allowed_commands = COALESCE(@Allowed::jsonb, allowed_commands),
+                           allowed_commands = @Allowed::jsonb,
+                           password_required_commands = @PasswordRequired::jsonb,
                            updated_at = now()
                      WHERE id = @Id
                     """,
                     new
                     {
                         DisplayName = displayName,
-                        Allowed = request.AllowedCommands is null ? null : DbJson.Serialise(request.AllowedCommands),
+                        Allowed = DbJson.Serialise(allowedCommands),
+                        PasswordRequired = DbJson.Serialise(passwordRequiredCommands),
                         row.Id,
                     }, tx, cancellationToken: ct));
             }
@@ -482,6 +360,18 @@ public sealed class DeviceService(
             await connection.ExecuteAsync(new CommandDefinition("""
                 UPDATE refresh_tokens SET revoked_at = now(), revoked_reason = 'device_revoked'
                  WHERE device_id = @Id AND revoked_at IS NULL
+                """, new { row.Id }, tx, cancellationToken: ct));
+
+            // Reminders stop naming this PC. The row survives a revoke — the
+            // device is marked, not deleted — so the join table's ON DELETE
+            // CASCADE never fires and the targets would simply stay.
+            //
+            // That matters more than tidiness: no targets means every PC, so a
+            // reminder that named only this one goes back to showing everywhere
+            // instead of firing on a machine that will never show it again. A
+            // reminder nobody can see is the worst outcome available here.
+            await connection.ExecuteAsync(new CommandDefinition("""
+                DELETE FROM reminder_devices WHERE device_id = @Id
                 """, new { row.Id }, tx, cancellationToken: ct));
 
             // Anything already in flight for this device is abandoned rather than
@@ -636,7 +526,8 @@ public sealed class DeviceService(
     internal const string DeviceSelectSql = """
         SELECT d.id AS Id, d.public_id AS PublicId, d.user_id AS UserId, d.display_name AS DisplayName,
                d.platform, d.os_version AS OsVersion, d.agent_version AS AgentVersion, d.status,
-               d.last_seen_at AS LastSeenAt, d.paired_at AS PairedAt, d.allowed_commands AS AllowedCommands
+               d.last_seen_at AS LastSeenAt, d.paired_at AS PairedAt, d.allowed_commands AS AllowedCommands,
+               d.password_required_commands AS PasswordRequiredCommands
           FROM devices d
         """;
 
@@ -665,7 +556,8 @@ public sealed class DeviceService(
         isOnline,
         row.LastSeenAt,
         row.PairedAt,
-        DbJson.StringArray(row.AllowedCommands));
+        DbJson.StringArray(row.AllowedCommands),
+        DbJson.StringArray(row.PasswordRequiredCommands));
 
     private async Task<string> DeduplicateNameAsync(
         NpgsqlConnection connection, NpgsqlTransaction tx, long userId, string displayName, CancellationToken ct)
@@ -729,8 +621,6 @@ public sealed class DeviceService(
         }
     }
 
-    private static byte[] Sha256(string value) => SHA256.HashData(Encoding.UTF8.GetBytes(value));
-
     private static string Base64Url(byte[] value) =>
         Convert.ToBase64String(value).TrimEnd('=').Replace('+', '-').Replace('/', '_');
 
@@ -749,28 +639,18 @@ public sealed class DeviceService(
         public DateTimeOffset? LastSeenAt { get; init; }
         public DateTimeOffset PairedAt { get; init; }
         public string AllowedCommands { get; init; } = "[]";
+        public string PasswordRequiredCommands { get; init; } = "[]";
     }
 
-    private sealed record PairingRow
-    {
-        public long Id { get; init; }
-        public string RequestedName { get; init; } = string.Empty;
-        public string Platform { get; init; } = "windows";
-        public DateTimeOffset ExpiresAt { get; init; }
-        public DateTimeOffset? ClaimedAt { get; init; }
-        public long? DeviceId { get; init; }
-    }
-
-    private sealed record PollRow
+    private sealed record ProvisioningRow
     {
         public long Id { get; init; }
         public DateTimeOffset ExpiresAt { get; init; }
-        public DateTimeOffset? ClaimedAt { get; init; }
         public byte[]? SecretWrapped { get; init; }
         public string? SecretKekId { get; init; }
         public DateTimeOffset? SecretReleasedAt { get; init; }
-        public Guid? DevicePublicId { get; init; }
-        public string? DisplayName { get; init; }
+        public Guid DevicePublicId { get; init; }
+        public string DisplayName { get; init; } = string.Empty;
     }
 
     private sealed record DeviceCredentialRow

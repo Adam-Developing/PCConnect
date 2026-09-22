@@ -31,7 +31,7 @@ info:
     url: https://www.gnu.org/licenses/gpl-3.0.html
   contact:
     name: PCConnect
-    url: https://pcconnect.adamkhattab.co.uk
+    url: https://pcconnect.adamdeveloping.co.uk
 
 servers:
   - url: https://api.pcconnect.example/v2
@@ -43,7 +43,7 @@ tags:
   - name: auth
     description: Sessions, passwords, registration
   - name: devices
-    description: Device registry and pairing
+    description: Device registry and account provisioning
   - name: commands
     description: Command lifecycle — issue, deliver, acknowledge
   - name: reminders
@@ -257,7 +257,7 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
     patch:
       tags: [devices]
-      summary: Rename a device or change its permitted commands
+      summary: Change a device's name, permitted commands, or password rules
       requestBody:
         required: true
         content:
@@ -274,6 +274,11 @@ paths:
                   description: |
                     Server-side policy. Removing `shutdown` here makes shutdown impossible for
                     this device even with a valid `command:issue` token.
+                passwordRequiredCommands:
+                  type: array
+                  uniqueItems: true
+                  items: { $ref: '#/components/schemas/CommandType' }
+                  description: Commands that require a fresh password or passkey for this PC.
       responses:
         '200':
           description: Updated
@@ -290,11 +295,10 @@ paths:
         '204': { description: Revoked }
         '404': { $ref: '#/components/responses/NotFound' }
 
-  /devices/pair/start:
+  /devices/provision:
     post:
       tags: [devices]
-      summary: Agent starts pairing and receives a code to display
-      security: []
+      summary: Add the PC the signed-in user is currently using
       requestBody:
         required: true
         content:
@@ -307,59 +311,24 @@ paths:
                 platform: { $ref: '#/components/schemas/Platform' }
                 agentVersion: { type: string, maxLength: 32 }
       responses:
-        '201':
-          description: Pairing started
+        '200':
+          description: Device registered; pass the ticket to the local agent
           content:
             application/json:
               schema:
                 type: object
-                required: [pairingCode, pairingToken, expiresAt]
+                required: [deviceId, displayName, provisioningTicket, expiresInSeconds]
                 properties:
-                  pairingCode:
-                    type: string
-                    pattern: '^[A-Z0-9]{4}-[A-Z0-9]{4}$'
-                    description: Shown to the user; they type it into the app
-                    examples: ["K7M2-9QXB"]
-                  pairingToken:
-                    type: string
-                    description: Opaque handle the agent uses to poll. Not shown to the user.
-                  expiresAt: { type: string, format: date-time }
+                  deviceId: { $ref: '#/components/schemas/Uuid' }
+                  displayName: { type: string }
+                  provisioningTicket: { type: string }
+                  expiresInSeconds: { type: integer }
         '429': { $ref: '#/components/responses/RateLimited' }
 
-  /devices/pair/claim:
+  /devices/provision/complete:
     post:
       tags: [devices]
-      summary: User confirms a pairing code
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [pairingCode]
-              properties:
-                pairingCode: { type: string, pattern: '^[A-Z0-9]{4}-[A-Z0-9]{4}$' }
-                displayName:
-                  type: string
-                  maxLength: 128
-                  description: Overrides the name the agent requested
-      responses:
-        '200':
-          description: Claimed; the agent may now collect its credential
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Device' }
-        '404':
-          description: Unknown, expired, or already-claimed code
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Error' }
-        '429': { $ref: '#/components/responses/RateLimited' }
-
-  /devices/pair/poll:
-    post:
-      tags: [devices]
-      summary: Agent collects its device credential, once
+      summary: Local agent collects its device credential once
       security: []
       requestBody:
         required: true
@@ -367,24 +336,27 @@ paths:
           application/json:
             schema:
               type: object
-              required: [pairingToken]
+              required: [provisioningTicket]
               properties:
-                pairingToken: { type: string }
+                provisioningTicket: { type: string }
       responses:
         '200':
-          description: |
-            Paired. `deviceSecret` is returned exactly once and is never retrievable again.
-            The agent stores it in the OS keychain (Windows Credential Manager).
+          description: Credential returned exactly once
           content:
             application/json:
               schema:
                 type: object
-                required: [deviceId, deviceSecret]
+                required: [deviceId, deviceSecret, displayName]
                 properties:
                   deviceId: { $ref: '#/components/schemas/Uuid' }
                   deviceSecret: { type: string, minLength: 43 }
-        '202': { description: Not yet claimed by the user; poll again }
-        '404': { description: Pairing expired or unknown }
+                  displayName: { type: string }
+        '404':
+          description: Unknown or expired provisioning ticket
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409': { $ref: '#/components/responses/Conflict' }
 
   /devices/token:
     post:
@@ -947,7 +919,7 @@ components:
 
     Device:
       type: object
-      required: [id, displayName, platform, status, isOnline, allowedCommands, pairedAt]
+      required: [id, displayName, platform, status, isOnline, allowedCommands, passwordRequiredCommands, pairedAt]
       properties:
         id: { $ref: '#/components/schemas/Uuid' }
         displayName:
@@ -962,6 +934,9 @@ components:
         isOnline: { type: boolean, description: Live presence from the realtime layer }
         lastSeenAt: { type: [string, 'null'], format: date-time }
         allowedCommands:
+          type: array
+          items: { $ref: '#/components/schemas/CommandType' }
+        passwordRequiredCommands:
           type: array
           items: { $ref: '#/components/schemas/CommandType' }
         pairedAt: { type: string, format: date-time }

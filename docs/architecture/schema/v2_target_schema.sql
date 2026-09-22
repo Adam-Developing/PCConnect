@@ -127,7 +127,7 @@ CREATE TABLE refresh_tokens (
 CREATE TABLE auth_challenges (
   id                BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   user_id           BIGINT UNSIGNED NOT NULL,
-  purpose           VARCHAR(32)     NOT NULL COMMENT 'password_reset | email_verify | device_pairing',
+  purpose           VARCHAR(32)     NOT NULL COMMENT 'password_reset | email_verify | step_up',
   code_hash         BINARY(32)      NOT NULL COMMENT 'SHA-256 of the code; the code itself is never stored',
   expires_at        DATETIME(3)     NOT NULL,
   consumed_at       DATETIME(3)     NULL,
@@ -140,7 +140,7 @@ CREATE TABLE auth_challenges (
   KEY        ix_auth_challenges_user (user_id, purpose, consumed_at),
   KEY        ix_auth_challenges_expiry (expires_at),
   CONSTRAINT fk_auth_challenges_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-  CONSTRAINT ck_auth_challenges_purpose CHECK (purpose IN ('password_reset','email_verify','device_pairing'))
+  CONSTRAINT ck_auth_challenges_purpose CHECK (purpose IN ('password_reset','email_verify','step_up'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 
@@ -165,6 +165,8 @@ CREATE TABLE devices (
   -- policy. The agent enforces its own allow-list independently: defence in depth.
   allowed_commands  JSON            NOT NULL
                       COMMENT 'e.g. ["lock","sleep"] — omit "shutdown" to disable it for this device',
+  password_required_commands JSON   NOT NULL
+                      COMMENT 'commands that require a fresh password/passkey confirmation on this device',
 
   status            VARCHAR(16)     NOT NULL DEFAULT 'active',
   paired_at         DATETIME(3)     NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
@@ -188,7 +190,7 @@ CREATE TABLE devices (
 -- The agent's own credential, independent of the user's password and tokens.
 CREATE TABLE device_credentials (
   device_id         BIGINT UNSIGNED NOT NULL,
-  secret_hash       VARBINARY(255)  NOT NULL COMMENT 'Argon2id PHC of the device secret. Plaintext is shown once, at pairing.',
+  secret_hash       VARBINARY(255)  NOT NULL COMMENT 'Argon2id PHC of the device secret. Plaintext is returned once to the local agent.',
   rotated_at        DATETIME(3)     NULL,
   created_at        DATETIME(3)     NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
 
@@ -197,26 +199,21 @@ CREATE TABLE device_credentials (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 
--- Short-lived pairing handshake. Replaces auto-registration of any PCName.
-CREATE TABLE device_pairings (
+-- Short-lived handoff from a signed-in companion to its local agent.
+CREATE TABLE device_provisionings (
   id                BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  code_hash         BINARY(32)      NOT NULL COMMENT 'SHA-256 of the 8-char user-visible pairing code',
-  requested_name    VARCHAR(128)    NOT NULL,
-  platform          VARCHAR(16)     NOT NULL DEFAULT 'windows',
-
-  claimed_by_user_id BIGINT UNSIGNED NULL,
-  device_id         BIGINT UNSIGNED NULL COMMENT 'Set once the pairing completes',
-
-  expires_at        DATETIME(3)     NOT NULL COMMENT 'Ten minutes from issue',
-  claimed_at        DATETIME(3)     NULL,
-  attempts          INT UNSIGNED    NOT NULL DEFAULT 0,
+  ticket_hash       BINARY(32)      NOT NULL COMMENT 'SHA-256 of the opaque provisioning ticket',
+  device_id         BIGINT UNSIGNED NOT NULL,
+  secret_wrapped    BLOB            NULL,
+  secret_kek_id     VARCHAR(32)     NULL,
+  secret_released_at DATETIME(3)    NULL,
+  expires_at        DATETIME(3)     NOT NULL,
   created_at        DATETIME(3)     NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
 
   PRIMARY KEY (id),
-  UNIQUE KEY uq_device_pairings_code (code_hash),
-  KEY        ix_device_pairings_expiry (expires_at),
-  CONSTRAINT fk_device_pairings_user   FOREIGN KEY (claimed_by_user_id) REFERENCES users(id)   ON DELETE CASCADE,
-  CONSTRAINT fk_device_pairings_device FOREIGN KEY (device_id)          REFERENCES devices(id) ON DELETE SET NULL
+  UNIQUE KEY uq_device_provisionings_ticket (ticket_hash),
+  KEY        ix_device_provisionings_expiry (expires_at),
+  CONSTRAINT fk_device_provisionings_device FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 
@@ -238,6 +235,10 @@ CREATE TABLE commands (
   command_type      VARCHAR(32)     NOT NULL
                       COMMENT 'Closed vocabulary, validated server-side AND agent-side',
   params            JSON            NULL COMMENT 'e.g. {"delaySeconds":10}. Never a shell string.',
+  risk_tier         VARCHAR(16)     NOT NULL DEFAULT 'standard',
+  password_required BOOLEAN         NOT NULL DEFAULT FALSE,
+  step_up_verified_at DATETIME(3)   NULL,
+  step_up_method    VARCHAR(24)     NULL,
 
   status            VARCHAR(16)     NOT NULL DEFAULT 'issued',
 
@@ -262,7 +263,9 @@ CREATE TABLE commands (
   CONSTRAINT ck_commands_status CHECK (status IN
     ('issued','delivered','succeeded','failed','expired','cancelled')),
   CONSTRAINT ck_commands_type CHECK (command_type IN
-    ('shutdown','restart','signout','lock','sleep','hibernate'))
+    ('shutdown','restart','signout','lock','sleep','hibernate')),
+  CONSTRAINT ck_commands_stepup CHECK (
+    NOT password_required OR step_up_verified_at IS NOT NULL)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 
@@ -425,7 +428,7 @@ CREATE TABLE idempotency_keys (
 
 
 -- Security-relevant events that are not command executions: logins, failures,
--- token reuse, pairings, revocations, password changes.
+-- token reuse, provisioning, revocations, password changes.
 CREATE TABLE security_events (
   id                BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   user_id           BIGINT UNSIGNED NULL,

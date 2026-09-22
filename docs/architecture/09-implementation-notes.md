@@ -31,7 +31,7 @@ Two capabilities were added that no ADR covered, and each has one now:
 | What | ADR |
 |---|---|
 | Passkeys / WebAuthn as a first-class credential | [0010](adr/0010-passkeys.md) |
-| Risk-tiered step-up for destructive commands | [0011](adr/0011-risk-tiered-step-up.md) |
+| Per-device step-up policy and destructive risk tiers | [0011](adr/0011-risk-tiered-step-up.md) |
 
 ---
 
@@ -336,9 +336,9 @@ decisions; this is what changed.
 
 | Drawn | Built | Where |
 |---|---|---|
-| A PC appears on the account by signing in on it | `POST /v2/devices/provision` mints a ticket for the signed-in user; the companion hands it to the agent over a second named pipe and the agent redeems it through `pair/poll`, so the device secret still only ever reaches the agent | `DeviceService.ProvisionAsync`, `ProvisioningBridge`, ADR-0013 §1 |
+| A PC appears on the account by signing in on it | `POST /v2/devices/provision` mints a ticket for the signed-in user; the companion hands it to the agent over a second named pipe and the agent redeems it through `provision/complete`, so the device secret still only ever reaches the agent | `DeviceService.ProvisionAsync`, `ProvisioningBridge`, ADR-0013 §1 |
 | A reminder chooses which PCs it shows on | `reminder_devices`, `deviceIds` on create / update / response, and the same list on `ReminderDueEvent`; no rows means every PC, so nothing needed backfilling | [0008](../../DB/migrations/0008_reminder_targets.sql), `ReminderService`, ADR-0013 §2 |
-| A fingerprint confirms a destructive command *instead of* a password | The server always accepted a passkey for step-up; Android now registers one and asserts it, so the fingerprint *is* the confirmation and there is nothing to type | `PasskeyClient`, `AppViewModel.confirmPendingCommandWithPasskey`, ADR-0013 §3 |
+| A fingerprint confirms a protected command *instead of* a password | The server accepts a passkey for step-up; Android registers one and asserts it, so the fingerprint *is* the confirmation and there is nothing to type | `PasskeyClient`, `AppViewModel.confirmPendingCommandWithPasskey`, ADR-0013 §3 |
 | "Snooze 10 min" on the full-screen reminder | Implemented, entirely on the PC showing it | There is no snooze on the wire. The window comes back in ten minutes; the reminder is untouched, so it still fires at its own time on every other screen, and a snooze does not survive restarting the app. |
 | A repeat with several times a day is one reminder | One series per time | `BYHOUR` and `BYMINUTE` multiply out: "10:30 and 15:45" in a single rule expands to four occurrences a day, not two. Each time is saved as its own series, which is what the words mean and what `RecurrenceExpander` already handles. The sheet says so. |
 
@@ -383,7 +383,7 @@ but it should not be mistaken for a permission.
 
 | What | Where specified | Why not built | What would be needed |
 |---|---|---|---|
-| Web dashboard | [06 §4](06-client-architecture.md) | The two clients that carry traffic are the desktop and the phone; the dashboard exists mainly so pairing is reachable without a phone, which the WPF companion now also does | A small React app against the generated contract |
+| Web dashboard | [06 §4](06-client-architecture.md) | The two clients that carry traffic are the desktop and the phone; PC registration belongs to the signed-in WPF companion running on that PC | A small React app against the generated contract |
 | iOS client | [ADR-0007](adr/0007-mobile-client-technology.md) | No Apple Developer account; listed as an open question in the README rather than a commitment | An account, and a client — the API is already platform-neutral |
 | Sentry | [01 §6.5](01-target-architecture.md) | Needs a DSN, which is an account decision | `SENTRY_DSN` and the SDK package |
 | SMTP delivery | [03 §8](03-security-architecture.md) | Needs credentials for a provider. `IEmailSender` is implemented against the log so reset and verification flows work end to end locally and in staging | An SMTP implementation and credentials in `.env` |
@@ -402,7 +402,7 @@ A reader coming from the architecture documents can find every named control her
 | Argon2id, server-side, upgrade-on-login | 03 §2.5, 02 §6 | `Argon2PasswordHasher`, `IdentityService.VerifyPasswordAsync` |
 | Token pair, rotation, family reuse detection | 03 §2.4 | `IdentityService.RefreshAsync` |
 | Scopes; issue and receive disjoint | 03 §2.3 | `Scopes`, `CallerIdentity.Require` |
-| Device pairing | 03 §2.6 | `DeviceService.StartPairingAsync` / `ClaimPairingAsync` / `PollPairingAsync` |
+| Device provisioning | ADR-0013 §1 | `DeviceService.ProvisionAsync` / `CompleteProvisioningAsync` |
 | The five server checks on a command | 03 §3 | `CommandService.IssueAsync`, in order, with comments naming each |
 | The three agent checks (allow-list, freshness, replay) | 03 §3 | `CommandExecutor.ExecuteAsync` |
 | Mandatory TTL and the expiry sweep | ADR-0003 | `CommandTtl`, `CommandService.ExpireDueAsync`, `CommandExpiryJob` |

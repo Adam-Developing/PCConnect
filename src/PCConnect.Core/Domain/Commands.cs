@@ -21,9 +21,8 @@ public static class CommandTypes
 
     /// <summary>
     /// Commands that end the user's session or power state without warning. These
-    /// carry the destructive risk tier and require step-up authentication
-    /// (ADR-0011). Sleep and lock are recoverable in one keypress; a shutdown
-    /// during work is not.
+    /// carry the destructive risk tier for tighter rate limiting. Password
+    /// confirmation is configured independently per command and PC.
     /// </summary>
     public static readonly IReadOnlySet<string> Destructive = new HashSet<string>(StringComparer.Ordinal)
     {

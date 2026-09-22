@@ -165,19 +165,13 @@ public sealed record DeviceResponse(
     bool IsOnline,
     DateTimeOffset? LastSeenAt,
     DateTimeOffset PairedAt,
-    IReadOnlyList<string> AllowedCommands);
+    IReadOnlyList<string> AllowedCommands,
+    IReadOnlyList<string> PasswordRequiredCommands);
 
-public sealed record UpdateDeviceRequest(string? DisplayName = null, IReadOnlyList<string>? AllowedCommands = null);
-
-public sealed record PairStartRequest(string RequestedName, string Platform = "windows", string AgentVersion = "");
-
-public sealed record PairStartResponse(string PairingCode, string PollToken, int ExpiresInSeconds);
-
-public sealed record PairClaimRequest(string PairingCode, string? DisplayName = null);
-
-public sealed record PairClaimResponse(string DeviceId, string DisplayName);
-
-public sealed record PairPollRequest(string PollToken);
+public sealed record UpdateDeviceRequest(
+    string? DisplayName = null,
+    IReadOnlyList<string>? AllowedCommands = null,
+    IReadOnlyList<string>? PasswordRequiredCommands = null);
 
 /// <summary>
 /// Adds the PC the caller is signed in on, with no code to read off a screen.
@@ -189,7 +183,7 @@ public sealed record DeviceProvisionRequest(
     string AgentVersion = "");
 
 /// <summary>
-/// The ticket is a poll token: the agent redeems it through <c>pair/poll</c>, so
+/// The ticket is an opaque, single-use capability. The local agent redeems it, so
 /// the device secret goes to the agent and never through whatever asked for it.
 /// </summary>
 public sealed record DeviceProvisionResponse(
@@ -198,8 +192,10 @@ public sealed record DeviceProvisionResponse(
     string ProvisioningTicket,
     int ExpiresInSeconds);
 
-/// <summary>The device secret crosses the wire exactly once, here (03 §2.6).</summary>
-public sealed record PairPollResponse(string Status, string? DeviceId, string? DeviceSecret, string? DisplayName);
+public sealed record DeviceProvisionCompleteRequest(string ProvisioningTicket);
+
+/// <summary>The device secret crosses the wire exactly once, to the local agent.</summary>
+public sealed record DeviceProvisionCompleteResponse(string DeviceId, string DeviceSecret, string DisplayName);
 
 public sealed record DeviceTokenRequest(string DeviceId, string DeviceSecret, string AgentVersion = "", string OsVersion = "");
 

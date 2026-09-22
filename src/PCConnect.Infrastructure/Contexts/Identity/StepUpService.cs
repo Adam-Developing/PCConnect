@@ -20,9 +20,8 @@ public static class StepUpMethods
 /// <summary>
 /// Risk-tiered step-up (ADR-0011).
 ///
-/// A valid access token is enough to lock a screen. It is not enough to power a
-/// machine off: a destructive command requires a fresh proof of the human, made
-/// within the last five minutes, single-use, and bound to the account.
+/// A target PC may require a fresh proof of the human for any command. That proof
+/// is made within the last five minutes, single-use, and bound to the account.
 /// </summary>
 public sealed class StepUpService(
     Db db,

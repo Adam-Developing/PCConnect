@@ -1,4 +1,4 @@
-using Microsoft.Extensions.Logging;
+﻿using Microsoft.Extensions.Logging;
 using System.Globalization;
 using System.Security.Cryptography;
 using Dapper;
@@ -480,32 +480,41 @@ public sealed class ReminderService(
                 """, new { Until = until, BatchSize = batchSize }, tx, cancellationToken: ct))).ToList();
 
             var results = new List<DueReminder>(singles.Count + occurrences.Count);
-            var keyCache = new Dictionary<long, byte[]>();
+            // Nullable: a null value is a remembered failure, so a user whose
+            // key will not unwrap is looked up once per tick rather than once
+            // per reminder.
+            var keyCache = new Dictionary<long, byte[]?>();
             var targets = await LoadTargetsAsync(connection, tx,
                 singles.Concat(occurrences).Select(r => r.ReminderId).Distinct().ToList(), ct);
 
             foreach (var row in singles.Concat(occurrences))
             {
+                // One account must not stop the sweep for every other account.
+                //
+                // Letting the exception out rolled the transaction back, which
+                // undid the notified marking for the whole batch and left the
+                // rows to be claimed again on the next tick — so a single user
+                // whose data key predates a KEK change stopped reminders for
+                // everybody, and did it again every thirty seconds, for ever.
+                // The read path has degraded to a placeholder since it was
+                // written; the schedule is not encrypted and must still fire.
                 if (!keyCache.TryGetValue(row.UserId, out var dek))
                 {
-                    var loaded = await LoadDataKeyAsync(connection, tx, row.UserId, create: false, ct);
-                    if (loaded is null)
-                    {
-                        continue;
-                    }
-
-                    dek = loaded;
+                    dek = await TryLoadDataKeyAsync(connection, row.UserId, ct, tx);
                     keyCache[row.UserId] = dek;
                 }
 
                 results.Add(new DueReminder(row.PublicId, row.UserPublicId,
-                    envelope.Decrypt(dek, row.BodyCiphertext, AssociatedData(row.UserId)), row.DueAtUtc,
+                    DecryptBodyOrPlaceholder(dek, row.BodyCiphertext, row.UserId, row.PublicId), row.DueAtUtc,
                     targets.GetValueOrDefault(row.ReminderId)));
             }
 
             foreach (var key in keyCache.Values)
             {
-                CryptographicOperations.ZeroMemory(key);
+                if (key is not null)
+                {
+                    CryptographicOperations.ZeroMemory(key);
+                }
             }
 
             return results;
@@ -568,8 +577,8 @@ public sealed class ReminderService(
     /// database is useless without the KEK, which is not in the database.
     /// </summary>
     /// <summary>
-    /// Loads the user's data key for a read, treating "cannot unwrap it" as
-    /// "cannot read the bodies" rather than as a failed request.
+    /// Loads the user's data key, treating "cannot unwrap it" as "cannot read
+    /// the bodies" rather than as a failed request or a failed sweep.
     ///
     /// The unwrap throws when the KEK that wrapped this user's data key is not
     /// the one configured — the exact state a mis-ordered rotation leaves behind
@@ -580,11 +589,11 @@ public sealed class ReminderService(
     /// readable; only the bodies are lost, and the list says so per row.
     /// </summary>
     private async Task<byte[]?> TryLoadDataKeyAsync(
-        NpgsqlConnection connection, long userId, CancellationToken ct)
+        NpgsqlConnection connection, long userId, CancellationToken ct, NpgsqlTransaction? tx = null)
     {
         try
         {
-            return await LoadDataKeyAsync(connection, null, userId, create: false, ct);
+            return await LoadDataKeyAsync(connection, tx, userId, create: false, ct);
         }
         catch (System.Security.Cryptography.CryptographicException ex)
         {
@@ -701,9 +710,11 @@ public sealed class ReminderService(
 
         if (deviceIds.Count == 0)
         {
-            throw AppException.Validation(
-                "Choose at least one PC, or send no list at all to show it on every PC.",
-                new ErrorDetail("deviceIds", "empty"));
+            // Well formed and impossible, so 422 with a code of its own rather
+            // than a generic 400 — the client has to tell "you sent nonsense"
+            // apart from "nobody would ever see that" to say anything useful.
+            throw AppException.Unprocessable(ErrorCodes.ReminderTargetsEmpty,
+                "Choose at least one PC, or send no list at all to show it on every PC.");
         }
 
         var parsed = new List<Guid>(deviceIds.Count);
@@ -726,8 +737,12 @@ public sealed class ReminderService(
 
         if (owned.Count != wanted.Length)
         {
-            throw AppException.Validation(
-                "One of those PCs is not on this account.", new ErrorDetail("deviceIds", "unknown"));
+            // Deliberately the same answer for "not yours" and "does not
+            // exist": a different one would let a caller test ids for
+            // existence. Revoked PCs are excluded above, so choosing one is
+            // this error and not a reminder aimed at a machine that is gone.
+            throw AppException.Unprocessable(ErrorCodes.ReminderTargetUnknown,
+                "One of those PCs is not on this account.");
         }
 
         await connection.ExecuteAsync(new CommandDefinition(
@@ -764,35 +779,49 @@ public sealed class ReminderService(
     /// </summary>
     internal const string UnreadableBody = "(this reminder could not be read)";
 
+    /// <summary>
+    /// The body, or the placeholder standing in for one this server cannot read.
+    ///
+    /// One rule for both paths that read a body, because a row that will not
+    /// decrypt must take neither of them down. Letting the exception out
+    /// returned 500 for `GET /v2/reminders` — one bad row removed the entire
+    /// feature, with no list, no way to find that row and no way to delete it —
+    /// and on the scheduler it abandoned the sweep for every other user in the
+    /// batch.
+    ///
+    /// This happens for real after a KEK rotation done wrongly (09 §2.11), after
+    /// a restore that mixes eras, and in development after the key file is lost.
+    /// The schedule, the recurrence and the completion state are all still
+    /// readable; only the body is lost, and saying so is far more useful than
+    /// failing.
+    /// </summary>
+    private string DecryptBodyOrPlaceholder(byte[]? dek, byte[] ciphertext, long userId, Guid reminderId)
+    {
+        // No key means no body on this account at all — see TryLoadDataKeyAsync,
+        // which has already logged why.
+        if (dek is null)
+        {
+            return UnreadableBody;
+        }
+
+        try
+        {
+            return envelope.Decrypt(dek, ciphertext, AssociatedData(userId));
+        }
+        catch (System.Security.Cryptography.CryptographicException ex)
+        {
+            logger.LogError(ex,
+                "Reminder {ReminderId} could not be decrypted. Its key encryption key is wrong or the row is damaged.",
+                reminderId);
+
+            return UnreadableBody;
+        }
+    }
+
     private ReminderResponse ToResponse(
         ReminderRow row, byte[]? dek, IReadOnlyDictionary<long, IReadOnlyList<string>>? targets = null)
     {
-        // A row that will not decrypt must not take the list down with it.
-        //
-        // Letting the exception out returned 500 for `GET /v2/reminders`, so one
-        // unreadable row removed the entire feature — no list, no way to find
-        // the bad row, no way to delete it. That happens for real after a KEK
-        // rotation done wrongly (09 §2.11), after a restore that mixes eras, or
-        // if a ciphertext is damaged. The schedule, the recurrence and the
-        // completion state are all still readable; only the body is lost, and
-        // saying so is far more useful than failing the request.
-        // No key means the bodies cannot be read at all — see TryLoadDataKeyAsync.
-        var body = UnreadableBody;
-
-        if (dek is not null)
-        {
-            try
-            {
-                body = envelope.Decrypt(dek, row.BodyCiphertext, AssociatedData(row.UserId));
-            }
-            catch (System.Security.Cryptography.CryptographicException ex)
-            {
-                logger.LogError(ex,
-                    "Reminder {ReminderId} could not be decrypted. Its key encryption key is wrong or the row is damaged.",
-                    row.PublicId);
-                body = UnreadableBody;
-            }
-        }
+        var body = DecryptBodyOrPlaceholder(dek, row.BodyCiphertext, row.UserId, row.PublicId);
 
         return new ReminderResponse(
             row.PublicId.ToString(),

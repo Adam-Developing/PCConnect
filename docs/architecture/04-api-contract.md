@@ -60,7 +60,7 @@ Consequences that matter:
   "minimumSupportedClient": { "desktop": "5.0.0", "mobile": "8.0.0" },
   "recommendedClient":     { "desktop": "5.2.1", "mobile": "8.1.0" },
   "legacySunset": { "v1": "2027-03-01T00:00:00Z" },
-  "capabilities": ["commands.ttl", "reminders.rrule", "devices.pairing"]
+  "capabilities": ["commands.ttl", "reminders.rrule", "devices.provisioning"]
 }
 ```
 
@@ -132,18 +132,17 @@ which is the mechanism that eventually lets the legacy PHP endpoints be switched
 
 | Method | Path | Scope | Notes |
 |---|---|---|---|
-| `GET` | `` | `device:read` | ✓ Returns objects with `id`, `displayName`, `isOnline`, `lastSeenAt`, `allowedCommands`. (Today: a bare array of name strings.) |
+| `GET` | `` | `device:read` | ✓ Returns objects with `id`, `displayName`, `isOnline`, `lastSeenAt`, `allowedCommands`, `passwordRequiredCommands`. (Today: a bare array of name strings.) |
 | `GET` | `/{deviceId}` | `device:read` | + |
-| `PATCH` | `/{deviceId}` | `device:manage` | + Rename; change `allowedCommands`. |
+| `PATCH` | `/{deviceId}` | `device:manage` | + Rename; change `allowedCommands` or the per-PC `passwordRequiredCommands`. |
 | `DELETE` | `/{deviceId}` | `device:manage` | + Revokes the device credential and cascades. |
-| `POST` | `/pair/start` | — | + Agent-initiated. Returns a pairing code. |
-| `POST` | `/pair/claim` | `device:manage` | + User-initiated. Confirms the code. |
-| `POST` | `/pair/poll` | — | + Agent collects `deviceId` + `deviceSecret`, **once**. |
+| `POST` | `/provision` | `device:manage` | + Adds the PC the caller is signed in on and returns a one-time local-agent ticket. |
+| `POST` | `/provision/complete` | ticket | + Local agent collects `deviceId` + `deviceSecret`, **once**. |
 | `POST` | `/token` | — | + Agent exchanges `deviceId` + `deviceSecret` for a device access token. |
 | `POST` | `/{deviceId}/heartbeat` | `command:receive` | + Coalesced; the fallback when the socket is down. |
 
-`POST /v2/devices` (blind creation from a header) does **not** exist. Devices come into being only
-through pairing.
+`POST /v2/devices` (blind creation from a header) does **not** exist. A PC joins an account only
+when a user signs in through the companion running on that PC.
 
 ### Commands — `/v2/commands`
 

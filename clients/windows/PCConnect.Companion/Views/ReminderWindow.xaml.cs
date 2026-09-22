@@ -2,13 +2,16 @@ using System.Globalization;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 
 namespace PCConnect.Companion.Views;
 
 public partial class ReminderWindow : Window
 {
     private readonly Func<Task>? _onDone;
-    private readonly Action? _onSnooze;
+    private readonly Action<TimeSpan>? _onSnooze;
+    private TimeSpan _selectedSnooze = TimeSpan.FromMinutes(10);
+    private bool _isClosing;
 
     public ReminderWindow(
         string body,
@@ -17,7 +20,7 @@ public partial class ReminderWindow : Window
         string foreground,
         string pcName,
         Func<Task>? onDone = null,
-        Action? onSnooze = null)
+        Action<TimeSpan>? onSnooze = null)
     {
         InitializeComponent();
 
@@ -37,13 +40,27 @@ public partial class ReminderWindow : Window
             BodyText.Foreground = brush;
             TimeText.Foreground = brush;
             HintText.Foreground = brush;
+            SnoozeBorder.BorderBrush = brush;
             SnoozeButton.Foreground = brush;
-            SnoozeButton.BorderBrush = brush;
-            // Both secondary buttons take the reminder's own text colour. Left
-            // on the default ink they were dark-on-dark and effectively
-            // invisible against the card.
+            SnoozeDropdownButton.Foreground = brush;
             DismissButton.Foreground = brush;
         });
+
+        Loaded += (_, _) =>
+        {
+            var fadeAnimation = new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(200))
+            {
+                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+            };
+            RootGrid.BeginAnimation(UIElement.OpacityProperty, fadeAnimation);
+
+            var scaleAnimation = new DoubleAnimation(0.94, 1.0, TimeSpan.FromMilliseconds(220))
+            {
+                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+            };
+            CardScale.BeginAnimation(ScaleTransform.ScaleXProperty, scaleAnimation);
+            CardScale.BeginAnimation(ScaleTransform.ScaleYProperty, scaleAnimation);
+        };
 
         // Escape dismisses. A full-screen window with no way out but the mouse
         // is a window people learn to dread.
@@ -51,7 +68,7 @@ public partial class ReminderWindow : Window
         {
             if (e.Key == Key.Escape)
             {
-                Close();
+                AnimateAndClose();
             }
         };
     }
@@ -81,23 +98,78 @@ public partial class ReminderWindow : Window
         }
     }
 
-    private async void OnDone(object sender, RoutedEventArgs e)
+    private void AnimateAndClose(Action? afterClosed = null)
     {
-        DoneButton.IsEnabled = false;
+        if (_isClosing) return;
+        _isClosing = true;
+
+        var fadeAnimation = new DoubleAnimation(1, 0, TimeSpan.FromMilliseconds(150))
+        {
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseIn }
+        };
+        var scaleAnimation = new DoubleAnimation(1.0, 0.95, TimeSpan.FromMilliseconds(150))
+        {
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseIn }
+        };
+        fadeAnimation.Completed += (_, _) =>
+        {
+            afterClosed?.Invoke();
+            Close();
+        };
+
+        RootGrid.BeginAnimation(UIElement.OpacityProperty, fadeAnimation);
+        CardScale.BeginAnimation(ScaleTransform.ScaleXProperty, scaleAnimation);
+        CardScale.BeginAnimation(ScaleTransform.ScaleYProperty, scaleAnimation);
+    }
+
+    private async void OnCompleted(object sender, RoutedEventArgs e)
+    {
+        CompletedButton.IsEnabled = false;
 
         if (_onDone is not null)
         {
             await _onDone();
         }
 
-        Close();
+        AnimateAndClose();
     }
 
-    private void OnSnooze(object sender, RoutedEventArgs e)
+    private void OnSnoozeDefault(object sender, RoutedEventArgs e)
     {
-        _onSnooze?.Invoke();
-        Close();
+        AnimateAndClose(() => _onSnooze?.Invoke(_selectedSnooze));
     }
 
-    private void OnDismiss(object sender, RoutedEventArgs e) => Close();
+    private void OnSnoozeDropdownClick(object sender, RoutedEventArgs e)
+    {
+        if (SnoozeContextMenu != null)
+        {
+            SnoozeContextMenu.PlacementTarget = SnoozeDropdownButton;
+            SnoozeContextMenu.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom;
+            SnoozeContextMenu.IsOpen = true;
+            e.Handled = true;
+        }
+    }
+
+    private void OnSnooze10m(object sender, RoutedEventArgs e)
+    {
+        _selectedSnooze = TimeSpan.FromMinutes(10);
+        SnoozeDurationText.Text = "10 mins";
+        AnimateAndClose(() => _onSnooze?.Invoke(_selectedSnooze));
+    }
+
+    private void OnSnooze30m(object sender, RoutedEventArgs e)
+    {
+        _selectedSnooze = TimeSpan.FromMinutes(30);
+        SnoozeDurationText.Text = "30 mins";
+        AnimateAndClose(() => _onSnooze?.Invoke(_selectedSnooze));
+    }
+
+    private void OnSnooze1h(object sender, RoutedEventArgs e)
+    {
+        _selectedSnooze = TimeSpan.FromHours(1);
+        SnoozeDurationText.Text = "1 hour";
+        AnimateAndClose(() => _onSnooze?.Invoke(_selectedSnooze));
+    }
+
+    private void OnDismiss(object sender, RoutedEventArgs e) => AnimateAndClose();
 }

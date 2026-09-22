@@ -29,14 +29,14 @@ personal computer.** Every security decision in this architecture follows from t
 | C5 | PCClientWails (next desktop) | `PCClientWails/` | Go 1.25, Wails v2+v3-alpha, React/TS/Vite | `main`, HEAD | Prototype |
 | C6 | Android app (production mobile) | `App/` | Java 8, Activities, `AsyncTask`, OkHttp | worktree + HEAD | **Live (v7.2, code 702)** |
 | C7 | Flutter app (next mobile) | `mobile_flutter/` | Flutter 3, Riverpod, Dio, socket_io_client | `main` only | Prototype |
-| C8 | Marketing website | *not in repo* | PHP | — | **Live** (`pcconnect.adamkhattab.co.uk`) |
+| C8 | Marketing website | *not in repo* | PHP | — | **Live** (`pcconnect.adamdeveloping.co.uk`) |
 | C9 | Database | `DB/pcconnect.sql` | MySQL 8, InnoDB, `utf8mb3` | dump on disk (gitignored) | **Live** |
 
 ### 2.1 The dependency reality
 
 ```
                  ┌──────────────────────────────────────────┐
-                 │  pcconnect.adamkhattab.co.uk (Cloudflare)│
+                 │  pcconnect.adamdeveloping.co.uk (Cloudflare)│
                  └────────────────┬─────────────────────────┘
                                   │
        ┌──────────────────────────┴──────────────────────────┐

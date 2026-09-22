@@ -1,6 +1,7 @@
 using System.IO;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
+using PCConnect.Core.Domain;
 
 namespace PCConnect.Companion.Services;
 
@@ -39,6 +40,42 @@ public sealed class CompanionSettings(ILogger<CompanionSettings> logger)
     }
 
     /// <summary>
+    /// Device preferences are stored locally as well as on the account. That
+    /// makes every control on the desktop settings page usable before the agent
+    /// is paired and while the server is unreachable. Pending values are sent
+    /// to the account the next time this PC is resolved.
+    /// </summary>
+    public string PcName => _state.PcName;
+
+    public IReadOnlyList<string> AllowedCommands => _state.AllowedCommands ?? CommandTypes.All.ToArray();
+
+    public IReadOnlyList<string> PasswordRequiredCommands =>
+        _state.PasswordRequiredCommands ?? CommandTypes.Destructive.ToArray();
+
+    public bool PcNameNeedsSync => _state.PcNameNeedsSync;
+
+    public bool AllowedCommandsNeedSync => _state.AllowedCommandsNeedSync;
+
+    public bool PasswordRequiredCommandsNeedSync => _state.PasswordRequiredCommandsNeedSync;
+
+    public void SavePcName(string value, bool needsSync) =>
+        Update(_state with { PcName = value, PcNameNeedsSync = needsSync });
+
+    public void SaveAllowedCommands(IEnumerable<string> value, bool needsSync) =>
+        Update(_state with
+        {
+            AllowedCommands = value.Where(CommandTypes.All.Contains).Distinct(StringComparer.Ordinal).ToArray(),
+            AllowedCommandsNeedSync = needsSync,
+        });
+
+    public void SavePasswordRequiredCommands(IEnumerable<string> value, bool needsSync) =>
+        Update(_state with
+        {
+            PasswordRequiredCommands = value.Where(CommandTypes.All.Contains).Distinct(StringComparer.Ordinal).ToArray(),
+            PasswordRequiredCommandsNeedSync = needsSync,
+        });
+
+    /// <summary>
     /// Which paired device is the machine this is running on.
     ///
     /// The companion holds a user credential, not a device one — the service in
@@ -58,7 +95,19 @@ public sealed class CompanionSettings(ILogger<CompanionSettings> logger)
         {
             if (File.Exists(Path))
             {
-                _state = JsonSerializer.Deserialize<State>(File.ReadAllText(Path)) ?? new State();
+                var loaded = JsonSerializer.Deserialize<State>(File.ReadAllText(Path)) ?? new State();
+                _state = loaded with
+                {
+                    PcName = string.IsNullOrWhiteSpace(loaded.PcName) ? Environment.MachineName : loaded.PcName,
+                    AllowedCommands = (loaded.AllowedCommands ?? CommandTypes.All.ToArray())
+                        .Where(CommandTypes.All.Contains)
+                        .Distinct(StringComparer.Ordinal)
+                        .ToArray(),
+                    PasswordRequiredCommands = (loaded.PasswordRequiredCommands ?? CommandTypes.Destructive.ToArray())
+                        .Where(CommandTypes.All.Contains)
+                        .Distinct(StringComparer.Ordinal)
+                        .ToArray(),
+                };
             }
         }
         catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
@@ -89,6 +138,18 @@ public sealed class CompanionSettings(ILogger<CompanionSettings> logger)
         public string ReminderBackground { get; init; } = "#0B1120";
 
         public string ReminderForeground { get; init; } = "#F8FAFC";
+
+        public string PcName { get; init; } = Environment.MachineName;
+
+        public string[]? AllowedCommands { get; init; } = CommandTypes.All.ToArray();
+
+        public string[]? PasswordRequiredCommands { get; init; } = CommandTypes.Destructive.ToArray();
+
+        public bool PcNameNeedsSync { get; init; }
+
+        public bool AllowedCommandsNeedSync { get; init; }
+
+        public bool PasswordRequiredCommandsNeedSync { get; init; }
 
         public string? ThisDeviceId { get; init; }
     }

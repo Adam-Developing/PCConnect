@@ -39,10 +39,10 @@ SELECT count(*) AS violations
 FROM commands
 WHERE status = 'succeeded' AND acked_at IS NOT NULL AND acked_at > expires_at;
 
--- check: V6 no destructive command exists without a recorded step-up
+-- check: V6 no password-protected command exists without a recorded step-up
 SELECT count(*) AS violations
 FROM commands
-WHERE risk_tier = 'destructive' AND step_up_verified_at IS NULL;
+WHERE password_required AND step_up_verified_at IS NULL;
 
 -- check: V7 every device has exactly one live credential
 SELECT count(*) AS violations

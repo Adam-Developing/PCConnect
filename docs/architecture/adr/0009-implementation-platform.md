@@ -67,7 +67,7 @@ The move from MySQL is the largest of these and it is worth being specific about
 | The command claim reads then updates | `UPDATE … FOR UPDATE SKIP LOCKED` in a single CTE, so two agents polling concurrently cannot be served the same command |
 
 One genuinely new capability is used: the `ck_commands_stepup` CHECK constraint makes
-"a destructive command cannot exist without a recorded step-up" an invariant the database
+"a password-protected command cannot exist without a recorded step-up" an invariant the database
 enforces, not just the service ([ADR-0011](0011-risk-tiered-step-up.md)).
 
 ## Signing algorithm: EdDSA → ES256

@@ -81,7 +81,7 @@ through an explicit exported interface, never a shared table.
 pcconnect-api/src/
 ├─ platform/          cross-cutting: config, db, cache, logging, errors, crypto, ids
 ├─ identity/          users, credentials, sessions, tokens, password reset
-├─ devices/           device registry, pairing, presence, heartbeat
+├─ devices/           device registry, provisioning, presence, heartbeat
 ├─ commands/          command lifecycle: issue → deliver → ack → expire, audit
 ├─ reminders/         reminders, recurrence, scheduling, encryption at rest
 ├─ notifications/     push fan-out (WS now; APNs/FCM later)
@@ -101,7 +101,7 @@ contexts import each other only via the narrow interface each exports (`identity
 | Context | Owns | Exposes | Does **not** |
 |---|---|---|---|
 | **identity** | `users`, `user_credentials`, `refresh_tokens`, `password_resets` | `authenticate()`, `verifyAccessToken()`, `issueTokenPair()`, `revokeFamily()` | know what a device or a command is |
-| **devices** | `devices`, `device_credentials`, `device_pairings` | `assertDeviceOwnedBy(userId, deviceId)`, `presence()`, `heartbeat()` | execute anything |
+| **devices** | `devices`, `device_credentials`, `device_provisionings` | `assertDeviceOwnedBy(userId, deviceId)`, `presence()`, `heartbeat()` | execute anything |
 | **commands** | `commands`, `command_events` | `issue()`, `claim()`, `ack()`, `expireDue()` | choose *how* a command reaches a device |
 | **reminders** | `reminders`, `reminder_occurrences` | `list()`, `create()`, `complete()`, `dueBetween()` | send notifications |
 | **notifications** | delivery fan-out only | `deliver(userId, event)` | own any table |
@@ -126,12 +126,12 @@ scope and revocation path:
 A leaked mobile refresh token can no longer shut down a PC: it cannot mint `device:execute`.
 Full detail: [03 — Security Architecture](03-security-architecture.md).
 
-### C-2 · Devices are paired, not asserted
+### C-2 · Devices are registered by signing in on the PC, not asserted
 
-`PCName` as a self-asserted, auto-registering header (S1-08) is replaced by an explicit pairing
-handshake: the agent requests a pairing code, the user confirms it in the mobile app or web
-dashboard, and the server issues a device id plus device secret. `PCName` becomes a mutable display
-label with no security meaning.
+`PCName` as a self-asserted, auto-registering header (S1-08) is replaced by authenticated local
+provisioning: the user signs in through the companion on that PC, which hands a one-time ticket to
+its local agent. The server issues a device id plus device secret. `PCName` becomes a mutable
+display label with no security meaning.
 
 ### C-3 · Commands become an append-only, expiring lifecycle
 

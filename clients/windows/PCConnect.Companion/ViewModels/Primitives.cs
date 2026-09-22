@@ -80,6 +80,13 @@ public sealed partial class MonthOption : ObservableObject
     private bool _isCurrent;
 }
 
+public enum ReopenChoice
+{
+    Cancel,
+    RescheduleForToday,
+    KeepOverdue
+}
+
 /// <summary>One reminder in a list, already rendered for the screen.</summary>
 public sealed record ReminderRow(
     string Id,
@@ -88,7 +95,10 @@ public sealed record ReminderRow(
     string Body,
     string Detail,
     bool IsCompleted,
-    bool IsPast);
+    bool IsPast)
+{
+    public bool IsOverdue => IsPast && !IsCompleted;
+}
 
 /// <summary>One command in the Settings table, or one button on Other PCs.</summary>
 public sealed partial class CommandRow : ObservableObject
@@ -119,9 +129,13 @@ public sealed partial class TargetToggle : ObservableObject
 
     public required string Name { get; init; }
 
-    public required bool IsOnline { get; init; }
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(Tag))]
+    private bool _isOnline;
 
-    public string Tag => IsOnline ? "online" : "offline";
+    public bool IsThisPc { get; init; }
+
+    public string Tag => IsThisPc ? "this PC" : (IsOnline ? "online" : "offline");
 }
 
 /// <summary>A colour a person can pick for the reminder window.</summary>
@@ -243,6 +257,48 @@ public static class Recurrence
                 JoinNaturally(byDay.Select(NameFor).Where(s => s.Length > 0).ToList()),
             _ => rrule!,
         };
+    }
+
+    public static (RepeatKind Kind, List<DayOfWeek> Days, int IntervalWeeks) FromRrule(string? rrule)
+    {
+        if (string.IsNullOrWhiteSpace(rrule))
+        {
+            return (RepeatKind.Once, [], 1);
+        }
+
+        var parts = rrule.Replace("RRULE:", string.Empty, StringComparison.OrdinalIgnoreCase)
+            .Split(';', StringSplitOptions.RemoveEmptyEntries)
+            .Select(p => p.Split('=', 2))
+            .Where(p => p.Length == 2)
+            .ToDictionary(p => p[0].ToUpperInvariant(), p => p[1], StringComparer.Ordinal);
+
+        var freq = parts.GetValueOrDefault("FREQ")?.ToUpperInvariant();
+        var byDay = parts.GetValueOrDefault("BYDAY")?.Split(',') ?? [];
+        var interval = int.TryParse(parts.GetValueOrDefault("INTERVAL"), out var n) ? n : 1;
+
+        if (freq == "MONTHLY")
+        {
+            return (RepeatKind.Monthly, [], 1);
+        }
+
+        if (freq == "WEEKLY" && byDay.Length == 0 && interval == 1)
+        {
+            return (RepeatKind.Weekly, [], 1);
+        }
+
+        var codeToDay = new Dictionary<string, DayOfWeek>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["MO"] = DayOfWeek.Monday,
+            ["TU"] = DayOfWeek.Tuesday,
+            ["WE"] = DayOfWeek.Wednesday,
+            ["TH"] = DayOfWeek.Thursday,
+            ["FR"] = DayOfWeek.Friday,
+            ["SA"] = DayOfWeek.Saturday,
+            ["SU"] = DayOfWeek.Sunday,
+        };
+
+        var days = byDay.Where(codeToDay.ContainsKey).Select(c => codeToDay[c]).ToList();
+        return (RepeatKind.Custom, days, interval);
     }
 
     /// <summary>The sentence under the repeat editor, so a rule can be read back before it is saved.</summary>

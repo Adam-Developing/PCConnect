@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Dapper;
@@ -159,6 +159,71 @@ public class ReminderTests(ApiFixture fixture)
         again.ShouldNotContain(d => d.PublicId == Guid.Parse(created!.Id));
     }
 
+    /// <summary>
+    /// One account whose data key cannot be unwrapped must not stop the sweep
+    /// for every other account.
+    ///
+    /// Letting the exception out rolled the transaction back, which undid the
+    /// notified marking for the whole batch — so nobody was reminded of
+    /// anything, and the next tick tried the same thing thirty seconds later,
+    /// for ever. It is not a hypothetical: it is what a KEK rotation done in
+    /// the wrong order leaves behind (09 §2.11), and what a restore that mixes
+    /// key eras produces.
+    /// </summary>
+    [Fact]
+    public async Task An_unreadable_data_key_does_not_stop_the_sweep_for_everybody_else()
+    {
+        var broken = await fixture.RegisterUserAsync();
+        var fine = await fixture.RegisterUserAsync();
+
+        var lost = await DueSoonAsync(broken, "Written before the key changed");
+        var delivered = await DueSoonAsync(fine, "Feed the cat");
+
+        await using (var connection = new NpgsqlConnection(fixture.ConnectionString))
+        {
+            await connection.OpenAsync();
+
+            var wrapped = (await connection.ExecuteScalarAsync<byte[]>(
+                "SELECT dek_wrapped FROM users WHERE username = @Name",
+                new { Name = broken.Username }))!;
+
+            // A wrapped key of exactly the right shape that this KEK cannot
+            // open — the tag fails, which is the real failure, rather than a
+            // null the code already handles.
+            wrapped[^1] ^= 0xFF;
+
+            await connection.ExecuteAsync("UPDATE users SET dek_wrapped = @Wrapped WHERE username = @Name",
+                new { Wrapped = wrapped, Name = broken.Username });
+        }
+
+        using var scope = fixture.Services.CreateScope();
+        var reminders = scope.ServiceProvider.GetRequiredService<ReminderService>();
+
+        var due = await reminders.ClaimDueAsync(TimeSpan.FromMinutes(1));
+
+        // The account that is fine is reminded, which is the whole point.
+        due.ShouldContain(d => d.PublicId == Guid.Parse(delivered) && d.Body == "Feed the cat");
+
+        // And the broken one still fires, saying what it can. The schedule is
+        // not encrypted; only the body is lost, and silence would be the worst
+        // possible answer from a reminder.
+        due.ShouldContain(d => d.PublicId == Guid.Parse(lost) && d.Body == "(this reminder could not be read)");
+
+        // Claimed, not retried for ever.
+        var again = await reminders.ClaimDueAsync(TimeSpan.FromMinutes(1));
+        again.ShouldNotContain(d => d.PublicId == Guid.Parse(lost));
+    }
+
+    private static async Task<string> DueSoonAsync(TestUser user, string body)
+    {
+        var response = await user.Client.PostAsJsonAsync("/v2/reminders",
+            new CreateReminderRequest(body, DateTimeOffset.UtcNow.AddSeconds(5)));
+
+        response.EnsureSuccessStatusCode();
+
+        return (await response.Content.ReadFromJsonAsync<ReminderResponse>())!.Id;
+    }
+
     [Fact]
     public async Task A_reminder_body_is_bounded()
     {
@@ -279,7 +344,7 @@ public class ContractTests(ApiFixture fixture)
         foreach (var path in new[]
         {
             "/v2/auth/login", "/v2/auth/refresh", "/v2/auth/step-up/verify",
-            "/v2/devices", "/v2/devices/pair/start", "/v2/devices/pair/claim", "/v2/devices/token",
+            "/v2/devices", "/v2/devices/provision", "/v2/devices/provision/complete", "/v2/devices/token",
             "/v2/commands", "/v2/commands/pending", "/v2/reminders", "/v2/account/profile",
             "/v2/meta/discovery",
         })

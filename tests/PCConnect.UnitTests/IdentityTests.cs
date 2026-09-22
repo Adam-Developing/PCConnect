@@ -119,55 +119,6 @@ public class Argon2PasswordHasherTests
     }
 }
 
-public class PairingCodeTests
-{
-    [Fact]
-    public void Generates_a_grouped_eight_character_code()
-    {
-        var code = PairingCode.Generate();
-
-        code.Length.ShouldBe(9);
-        code[4].ShouldBe('-');
-        code.Replace("-", string.Empty, StringComparison.Ordinal).ShouldAllBe(c => PairingCode.Alphabet.Contains(c));
-    }
-
-    [Fact]
-    public void Excludes_the_characters_people_confuse()
-    {
-        // 0/O, 1/I/L, 2/Z, 5/S, 8/B are all absent: the code is read aloud and
-        // typed by a person (03 §2.6).
-        foreach (var confusable in "01258OILSBZ")
-        {
-            PairingCode.Alphabet.ShouldNotContain(confusable);
-        }
-    }
-
-    [Theory]
-    [InlineData("ACDE-FGHJ", "ACDE-FGHJ")]
-    [InlineData("acde-fghj", "ACDE-FGHJ")]
-    [InlineData("ACDEFGHJ", "ACDE-FGHJ")]
-    [InlineData("  acde fghj  ", "ACDE-FGHJ")]
-    [InlineData("ACDE--FGHJ", "ACDE-FGHJ")]
-    public void Accepts_what_a_person_actually_types(string input, string expected) =>
-        PairingCode.Normalise(input).ShouldBe(expected);
-
-    [Theory]
-    [InlineData("")]
-    [InlineData(null)]
-    [InlineData("TOO-SHORT")]
-    [InlineData("ACDEFGHJKLMN")]
-    [InlineData("00000000")]
-    public void Rejects_anything_that_is_not_a_code(string? input) =>
-        PairingCode.Normalise(input).ShouldBeEmpty();
-
-    [Fact]
-    public void Generates_distinct_codes()
-    {
-        var codes = Enumerable.Range(0, 200).Select(_ => PairingCode.Generate()).ToHashSet(StringComparer.Ordinal);
-        codes.Count.ShouldBe(200);
-    }
-}
-
 public class ScopeTests
 {
     [Fact]

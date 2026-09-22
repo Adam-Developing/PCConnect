@@ -21,12 +21,6 @@ public sealed class AgentOptions
 
     public int HeartbeatSeconds { get; set; } = 45;
 
-    /// <summary>
-    /// When true the agent prints a pairing code and waits for the user to
-    /// confirm it in the app. When false it stays idle until it is paired, which
-    /// is what a freshly-installed service does before anyone has set it up.
-    /// </summary>
-    public bool AutoStartPairing { get; set; } = true;
 }
 
 /// <summary>
@@ -47,8 +41,8 @@ public sealed class AgentWorker(
 {
     private readonly AgentOptions _options = options.Value;
 
-    /// <summary>Completed when the companion provisions this PC mid-pairing.</summary>
-    private readonly TaskCompletionSource _pairedNow =
+    /// <summary>Completed when a signed-in companion provisions this PC.</summary>
+    private readonly TaskCompletionSource _provisionedNow =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     private string? _deviceId;
@@ -57,18 +51,17 @@ public sealed class AgentWorker(
     {
         logger.LogInformation("PCConnect agent {Version} starting for {Machine}", _options.Version, _options.DisplayName);
 
-        // Started before pairing, because it is one of the two ways pairing can
-        // happen: the companion signs in and hands this service a ticket
-        // (ADR-0013). The other is the code below, for a PC nobody is signed in
-        // on.
+        // The service starts before anyone signs in. Its local pipe lets the
+        // companion hand it the one-time ticket created by that sign-in.
         var provisioning = new ProvisioningPipeServer(
             provisioningLogger,
             () => _deviceId,
-            RedeemProvisioningTicketAsync);
+            RedeemProvisioningTicketAsync,
+            UnregisterAsync);
 
         _ = Task.Run(() => provisioning.RunAsync(stoppingToken), stoppingToken);
 
-        await WaitForPairingAsync(stoppingToken);
+        await WaitForProvisioningAsync(stoppingToken);
 
         if (stoppingToken.IsCancellationRequested)
         {
@@ -128,40 +121,47 @@ public sealed class AgentWorker(
     /// <summary>
     /// Redeems a ticket the companion obtained for the signed-in user.
     ///
-    /// This is the same collection step the pairing code ends with — the ticket
-    /// is a poll token — so the device secret is written to Credential Manager
-    /// by this process and crosses the wire exactly once, to it (ADR-0013).
+    /// The device secret is written to Credential Manager by this process and
+    /// crosses the wire exactly once, to it (ADR-0013).
     /// </summary>
     private async Task<string?> RedeemProvisioningTicketAsync(string ticket, CancellationToken ct)
     {
-        var poll = await api.PollPairingAsync(ticket, ct);
+        var completed = await api.CompleteDeviceProvisioningAsync(ticket, ct);
 
-        if (poll?.Status != "paired" || poll.DeviceId is null || poll.DeviceSecret is null)
+        if (completed is null)
         {
-            logger.LogWarning("A provisioning ticket was not accepted ({Status})", poll?.Status ?? "no response");
+            logger.LogWarning("A provisioning ticket was not accepted");
             return null;
         }
 
-        await tokens.WriteAsync(new StoredTokens(null, poll.DeviceId, poll.DeviceSecret), ct);
-        await api.ExchangeDeviceSecretAsync(poll.DeviceId, poll.DeviceSecret, Environment.OSVersion.VersionString, ct);
+        await tokens.WriteAsync(new StoredTokens(null, completed.DeviceId, completed.DeviceSecret), ct);
+        await api.ExchangeDeviceSecretAsync(
+            completed.DeviceId, completed.DeviceSecret, Environment.OSVersion.VersionString, ct);
 
-        _deviceId = poll.DeviceId;
-        logger.LogInformation("This PC was added to the account as {DisplayName}", poll.DisplayName);
+        _deviceId = completed.DeviceId;
+        logger.LogInformation("This PC was added to the account as {DisplayName}", completed.DisplayName);
 
         // The realtime connection was never started, because the agent was
-        // unpaired when it booted. Waking the loop is what makes the PC usable
+        // not provisioned when it booted. Waking the loop makes the PC usable
         // straight away rather than after the next restart.
-        _pairedNow.TrySetResult();
+        _provisionedNow.TrySetResult();
 
-        return poll.DeviceId;
+        return completed.DeviceId;
+    }
+
+    private async Task<bool> UnregisterAsync(CancellationToken ct)
+    {
+        logger.LogInformation("Unregistering this PC: clearing stored credentials");
+        await tokens.ClearAsync(ct);
+        _deviceId = null;
+        return true;
     }
 
     /// <summary>
-    /// Pairing: the agent asks for a code, shows it, and waits for the account
-    /// owner to confirm it in the app. Nothing about this machine's name grants
-    /// it anything — that is the whole of C-2.
+    /// Uses an existing device credential or waits until someone signs in through
+    /// the companion on this PC. There is no remote or code-entry registration path.
     /// </summary>
-    private async Task WaitForPairingAsync(CancellationToken ct)
+    private async Task WaitForProvisioningAsync(CancellationToken ct)
     {
         var stored = await tokens.ReadAsync(ct);
 
@@ -175,118 +175,11 @@ public sealed class AgentWorker(
                 return;
             }
 
-            // The account owner revoked this device, and EnsureSessionAsync has
-            // just cleared the credential. Returning here left the agent running
-            // with nothing: no credential, no pairing, polling forever against a
-            // token the server will always reject, and never showing a code. The
-            // only way back was to delete the entry from Credential Manager by
-            // hand. Falling through offers a new pairing code instead, which is
-            // what someone who has just un-revoked their own PC expects.
-            logger.LogInformation("This PC is no longer paired. Starting again so it can be linked.");
+            logger.LogInformation("This PC is no longer on an account. Waiting for a sign-in on this PC.");
         }
 
-        if (!_options.AutoStartPairing)
-        {
-            logger.LogInformation("This agent is not paired. Start pairing from the PCConnect companion.");
-            return;
-        }
-
-        var backoff = InitialBackoff;
-
-        while (!ct.IsCancellationRequested)
-        {
-            // The companion may have provisioned this PC while the code was on
-            // screen. Whoever gets there first wins; the other route stops.
-            if (_pairedNow.Task.IsCompleted)
-            {
-                return;
-            }
-
-            try
-            {
-                var start = await api.StartPairingAsync(_options.DisplayName, ct);
-                if (start is null)
-                {
-                    backoff = NextBackoff(backoff);
-                    await Task.Delay(backoff, ct);
-                    continue;
-                }
-
-                backoff = InitialBackoff;
-
-                logger.LogInformation(
-                    "Pairing code {Code} — enter it in the PCConnect app within {Minutes} minutes to link this PC",
-                    start.PairingCode, start.ExpiresInSeconds / 60);
-
-                var deadline = DateTimeOffset.UtcNow.AddSeconds(start.ExpiresInSeconds);
-
-                while (DateTimeOffset.UtcNow < deadline && !ct.IsCancellationRequested)
-                {
-                    await Task.Delay(TimeSpan.FromSeconds(3), ct);
-
-                    if (_pairedNow.Task.IsCompleted)
-                    {
-                        return;
-                    }
-
-                    var poll = await api.PollPairingAsync(start.PollToken, ct);
-
-                    if (poll?.Status == "paired" && poll.DeviceId is not null && poll.DeviceSecret is not null)
-                    {
-                        logger.LogInformation("Paired as {DisplayName}", poll.DisplayName);
-                        _deviceId = poll.DeviceId;
-
-                        // The secret is written to Credential Manager and then
-                        // exchanged for a short-lived device token. It crosses
-                        // the wire exactly once, here.
-                        await tokens.WriteAsync(new StoredTokens(null, poll.DeviceId, poll.DeviceSecret), ct);
-                        await api.ExchangeDeviceSecretAsync(poll.DeviceId, poll.DeviceSecret,
-                            Environment.OSVersion.VersionString, ct);
-                        return;
-                    }
-
-                    if (poll?.Status == "expired")
-                    {
-                        break;
-                    }
-                }
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                // Everything reachable from here is transient by definition: the
-                // agent holds no credential yet, so there is no failure it could
-                // answer by behaving differently. A 429 from the pairing budget,
-                // a Polly timeout, a DNS failure and a 503 are all "come back
-                // later". Letting any of them escape faults the BackgroundService
-                // and stops the host, which turns a ten-minute rate limit into an
-                // agent that never returns until someone restarts the service.
-                backoff = NextBackoff(backoff);
-                logger.LogWarning(ex, "Pairing attempt failed; retrying in {Delay}", backoff);
-
-                try
-                {
-                    await Task.Delay(backoff, ct);
-                }
-                catch (OperationCanceledException)
-                {
-                    return;
-                }
-            }
-        }
-    }
-
-    private static readonly TimeSpan InitialBackoff = TimeSpan.FromSeconds(5);
-
-    /// <summary>
-    /// Exponential to a five-minute ceiling with the same +/-20% jitter the
-    /// realtime fallback uses (05 section 5), so a fleet that all lost the
-    /// server does not come back in lockstep and knock it over again.
-    /// </summary>
-    private static TimeSpan NextBackoff(TimeSpan current)
-    {
-        var seconds = Math.Min(current.TotalSeconds * 2, 300);
-        var jitter = 1 + (0.2 * ((Random.Shared.NextDouble() * 2) - 1));
-        return TimeSpan.FromSeconds(Math.Max(1, seconds * jitter));
+        logger.LogInformation("This PC is waiting for a user to sign in through the PCConnect companion.");
+        await _provisionedNow.Task.WaitAsync(ct);
     }
 
     private async Task EnsureSessionAsync(StoredTokens stored, CancellationToken ct)
@@ -300,14 +193,14 @@ public sealed class AgentWorker(
         {
             // The account owner removed this device. Forget the credential
             // rather than retrying with one that will never work again.
-            logger.LogWarning("This device has been unpaired from the account; clearing the stored credential");
+            logger.LogWarning("This device was removed from the account; clearing the stored credential");
             await tokens.ClearAsync(ct);
             _deviceId = null;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            // Same reasoning as the pairing loop: an unreachable or overloaded
-            // server must not stop a paired agent, because the main loop below
+            // An unreachable or overloaded
+            // server must not stop a registered agent, because the main loop below
             // is already the retry path.
             logger.LogWarning(ex, "Could not reach the server to start a device session; will retry");
         }

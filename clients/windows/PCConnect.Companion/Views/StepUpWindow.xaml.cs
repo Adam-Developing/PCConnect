@@ -6,7 +6,7 @@ using PCConnect.Companion.ViewModels;
 namespace PCConnect.Companion.Views;
 
 /// <summary>
-/// The confirmation a destructive command needs (ADR-0011).
+/// The confirmation a target PC's password policy requires (ADR-0011).
 ///
 /// The wording names the actual consequence — "Shut down Study PC?" — rather
 /// than asking the user to confirm an abstraction. A dialog that says "Are you
@@ -44,10 +44,37 @@ public partial class StepUpWindow : Window
         }
 
         EnteredPassword = PasswordBox.Password;
-        DialogResult = true;
+        AnimateAndClose(true);
     }
 
-    private void OnCancel(object sender, RoutedEventArgs e) => DialogResult = false;
+    private void OnCancel(object sender, RoutedEventArgs e) => AnimateAndClose(false);
+
+    private void AnimateAndClose(bool result)
+    {
+        if (Content is FrameworkElement root)
+        {
+            var scale = new ScaleTransform(1.0, 1.0);
+            root.RenderTransformOrigin = new Point(0.5, 0.5);
+            root.RenderTransform = scale;
+
+            var anim = new System.Windows.Media.Animation.DoubleAnimation(0.90, TimeSpan.FromMilliseconds(130))
+            {
+                EasingFunction = new System.Windows.Media.Animation.CubicEase { EasingMode = System.Windows.Media.Animation.EasingMode.EaseIn }
+            };
+            var fade = new System.Windows.Media.Animation.DoubleAnimation(0, TimeSpan.FromMilliseconds(130))
+            {
+                EasingFunction = new System.Windows.Media.Animation.CubicEase { EasingMode = System.Windows.Media.Animation.EasingMode.EaseIn }
+            };
+            fade.Completed += (_, _) => DialogResult = result;
+            scale.BeginAnimation(ScaleTransform.ScaleXProperty, anim);
+            scale.BeginAnimation(ScaleTransform.ScaleYProperty, anim);
+            root.BeginAnimation(OpacityProperty, fade);
+        }
+        else
+        {
+            DialogResult = result;
+        }
+    }
 
     private void OnKeyDown(object sender, KeyEventArgs e)
     {

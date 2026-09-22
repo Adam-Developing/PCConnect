@@ -158,10 +158,18 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
       POSTGRES_INITDB_ARGS: "--data-checksums"
     volumes:
+      # A bind mount, deliberately, and not a named volume.
+      #
+      # `docker compose down -v` removes named volumes. It does not touch a bind
+      # mount, because that is a directory on the host that Docker does not own —
+      # so the database also survives Docker being reinstalled, its storage
+      # driver being corrupted, or the whole stack being torn down by somebody
+      # who did not realise what -v meant.
+      #
       # PostgreSQL 18 expects a single mount at /var/lib/postgresql, with the
       # data directory as a subdirectory of it. Mounting the data directory
       # itself is the 17-and-earlier shape and blocks `pg_upgrade --link`.
-      - postgres-data:/var/lib/postgresql
+      - ${POSTGRES_DATA_DIR:-/srv/pcconnect/postgres}:/var/lib/postgresql
       - ./postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
     command: ["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf"]
     healthcheck:
@@ -202,7 +210,12 @@ services:
       BACKUP_AGE_RECIPIENT: ${BACKUP_AGE_RECIPIENT:?set BACKUP_AGE_RECIPIENT}
       BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-30}
     volumes:
-      - backup-data:/var/backups/pcconnect
+      # Also a bind mount. A backup that lives in a Docker volume on the same
+      # host as the database is lost by the same failure that loses the
+      # database, which makes it a copy rather than a backup. Getting it off the
+      # host entirely is still the step that matters — see BACKUP_REMOTE_* in
+      # .env.example.
+      - ${BACKUP_DIR:-/srv/pcconnect/backups}:/var/backups/pcconnect
     depends_on:
       postgres:
         condition: service_healthy
@@ -214,9 +227,12 @@ networks:
   internal:
     internal: true
 
+# What is left here is state that can be rebuilt from nothing: Valkey holds
+# presence, rate-limit counters and the realtime backplane, and Caddy holds
+# certificates it will fetch again. Losing any of it costs a reconnect and a
+# handshake. The database and the backups are bind mounts above, because losing
+# either of those costs everything.
 volumes:
-  postgres-data:
   valkey-data:
   caddy-data:
   caddy-config:
-  backup-data:

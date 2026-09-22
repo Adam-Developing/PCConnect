@@ -69,7 +69,7 @@ desktop/
 ├─ internal/
 │  ├─ apiclient/                GENERATED from OpenAPI (oapi-codegen) + a thin retry wrapper
 │  ├─ auth/                     device secret in Windows Credential Manager  [exists, keep]
-│  ├─ pairing/                  pairing-code UI flow                         [new]
+│  ├─ provisioning/             signed-in companion → local agent handoff    [new]
 │  ├─ realtime/                 socket lifecycle + policy.go backoff         [exists, keep+jitter]
 │  ├─ commands/executor.go      the allow-list — the last line of defence    [exists, keep]
 │  ├─ reminders/                local scheduler, fullscreen window
@@ -125,7 +125,7 @@ mobile/lib/
 │  └─ offline/        mutation queue keyed by client-generated UUIDv7
 └─ features/
    ├─ auth/           login, register, reset, biometric unlock
-   ├─ devices/        list, presence, pairing-code entry, rename, revoke
+   ├─ devices/        list, presence, rename, revoke
    ├─ commands/       issue, live status, history
    ├─ reminders/      list, create, recurrence editor, complete
    └─ account/        profile, timezone, sessions, delete account
@@ -157,7 +157,7 @@ APK and should be removed regardless.
 ## 4. Web dashboard
 
 Small on purpose: React + TS + Vite, the generated TypeScript client, one page for devices, one for
-reminders, one for account and sessions. It exists mainly so that device pairing and session
+reminders, one for account and sessions. It exists mainly so that device provisioning and session
 revocation are reachable without a phone, and so the marketing site has somewhere to send people.
 
 It is the only client that uses a browser session cookie, and that cookie authenticates the
@@ -199,7 +199,7 @@ date guess. See [ADR-0008](adr/0008-api-versioning-and-legacy-sunset.md).
 | Client | Layer | Tooling |
 |---|---|---|
 | Go agent | Unit — allow-list, backoff+jitter, freshness, replay guard | `go test`; extend the existing `policy_test.go` |
-| Go agent | Integration — pairing, socket lifecycle, ack | testcontainers against a real API |
+| Go agent | Integration — provisioning, socket lifecycle, ack | testcontainers against a real API |
 | Flutter | Unit + widget | `flutter_test`, `mocktail` |
 | Flutter | Integration | `integration_test` against staging |
 | Web | Component + e2e | Vitest, Playwright |

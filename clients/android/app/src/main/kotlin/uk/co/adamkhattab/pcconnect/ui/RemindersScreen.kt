@@ -1,6 +1,16 @@
 package uk.co.adamkhattab.pcconnect.ui
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -27,6 +37,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
@@ -57,66 +68,85 @@ fun RemindersScreen(
     val done = state.reminders.filter { it.isCompleted }.sortedByDescending { it.completedAt ?: it.dueAt }.take(5)
 
     Box(modifier.fillMaxSize()) {
-        if (state.reminders.isEmpty()) {
-            NothingScheduled(Modifier.align(Alignment.Center))
-        } else {
-            LazyColumn(
-                Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 96.dp),
-                verticalArrangement = Arrangement.spacedBy(18.dp),
-            ) {
-                if (today.isNotEmpty()) {
-                    item {
-                        ReminderGroup(
-                            title = "Today",
-                            trailing = LocalDate.now().let {
-                                "${it.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.getDefault())} " +
-                                    "${it.dayOfMonth} ${it.month.getDisplayName(TextStyle.SHORT, Locale.getDefault())}"
-                            },
-                            reminders = today,
-                            showDay = false,
-                            onToggle = onToggle,
-                            onInspect = { inspecting = it },
-                        )
+        AnimatedContent(
+            targetState = state.reminders.isEmpty(),
+            transitionSpec = { fadeIn(tween(200)) togetherWith fadeOut(tween(180)) },
+            label = "RemindersEmptyState",
+            modifier = Modifier.fillMaxSize(),
+        ) { isEmpty ->
+            if (isEmpty) {
+                NothingScheduled(Modifier.align(Alignment.Center))
+            } else {
+                LazyColumn(
+                    Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 96.dp),
+                    verticalArrangement = Arrangement.spacedBy(18.dp),
+                ) {
+                    if (today.isNotEmpty()) {
+                        item {
+                            ReminderGroup(
+                                title = "Today",
+                                trailing = LocalDate.now().let {
+                                    "${it.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.getDefault())} " +
+                                        "${it.dayOfMonth} ${it.month.getDisplayName(TextStyle.SHORT, Locale.getDefault())}"
+                                },
+                                reminders = today,
+                                showDay = false,
+                                onToggle = onToggle,
+                                onInspect = { inspecting = it },
+                            )
+                        }
                     }
-                }
 
-                if (later.isNotEmpty()) {
-                    item {
-                        ReminderGroup(
-                            title = "Later",
-                            reminders = later,
-                            showDay = true,
-                            onToggle = onToggle,
-                            onInspect = { inspecting = it },
-                        )
+                    if (later.isNotEmpty()) {
+                        item {
+                            ReminderGroup(
+                                title = "Later",
+                                reminders = later,
+                                showDay = true,
+                                onToggle = onToggle,
+                                onInspect = { inspecting = it },
+                            )
+                        }
                     }
-                }
 
-                if (done.isNotEmpty()) {
-                    item {
-                        ReminderGroup(
-                            title = "Done",
-                            reminders = done,
-                            showDay = false,
-                            onToggle = onToggle,
-                            onInspect = { inspecting = it },
-                        )
+                    if (done.isNotEmpty()) {
+                        item {
+                            ReminderGroup(
+                                title = "Done",
+                                reminders = done,
+                                showDay = false,
+                                onToggle = onToggle,
+                                onInspect = { inspecting = it },
+                            )
+                        }
                     }
                 }
             }
         }
 
         // The design's floating action button: a rounded square, not a circle.
+        val fabInteraction = remember { MutableInteractionSource() }
+        val fabPressed by fabInteraction.collectIsPressedAsState()
+        val fabScale by animateFloatAsState(
+            targetValue = if (fabPressed) 0.94f else 1.0f,
+            animationSpec = spring(dampingRatio = 0.55f, stiffness = 600f),
+            label = "fabScale",
+        )
+
         Box(
             Modifier
                 .align(Alignment.BottomEnd)
                 .padding(16.dp)
+                .graphicsLayer {
+                    scaleX = fabScale
+                    scaleY = fabScale
+                }
                 .shadow(10.dp, PcShapes.Tile, ambientColor = PcColors.Primary, spotColor = PcColors.Primary)
                 .size(56.dp)
                 .clip(PcShapes.Tile)
                 .background(PcColors.Primary)
-                .clickable(onClick = onAdd),
+                .clickable(interactionSource = fabInteraction, indication = null, onClick = onAdd),
             contentAlignment = Alignment.Center,
         ) {
             PcIcon(PcIcons.Add, "New reminder", size = 26.dp, tint = Color.White)
@@ -154,7 +184,7 @@ private fun ReminderGroup(
             if (trailing != null) Caption(trailing)
         }
 
-        PcCard(Modifier.fillMaxWidth()) {
+        PcCard(Modifier.fillMaxWidth().animateContentSize(tween(200))) {
             reminders.forEachIndexed { index, reminder ->
                 if (index > 0) RowDivider()
                 ReminderRow(reminder, showDay, onToggle = { onToggle(reminder) }, onClick = { onInspect(reminder) })

@@ -172,7 +172,7 @@ data class StepUpVerifyRequest(
     val passkey: PasskeyAssertionRequest? = null,
 )
 
-/** The two ways a destructive command can be confirmed (ADR-0011). */
+/** The two ways a target PC's protected command can be confirmed (ADR-0011). */
 object StepUpMethods {
     const val PASSWORD = "password"
     const val PASSKEY = "passkey"
@@ -195,16 +195,15 @@ data class Device(
     val lastSeenAt: String? = null,
     val pairedAt: String,
     val allowedCommands: List<String>,
+    val passwordRequiredCommands: List<String>,
 )
 
 @Serializable
-data class PairClaimRequest(val pairingCode: String, val displayName: String? = null)
-
-@Serializable
-data class PairClaimResponse(val deviceId: String, val displayName: String)
-
-@Serializable
-data class UpdateDeviceRequest(val displayName: String? = null, val allowedCommands: List<String>? = null)
+data class UpdateDeviceRequest(
+    val displayName: String? = null,
+    val allowedCommands: List<String>? = null,
+    val passwordRequiredCommands: List<String>? = null,
+)
 
 // ── commands ─────────────────────────────────────────────────────────────────
 
@@ -274,6 +273,16 @@ data class CreateReminderRequest(
      * the choice when discovery advertises [Capabilities.REMINDER_TARGETS]:
      * a picker whose choice the server ignores is worse than no picker.
      */
+    val deviceIds: List<String>? = null,
+)
+
+@Serializable
+data class UpdateReminderRequest(
+    val body: String? = null,
+    val dueAt: String? = null,
+    val timezone: String? = null,
+    val rrule: String? = null,
+    val recurrenceUntil: String? = null,
     val deviceIds: List<String>? = null,
 )
 
@@ -389,6 +398,5 @@ object ErrorCodes {
     const val INVALID_CREDENTIALS = "auth.invalid_credentials"
     const val RATE_LIMITED = "request.rate_limited"
     const val DEVICE_REVOKED = "device.revoked"
-    const val PAIRING_CODE_INVALID = "device.pairing_code_invalid"
     const val COMMAND_TYPE_NOT_ALLOWED = "command.type_not_allowed"
 }

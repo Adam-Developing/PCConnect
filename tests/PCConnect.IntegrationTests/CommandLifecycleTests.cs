@@ -267,7 +267,7 @@ public class CommandLifecycleTests(ApiFixture fixture)
         (await ApiFixture.ErrorCodeAsync(response)).ShouldBe(ErrorCodes.CommandTtlInvalid);
     }
 
-    // ── step-up on destructive commands (ADR-0011) ───────────────────────────
+    // ── per-device password confirmation ─────────────────────────────────────
 
     [Fact]
     public async Task A_destructive_command_is_refused_without_a_confirmation()
@@ -279,6 +279,33 @@ public class CommandLifecycleTests(ApiFixture fixture)
 
         response.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
         (await ApiFixture.ErrorCodeAsync(response)).ShouldBe(ErrorCodes.AuthStepUpRequired);
+    }
+
+    [Fact]
+    public async Task A_pcs_password_choices_control_which_commands_ask()
+    {
+        var user = await fixture.RegisterUserAsync();
+        var device = await fixture.PairDeviceAsync(user);
+
+        var updated = await (await user.Client.PatchAsJsonAsync($"/v2/devices/{device.DeviceId}",
+                new UpdateDeviceRequest(PasswordRequiredCommands: ["lock"])))
+            .Content.ReadFromJsonAsync<DeviceResponse>();
+
+        updated!.PasswordRequiredCommands.ShouldBe(["lock"]);
+
+        // Shutdown is still classified and rate-limited as destructive, but
+        // this PC no longer asks for a password before accepting it.
+        (await user.Client.PostAsJsonAsync("/v2/commands", Issue(device.DeviceId, "shutdown")))
+            .StatusCode.ShouldBe(HttpStatusCode.Created);
+
+        var unconfirmedLock = await user.Client.PostAsJsonAsync(
+            "/v2/commands", Issue(device.DeviceId, "lock"));
+        unconfirmedLock.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+        (await ApiFixture.ErrorCodeAsync(unconfirmedLock)).ShouldBe(ErrorCodes.AuthStepUpRequired);
+
+        (await user.Client.PostAsJsonAsync("/v2/commands",
+                Issue(device.DeviceId, "lock", await ApiFixture.StepUpAsync(user))))
+            .StatusCode.ShouldBe(HttpStatusCode.Created);
     }
 
     [Fact]
@@ -350,7 +377,7 @@ public class CommandLifecycleTests(ApiFixture fixture)
     }
 
     [Fact]
-    public async Task Every_destructive_command_carries_a_recorded_step_up()
+    public async Task Every_password_protected_command_carries_a_recorded_step_up()
     {
         var user = await fixture.RegisterUserAsync();
         var device = await fixture.PairDeviceAsync(user);
@@ -361,10 +388,10 @@ public class CommandLifecycleTests(ApiFixture fixture)
         await using var connection = new NpgsqlConnection(fixture.ConnectionString);
         await connection.OpenAsync();
 
-        // The database refuses a destructive command with no step-up as well as
-        // the service, so this invariant survives a bug in the service.
+        // The database refuses any command marked password-required without a
+        // step-up, so the per-PC choice survives a bug in the service.
         var unconfirmed = await connection.ExecuteScalarAsync<long>(
-            "SELECT count(*) FROM commands WHERE risk_tier = 'destructive' AND step_up_verified_at IS NULL");
+            "SELECT count(*) FROM commands WHERE password_required AND step_up_verified_at IS NULL");
 
         unconfirmed.ShouldBe(0);
     }
@@ -377,8 +404,12 @@ public class CommandLifecycleTests(ApiFixture fixture)
         var user = await fixture.RegisterUserAsync();
         var device = await fixture.PairDeviceAsync(user);
 
-        await user.Client.PatchAsJsonAsync($"/v2/devices/{device.DeviceId}",
-            new UpdateDeviceRequest(null, ["lock", "sleep"]));
+        var updated = await (await user.Client.PatchAsJsonAsync($"/v2/devices/{device.DeviceId}",
+                new UpdateDeviceRequest(null, ["lock", "sleep"])))
+            .Content.ReadFromJsonAsync<DeviceResponse>();
+
+        // Turning a command off also removes its now-meaningless password rule.
+        updated!.PasswordRequiredCommands.ShouldBeEmpty();
 
         var response = await user.Client.PostAsJsonAsync("/v2/commands",
             Issue(device.DeviceId, "shutdown", await ApiFixture.StepUpAsync(user)));

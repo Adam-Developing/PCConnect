@@ -3,8 +3,8 @@
 Change your computer's state from your phone, and set reminders you will actually see — because
 they appear on the screen you are sitting in front of.
 
-Screenshots: <https://pcconnect.adamkhattab.co.uk/screenshots.html> ·
-Downloads: <https://pcconnect.adamkhattab.co.uk/download.html>
+Screenshots: <https://pcconnect.adamdeveloping.co.uk/screenshots> ·
+Downloads: <https://pcconnect.adamdeveloping.co.uk/download>
 
 ---
 
@@ -20,8 +20,8 @@ What is materially different from v1:
 - **Passwords are Argon2id**, not client-side SHA-256 with no salt. Legacy hashes are upgraded on
   the owner's next successful sign-in, so nobody has to be told to reset anything.
 - **Passkeys** (WebAuthn) as a first-class credential, not a second factor bolted on.
-- **A device is something you pair, not something you name.** Claiming a PC needs a code shown on
-  that PC and confirmed by the signed-in owner.
+- **A PC joins an account when you sign in on that PC.** Its local agent receives a dedicated
+  device credential; there is no code to copy into the phone.
 - **Commands expire.** Every command carries a TTL, an audit trail and a real outcome, so "the
   shutdown I sent this morning" cannot fire tonight and "Success" cannot mean "a row was written".
 - **Shutting down, restarting, signing out and hibernating need a fresh confirmation** — a
@@ -47,7 +47,7 @@ src/     PCConnect.Api          ASP.NET Core 10 — HTTP API and the SignalR hub
          PCConnect.DbMigrator   `pcconnect-migrate` — schema, verification gates, KEK rewrap
          PCConnect.LegacyMigrator  `pcconnect-import` — the v1 MySQL → v2 PostgreSQL import
 clients/ windows/PCConnect.Agent      the Windows service that receives commands
-         windows/PCConnect.Companion  the WPF app that shows reminders and pairs a PC
+         windows/PCConnect.Companion  the WPF app that signs in, registers the PC and shows reminders
          android/                     Kotlin + Jetpack Compose
 db/      migrations/ verification/ legacy/
 deploy/  docker-compose.yml and everything the VPS needs
@@ -65,14 +65,22 @@ the temporary compatibility routes described in the migration plan
 
 You need .NET 10 and Docker.
 
+On Windows, run `powershell ./make-and-run-backend.ps1`. PostgreSQL uses local port
+15432; override it with `-PostgresPort 15433` if needed. Windows can reserve ports
+in the old 55432 range, preventing Docker from binding them. The script moves a
+stopped development PostgreSQL container to the chosen port, reuses its data volume,
+and keeps the original container as `pcconnect-dev-pg-before-port-change-*` for rollback.
+Keep that backup stopped while its replacement uses the same database volume.
+Use `-DependenciesOnly` to start and check PostgreSQL and Valkey without launching the backend.
+
 ```bash
 # A database and a cache to develop against.
 docker run -d --name pcconnect-dev-pg -e POSTGRES_PASSWORD=postgres \
-  -p 55432:5432 postgres:18-alpine
+  -p 127.0.0.1:15432:5432 postgres:18-alpine
 docker run -d --name pcconnect-dev-valkey -p 56379:6379 valkey/valkey:8-alpine
 
 # Schema.
-PCCONNECT_DATABASE__CONNECTIONSTRING="Host=localhost;Port=55432;Database=pcconnect;Username=postgres;Password=postgres" \
+PCCONNECT_DATABASE__CONNECTIONSTRING="Host=localhost;Port=15432;Database=pcconnect;Username=postgres;Password=postgres" \
   dotnet run --project src/PCConnect.DbMigrator -- up
 
 # The API. In Development it generates a signing key and a KEK in memory and says
@@ -89,8 +97,9 @@ PCCONNECT_AGENT_AGENT__BASEADDRESS=http://localhost:5080 \
   dotnet run --project clients/windows/PCConnect.Agent
 ```
 
-It prints a pairing code. Type that into the phone app or the companion, and the PC is linked.
-The device secret goes into Windows Credential Manager; it crosses the wire exactly once.
+Open the PCConnect companion and sign in. That PC is added to the account automatically and
+appears in the phone app alongside every other PC on the same account. The device secret goes
+into Windows Credential Manager; it crosses the wire exactly once.
 
 ### The Android app
 
@@ -99,16 +108,17 @@ cd clients/android && ./gradlew assembleDebug
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
-The debug build points at `http://10.0.2.2:5080`, which is the host machine as seen from an
-emulator.
+The debug build points at `http://127.0.0.1:5080`. `make mobile` runs `adb reverse` so that
+address reaches the API on the development workstation from either an emulator or a USB device.
+The debug application has its own `.debug` package and cannot inherit a saved production API URL.
 
 ---
 
 ## Tests
 
 ```bash
-dotnet test tests/PCConnect.UnitTests/PCConnect.UnitTests.csproj          # 198
-dotnet test tests/PCConnect.IntegrationTests/PCConnect.IntegrationTests.csproj  # 112
+dotnet test tests/PCConnect.UnitTests/PCConnect.UnitTests.csproj
+dotnet test tests/PCConnect.IntegrationTests/PCConnect.IntegrationTests.csproj
 cd clients/android && ./gradlew test
 ```
 

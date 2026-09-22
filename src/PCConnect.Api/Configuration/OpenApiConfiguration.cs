@@ -59,8 +59,8 @@ public static class OpenApiConfiguration
                 [
                     new OpenApiTag { Name = "Auth", Description = "Passwords, tokens, passkeys and step-up confirmation." },
                     new OpenApiTag { Name = "Passkeys", Description = "WebAuthn registration and assertion." },
-                    new OpenApiTag { Name = "Step-up", Description = "Confirming a destructive command." },
-                    new OpenApiTag { Name = "Devices", Description = "Pairing, presence and the device registry." },
+                    new OpenApiTag { Name = "Step-up", Description = "Confirming a command protected by the target PC's settings." },
+                    new OpenApiTag { Name = "Devices", Description = "Account provisioning, presence and the device registry." },
                     new OpenApiTag { Name = "Commands", Description = "Issue, deliver, acknowledge, expire." },
                     new OpenApiTag { Name = "Reminders", Description = "Encrypted reminders and recurrence." },
                     new OpenApiTag { Name = "Account", Description = "Profile, sessions, export and deletion." },
@@ -92,10 +92,10 @@ public static class OpenApiConfiguration
 
         ## Destructive commands
 
-        `shutdown`, `restart`, `signout` and `hibernate` additionally require a `stepUpToken`
-        from `POST /v2/auth/step-up/verify`. It is single-use, expires in five minutes, and
-        is bound to the account. A valid session is enough to lock a screen; it is not enough
-        to power a machine off.
+        Each PC stores which commands require a `stepUpToken` from
+        `POST /v2/auth/step-up/verify`. It is single-use, expires in five minutes, and is
+        bound to the account. Shutdown, restart, sign out and hibernate are protected by
+        default, and the PC's settings can change the policy for every command.
 
         ## Idempotency
 

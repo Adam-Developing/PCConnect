@@ -73,25 +73,25 @@ public sealed class ReminderPresenter(
                     logger.LogWarning(ex, "Could not mark reminder {ReminderId} as done", reminderId);
                 }
             },
-            () => Snooze(reminderId, body, dueAt));
+            duration => Snooze(reminderId, body, dueAt, duration));
 
         window.Show();
         window.Activate();
     }
 
     /// <summary>
-    /// Brings the window back in ten minutes.
+    /// Brings the window back after the specified snooze duration.
     ///
     /// Snooze lives entirely on this PC: the reminder itself is untouched, so it
     /// still shows on every other screen at its own time, and nothing about the
     /// series changes on the server. A snoozed reminder does not survive a
     /// restart of the app, which is the honest consequence of it being local.
     /// </summary>
-    private void Snooze(string reminderId, string body, DateTimeOffset dueAt)
+    private void Snooze(string reminderId, string body, DateTimeOffset dueAt, TimeSpan duration)
     {
-        logger.LogInformation("Snoozing reminder {ReminderId} for {Minutes} minutes", reminderId, SnoozeFor.TotalMinutes);
+        logger.LogInformation("Snoozing reminder {ReminderId} for {Minutes} minutes", reminderId, duration.TotalMinutes);
 
-        var timer = new DispatcherTimer { Interval = SnoozeFor };
+        var timer = new DispatcherTimer { Interval = duration };
 
         timer.Tick += (_, _) =>
         {
