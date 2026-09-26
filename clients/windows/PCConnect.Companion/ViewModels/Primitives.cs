@@ -95,9 +95,19 @@ public sealed record ReminderRow(
     string Body,
     string Detail,
     bool IsCompleted,
-    bool IsPast)
+    bool IsPast,
+    bool IsSnoozed = false,
+    string? SnoozeLabel = null,
+    string? SnoozeToolTip = null,
+    bool IsDismissed = false)
 {
-    public bool IsOverdue => IsPast && !IsCompleted;
+    public bool IsDismissedBadgeVisible => IsDismissed && !IsCompleted && !IsSnoozed;
+    public string DismissedLabel => "Won't rerun";
+    public string DismissedToolTip => "Dismissed — this reminder will not alert again.";
+
+    public bool IsOverdue => IsDismissedBadgeVisible;
+    public string OverdueLabel => DismissedLabel;
+    public string OverdueToolTip => DismissedToolTip;
 }
 
 /// <summary>One command in the Settings table, or one button on Other PCs.</summary>
@@ -153,7 +163,89 @@ public sealed record DayColumn(string Label, string Number, bool IsToday, IReadO
     public bool IsEmpty => Items.Count == 0;
 }
 
-public sealed record WeekItem(string Time, string Body);
+public sealed record WeekItem(
+    string Time,
+    string Body,
+    string Id = "",
+    string DayLabel = "",
+    string FullDate = "",
+    string? RecurrenceText = null,
+    string? TargetText = null,
+    bool IsCompleted = false,
+    bool IsSnoozed = false,
+    string? SnoozeLabel = null,
+    bool IsDismissed = false)
+{
+    public bool IsDismissedBadgeVisible => IsDismissed && !IsCompleted && !IsSnoozed;
+    public bool IsWonTRerunBadgeVisible => IsDismissedBadgeVisible;
+    public bool IsSnoozedBadgeVisible => IsSnoozed && !IsCompleted;
+    public bool IsCompletedBadgeVisible => IsCompleted;
+    public bool IsActiveBadgeVisible => !IsCompleted && !IsSnoozed && !IsDismissed;
+}
+
+/// <summary>Detailed view of a clicked event for the popup modal.</summary>
+public sealed partial class EventDetailModalViewModel : ObservableObject
+{
+    [ObservableProperty]
+    private string _id = string.Empty;
+
+    [ObservableProperty]
+    private string _title = string.Empty;
+
+    [ObservableProperty]
+    private string _timeAndDate = string.Empty;
+
+    [ObservableProperty]
+    private string _recurrence = string.Empty;
+
+    [ObservableProperty]
+    private string _targets = string.Empty;
+
+    [ObservableProperty]
+    private string _statusText = string.Empty;
+
+    [ObservableProperty]
+    private string _statusTone = "Offline";
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsWonTRerunBadgeVisible))]
+    [NotifyPropertyChangedFor(nameof(IsDismissedBadgeVisible))]
+    [NotifyPropertyChangedFor(nameof(IsSnoozedBadgeVisible))]
+    [NotifyPropertyChangedFor(nameof(IsCompletedBadgeVisible))]
+    [NotifyPropertyChangedFor(nameof(IsActiveBadgeVisible))]
+    private bool _isCompleted;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsWonTRerunBadgeVisible))]
+    [NotifyPropertyChangedFor(nameof(IsDismissedBadgeVisible))]
+    [NotifyPropertyChangedFor(nameof(IsSnoozedBadgeVisible))]
+    [NotifyPropertyChangedFor(nameof(IsCompletedBadgeVisible))]
+    [NotifyPropertyChangedFor(nameof(IsActiveBadgeVisible))]
+    private bool _isSnoozed;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsWonTRerunBadgeVisible))]
+    [NotifyPropertyChangedFor(nameof(IsDismissedBadgeVisible))]
+    [NotifyPropertyChangedFor(nameof(IsSnoozedBadgeVisible))]
+    [NotifyPropertyChangedFor(nameof(IsCompletedBadgeVisible))]
+    [NotifyPropertyChangedFor(nameof(IsActiveBadgeVisible))]
+    private bool _isDismissed;
+
+    [ObservableProperty]
+    private bool _canComplete = true;
+
+    [ObservableProperty]
+    private bool _canEdit = true;
+
+    [ObservableProperty]
+    private bool _canDelete = true;
+
+    public bool IsWonTRerunBadgeVisible => IsDismissed && !IsCompleted && !IsSnoozed;
+    public bool IsDismissedBadgeVisible => IsWonTRerunBadgeVisible;
+    public bool IsSnoozedBadgeVisible => IsSnoozed && !IsCompleted;
+    public bool IsCompletedBadgeVisible => IsCompleted;
+    public bool IsActiveBadgeVisible => !IsCompleted && !IsSnoozed && !IsDismissed;
+}
 
 /// <summary>The repeat options the design offers, in the order it shows them.</summary>
 public enum RepeatKind

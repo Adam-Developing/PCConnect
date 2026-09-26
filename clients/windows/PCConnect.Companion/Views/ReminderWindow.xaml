@@ -23,10 +23,22 @@
 
       <StackPanel>
         <DockPanel LastChildFill="False">
-          <TextBlock x:Name="EyebrowText" DockPanel.Dock="Left"
-                     FontFamily="{StaticResource MonoFont}" FontSize="12"
-                     Foreground="{StaticResource Accent}" />
-          <TextBlock x:Name="HintText" DockPanel.Dock="Right" Text="Esc to close without completing"
+          <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center">
+            <TextBlock x:Name="EyebrowText"
+                       FontFamily="{StaticResource MonoFont}" FontSize="12"
+                       Foreground="{StaticResource Accent}" VerticalAlignment="Center" />
+            <Border x:Name="SnoozedBadge" Background="#33F59E0B" BorderBrush="#F59E0B"
+                    BorderThickness="1" CornerRadius="4" Padding="6,2" Margin="10,0,0,0"
+                    VerticalAlignment="Center" Visibility="Collapsed">
+              <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                <Path Data="{StaticResource Icon.Schedule}" Fill="#F59E0B" Width="11" Height="11"
+                      Stretch="Uniform" VerticalAlignment="Center" Margin="0,0,4,0" />
+                <TextBlock x:Name="SnoozedBadgeText" Text="Snoozed for 10 mins" FontSize="11.5"
+                           FontWeight="SemiBold" Foreground="#FDE68A" VerticalAlignment="Center" />
+              </StackPanel>
+            </Border>
+          </StackPanel>
+          <TextBlock x:Name="HintText" DockPanel.Dock="Right" Text="Esc to mark as completed"
                      FontSize="12.5" Opacity="0.6" />
         </DockPanel>
 
@@ -101,24 +113,65 @@
                 <Button.ContextMenu>
                   <ContextMenu x:Name="SnoozeContextMenu" Placement="Bottom"
                                Background="#1E293B" Foreground="#F8FAFC" BorderBrush="#334155" BorderThickness="1">
-                    <MenuItem Header="10 mins" Click="OnSnooze10m" Foreground="#F8FAFC" FontWeight="Medium" />
-                    <MenuItem Header="30 mins" Click="OnSnooze30m" Foreground="#F8FAFC" FontWeight="Medium" />
-                    <MenuItem Header="1 hour" Click="OnSnooze1h" Foreground="#F8FAFC" FontWeight="Medium" />
-                    <Separator Background="#334155" />
-                    <MenuItem Header="Don't remind me" Click="OnDismiss" Foreground="#94A3B8" FontWeight="Medium" />
+                    <ContextMenu.Resources>
+                      <Style TargetType="{x:Type MenuItem}">
+                        <Setter Property="Background" Value="Transparent" />
+                        <Setter Property="Foreground" Value="#F8FAFC" />
+                        <Setter Property="FontFamily" Value="{StaticResource Sans}" />
+                        <Setter Property="FontSize" Value="13" />
+                        <Setter Property="Padding" Value="12,8" />
+                        <Setter Property="Cursor" Value="Hand" />
+                        <Setter Property="Template">
+                          <Setter.Value>
+                            <ControlTemplate TargetType="{x:Type MenuItem}">
+                              <Border x:Name="Bd" Background="{TemplateBinding Background}"
+                                      CornerRadius="6" Padding="{TemplateBinding Padding}"
+                                      Margin="2,1">
+                                <ContentPresenter ContentSource="Header" VerticalAlignment="Center" RecognizesAccessKey="True" />
+                              </Border>
+                              <ControlTemplate.Triggers>
+                                <Trigger Property="IsHighlighted" Value="True">
+                                  <Setter TargetName="Bd" Property="Background" Value="#334155" />
+                                </Trigger>
+                                <Trigger Property="IsEnabled" Value="False">
+                                  <Setter Property="Opacity" Value="0.45" />
+                                </Trigger>
+                              </ControlTemplate.Triggers>
+                            </ControlTemplate>
+                          </Setter.Value>
+                        </Setter>
+                      </Style>
+                      <Style TargetType="{x:Type Separator}">
+                        <Setter Property="Template">
+                          <Setter.Value>
+                            <ControlTemplate TargetType="{x:Type Separator}">
+                              <Rectangle Height="1" Fill="#334155" Margin="4,3" />
+                            </ControlTemplate>
+                          </Setter.Value>
+                        </Setter>
+                      </Style>
+                    </ContextMenu.Resources>
+                    <MenuItem Header="10 mins" Click="OnSnooze10m" FontWeight="Medium" />
+                    <MenuItem Header="30 mins" Click="OnSnooze30m" FontWeight="Medium" />
+                    <MenuItem Header="1 hour" Click="OnSnooze1h" FontWeight="Medium" />
                   </ContextMenu>
                 </Button.ContextMenu>
               </Button>
             </StackPanel>
           </Border>
 
-          <Button x:Name="DismissButton" Content="Don't remind me" Click="OnDismiss" Padding="16,0" Height="44"
-                  FontSize="14" Background="Transparent" BorderThickness="0" Opacity="0.75" Cursor="Hand"
-                  ToolTip="Close window and keep task pending in list">
+          <Button x:Name="DismissButton" Click="OnDismiss" Padding="14,4" Height="44"
+                  Background="Transparent" BorderThickness="0" Opacity="0.8" Cursor="Hand"
+                  ToolTip="Dismiss alert without marking as completed (leaves task incomplete and will not alert again)">
             <Button.Template>
               <ControlTemplate TargetType="Button">
                 <Border x:Name="Bd" Background="Transparent" CornerRadius="8" Padding="{TemplateBinding Padding}">
-                  <ContentPresenter VerticalAlignment="Center" HorizontalAlignment="Center" />
+                  <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                    <TextBlock Text="Don't remind again" FontSize="13" FontWeight="SemiBold"
+                               HorizontalAlignment="Center" />
+                    <TextBlock Text="Leaves task incomplete" FontSize="11" Opacity="0.65"
+                               HorizontalAlignment="Center" Margin="0,1,0,0" />
+                  </StackPanel>
                 </Border>
                 <ControlTemplate.Triggers>
                   <Trigger Property="IsMouseOver" Value="True">

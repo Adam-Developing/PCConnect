@@ -30,6 +30,8 @@ public partial class MainWindow : Window
                 shell.Devices.RequestStepUpPassword = RequestStepUpPasswordAsync;
                 shell.Reminders.RequestReopenChoice = RequestReopenChoiceAsync;
                 shell.Reminders.RowsReset += () => RemindersScrollViewer.ScrollToTop();
+                shell.EventDetailOpenRequested += OpenEventDetailModal;
+                shell.EventDetailCloseRequested += CloseEventDetailModal;
 
                 shell.PropertyChanged += OnShellPropertyChanged;
                 shell.Reminders.PropertyChanged += OnRemindersPropertyChanged;
@@ -47,11 +49,15 @@ public partial class MainWindow : Window
             }
         };
 
-        // Escape closes the activity log rather than the window, which is where
-        // a full-page overlay leads people to expect it to go.
+        // Escape closes the active overlay or modal
         PreviewKeyDown += (_, e) =>
         {
-            if (e.Key == Key.Escape && DataContext is ShellViewModel { Devices.IsLogOpen: true } shell)
+            if (e.Key == Key.Escape && EventDetailOverlay.Visibility == Visibility.Visible)
+            {
+                CloseEventDetailModal();
+                e.Handled = true;
+            }
+            else if (e.Key == Key.Escape && DataContext is ShellViewModel { Devices.IsLogOpen: true } shell)
             {
                 shell.Devices.CloseLogCommand.Execute(null);
                 e.Handled = true;
@@ -63,9 +69,50 @@ public partial class MainWindow : Window
                 remindersShell.Reminders.ClearSelectionCommand.Execute(null);
                 e.Handled = true;
             }
+            else if (e.Key == Key.Escape &&
+                     DataContext is ShellViewModel { IsAccountMenuOpen: true } accountShell)
+            {
+                accountShell.IsAccountMenuOpen = false;
+                e.Handled = true;
+            }
         };
 
-        Deactivated += (_, _) => EndCalendarDrag();
+        Deactivated += (_, _) =>
+        {
+            EndCalendarDrag();
+            if (DataContext is ShellViewModel { IsAccountMenuOpen: true } shell)
+            {
+                shell.IsAccountMenuOpen = false;
+            }
+        };
+
+        LocationChanged += (_, _) => RepositionAccountPopup();
+        SizeChanged += (_, _) => RepositionAccountPopup();
+
+        PreviewMouseDown += OnWindowPreviewMouseDown;
+        PreviewMouseWheel += (_, _) =>
+        {
+            if (DataContext is ShellViewModel { IsAccountMenuOpen: true } shell)
+            {
+                shell.IsAccountMenuOpen = false;
+            }
+        };
+    }
+
+    private void OnWindowPreviewMouseDown(object sender, MouseButtonEventArgs e)
+    {
+        if (DataContext is ShellViewModel { IsAccountMenuOpen: true } shell)
+        {
+            if (IsElementOrChildOf(e.OriginalSource as DependencyObject, AccountButton))
+            {
+                shell.IsAccountMenuOpen = false;
+                e.Handled = true;
+            }
+            else
+            {
+                shell.IsAccountMenuOpen = false;
+            }
+        }
     }
 
     private void OnShellPropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -78,6 +125,28 @@ public partial class MainWindow : Window
             {
                 _lastPage = newPage;
                 OnPageChanged(oldPage, newPage);
+            }
+        }
+        else if (e.PropertyName == nameof(ShellViewModel.IsAccountMenuOpen) && DataContext is ShellViewModel shellMenu)
+        {
+            if (shellMenu.IsAccountMenuOpen)
+            {
+                OpenAccountMenu();
+            }
+            else
+            {
+                CloseAccountMenu();
+            }
+        }
+        else if (e.PropertyName == nameof(ShellViewModel.IsEventDetailOpen) && DataContext is ShellViewModel shellDetail)
+        {
+            if (shellDetail.IsEventDetailOpen)
+            {
+                OpenEventDetailModal();
+            }
+            else
+            {
+                CloseEventDetailModal();
             }
         }
     }
@@ -517,8 +586,8 @@ public partial class MainWindow : Window
 
         var overdueItem = new MenuItem
         {
-            Header = "Keep as overdue",
-            ToolTip = "Keep original date and mark as overdue without setting an alarm",
+            Header = "Won't rerun",
+            ToolTip = "Keep original date without re-running alert",
             Icon = new Path
             {
                 Data = (TryFindResource("Icon.Schedule") ?? TryFindResource("Icon.Clock")) as Geometry,
@@ -557,6 +626,230 @@ public partial class MainWindow : Window
         {
             shell.Reminders.ResumeStatusTimer();
         }
+    }
+
+    private void RepositionAccountPopup()
+    {
+        if (AccountPopup.IsOpen)
+        {
+            var offset = AccountPopup.HorizontalOffset;
+            AccountPopup.HorizontalOffset = offset + 0.0001;
+            AccountPopup.HorizontalOffset = offset;
+        }
+    }
+
+    private int _accountMenuAnimationVersion;
+
+    private void OpenAccountMenu()
+    {
+        var version = ++_accountMenuAnimationVersion;
+        AccountPopup.IsOpen = true;
+
+        var startY = AccountMenuTranslate.Y;
+        if (double.IsNaN(startY) || Math.Abs(startY) < 0.01) startY = 10.0;
+
+        var slideAnim = new DoubleAnimation(startY, 0.0, TimeSpan.FromMilliseconds(200))
+        {
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+        };
+        var fadeAnim = new DoubleAnimation(AccountPopupCard.Opacity, 1.0, TimeSpan.FromMilliseconds(180))
+        {
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+        };
+
+        AccountMenuTranslate.BeginAnimation(TranslateTransform.YProperty, slideAnim);
+        AccountPopupCard.BeginAnimation(OpacityProperty, fadeAnim);
+    }
+
+    private void CloseAccountMenu()
+    {
+        if (!AccountPopup.IsOpen) return;
+        var version = ++_accountMenuAnimationVersion;
+
+        var startY = AccountMenuTranslate.Y;
+        if (double.IsNaN(startY)) startY = 0.0;
+
+        var slideAnim = new DoubleAnimation(startY, 10.0, TimeSpan.FromMilliseconds(160))
+        {
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseIn }
+        };
+        var fadeAnim = new DoubleAnimation(AccountPopupCard.Opacity, 0.0, TimeSpan.FromMilliseconds(150))
+        {
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseIn }
+        };
+
+        fadeAnim.Completed += (_, _) =>
+        {
+            if (version == _accountMenuAnimationVersion && DataContext is ShellViewModel { IsAccountMenuOpen: false })
+            {
+                AccountPopup.IsOpen = false;
+                AccountMenuTranslate.Y = 0.0;
+                AccountPopupCard.Opacity = 1.0;
+            }
+        };
+
+        AccountMenuTranslate.BeginAnimation(TranslateTransform.YProperty, slideAnim);
+        AccountPopupCard.BeginAnimation(OpacityProperty, fadeAnim);
+    }
+
+    private static bool IsElementOrChildOf(DependencyObject? source, DependencyObject target)
+    {
+        while (source != null)
+        {
+            if (source == target) return true;
+            source = VisualTreeHelper.GetParent(source);
+        }
+        return false;
+    }
+
+    private int _eventDetailAnimationVersion;
+
+    private void OpenEventDetailModal()
+    {
+        var version = ++_eventDetailAnimationVersion;
+        EventDetailOverlay.Visibility = Visibility.Visible;
+
+        var backdropFade = new DoubleAnimation(0.0, 1.0, TimeSpan.FromMilliseconds(180))
+        {
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+        };
+        EventDetailBackdrop.BeginAnimation(OpacityProperty, backdropFade);
+
+        var cardFade = new DoubleAnimation(0.0, 1.0, TimeSpan.FromMilliseconds(180))
+        {
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+        };
+        var cardScaleX = new DoubleAnimation(0.92, 1.0, TimeSpan.FromMilliseconds(200))
+        {
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+        };
+        var cardScaleY = new DoubleAnimation(0.92, 1.0, TimeSpan.FromMilliseconds(200))
+        {
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+        };
+        var cardTranslate = new DoubleAnimation(10.0, 0.0, TimeSpan.FromMilliseconds(200))
+        {
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+        };
+
+        cardFade.Completed += (_, _) =>
+        {
+            if (version == _eventDetailAnimationVersion)
+            {
+                // Detach active animation clocks so WPF exits GPU composition and renders with crisp font hinting
+                EventDetailCardContainer.BeginAnimation(OpacityProperty, null);
+                EventDetailScale.BeginAnimation(ScaleTransform.ScaleXProperty, null);
+                EventDetailScale.BeginAnimation(ScaleTransform.ScaleYProperty, null);
+                EventDetailTranslate.BeginAnimation(TranslateTransform.YProperty, null);
+
+                EventDetailCardContainer.Opacity = 1.0;
+                EventDetailScale.ScaleX = 1.0;
+                EventDetailScale.ScaleY = 1.0;
+                EventDetailTranslate.Y = 0.0;
+            }
+        };
+
+        EventDetailCardContainer.BeginAnimation(OpacityProperty, cardFade);
+        EventDetailScale.BeginAnimation(ScaleTransform.ScaleXProperty, cardScaleX);
+        EventDetailScale.BeginAnimation(ScaleTransform.ScaleYProperty, cardScaleY);
+        EventDetailTranslate.BeginAnimation(TranslateTransform.YProperty, cardTranslate);
+    }
+
+    private void CloseEventDetailModal()
+    {
+        if (EventDetailOverlay.Visibility != Visibility.Visible) return;
+        var version = ++_eventDetailAnimationVersion;
+
+        var backdropFade = new DoubleAnimation(EventDetailBackdrop.Opacity, 0.0, TimeSpan.FromMilliseconds(150))
+        {
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseIn }
+        };
+        EventDetailBackdrop.BeginAnimation(OpacityProperty, backdropFade);
+
+        var cardFade = new DoubleAnimation(EventDetailCardContainer.Opacity, 0.0, TimeSpan.FromMilliseconds(150))
+        {
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseIn }
+        };
+        var cardScaleX = new DoubleAnimation(EventDetailScale.ScaleX, 0.95, TimeSpan.FromMilliseconds(150))
+        {
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseIn }
+        };
+        var cardScaleY = new DoubleAnimation(EventDetailScale.ScaleY, 0.95, TimeSpan.FromMilliseconds(150))
+        {
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseIn }
+        };
+        var cardTranslate = new DoubleAnimation(EventDetailTranslate.Y, 8.0, TimeSpan.FromMilliseconds(150))
+        {
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseIn }
+        };
+
+        cardFade.Completed += (_, _) =>
+        {
+            if (version == _eventDetailAnimationVersion)
+            {
+                EventDetailOverlay.Visibility = Visibility.Collapsed;
+                EventDetailBackdrop.Opacity = 0.0;
+                EventDetailCardContainer.Opacity = 1.0;
+                EventDetailScale.ScaleX = 0.92;
+                EventDetailScale.ScaleY = 0.92;
+                EventDetailTranslate.Y = 10.0;
+
+                if (DataContext is ShellViewModel shell)
+                {
+                    shell.IsEventDetailOpen = false;
+                }
+            }
+        };
+
+        EventDetailCardContainer.BeginAnimation(OpacityProperty, cardFade);
+        EventDetailScale.BeginAnimation(ScaleTransform.ScaleXProperty, cardScaleX);
+        EventDetailScale.BeginAnimation(ScaleTransform.ScaleYProperty, cardScaleY);
+        EventDetailTranslate.BeginAnimation(TranslateTransform.YProperty, cardTranslate);
+    }
+
+    private void OnEventDetailBackdropMouseDown(object sender, MouseButtonEventArgs e)
+    {
+        CloseEventDetailModal();
+        e.Handled = true;
+    }
+
+    private void OnEventDetailCloseClick(object sender, RoutedEventArgs e)
+    {
+        CloseEventDetailModal();
+    }
+
+    private void OnDayColumnPreviewMouseWheel(object sender, MouseWheelEventArgs e)
+    {
+        if (sender is DependencyObject d)
+        {
+            var sv = FindVisualChild<ScrollViewer>(d);
+            if (sv is not null && sv.ScrollableHeight > 0)
+            {
+                var step = 48.0;
+                var target = e.Delta > 0 ? sv.VerticalOffset - step : sv.VerticalOffset + step;
+                target = Math.Clamp(target, 0, sv.ScrollableHeight);
+                sv.ScrollToVerticalOffset(target);
+                e.Handled = true;
+            }
+        }
+    }
+
+    private static T? FindVisualChild<T>(DependencyObject parent) where T : DependencyObject
+    {
+        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
+        {
+            var child = VisualTreeHelper.GetChild(parent, i);
+            if (child is T typed)
+            {
+                return typed;
+            }
+            var descendant = FindVisualChild<T>(child);
+            if (descendant is not null)
+            {
+                return descendant;
+            }
+        }
+        return null;
     }
 
     protected override void OnClosing(System.ComponentModel.CancelEventArgs e)

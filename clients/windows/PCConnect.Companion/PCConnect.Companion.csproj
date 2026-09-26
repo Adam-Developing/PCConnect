@@ -6,6 +6,7 @@
     <UseWindowsForms>true</UseWindowsForms>
     <AssemblyName>PCConnect.Companion</AssemblyName>
     <RootNamespace>PCConnect.Companion</RootNamespace>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
   </PropertyGroup>
   <ItemGroup>
     <!-- WinForms is here only for the tray icon. Its implicit usings collide

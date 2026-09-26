@@ -1,0 +1,87 @@
+<UserControl x:Class="PCConnect.Companion.Views.TimePickerBox"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d" Height="34">
+  <Border x:Name="RootBorder" Background="{StaticResource Surface}" BorderThickness="1"
+          BorderBrush="{StaticResource Border}" CornerRadius="{StaticResource ControlRadius}">
+    <Border.Style>
+      <Style TargetType="Border">
+        <Style.Triggers>
+          <DataTrigger Binding="{Binding IsKeyboardFocusWithin, RelativeSource={RelativeSource AncestorType=UserControl}}" Value="True">
+            <Setter Property="BorderBrush" Value="{StaticResource Primary}" />
+          </DataTrigger>
+        </Style.Triggers>
+      </Style>
+    </Border.Style>
+    <Grid>
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="Auto" />
+        <ColumnDefinition Width="*" />
+        <ColumnDefinition Width="Auto" />
+      </Grid.ColumnDefinitions>
+
+      <!-- Schedule Icon -->
+      <Path Data="{StaticResource Icon.Schedule}" Fill="{StaticResource InkSoft}"
+            Width="15" Height="15" Stretch="Uniform" Margin="9,0,4,0" VerticalAlignment="Center" />
+
+      <!-- Interactive Time Segments -->
+      <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="2,0,0,0">
+        <!-- Hour Field -->
+        <TextBox x:Name="HourInput" Text="12" FontFamily="{StaticResource MonoFont}" FontSize="13"
+                 Background="Transparent" BorderThickness="0" Padding="0"
+                 VerticalContentAlignment="Center" HorizontalContentAlignment="Center"
+                 Width="24" MaxLength="2" Cursor="IBeam"
+                 PreviewTextInput="OnHourPreviewTextInput"
+                 PreviewKeyDown="OnHourPreviewKeyDown"
+                 GotKeyboardFocus="OnHourGotFocus"
+                 LostFocus="OnHourLostFocus"
+                 MouseWheel="OnHourMouseWheel"
+                 ToolTip="Hours (use Up/Down arrow keys or scroll)" />
+
+        <TextBlock Text=":" FontFamily="{StaticResource MonoFont}" FontSize="13"
+                   Foreground="{StaticResource InkSoft}" VerticalAlignment="Center" Margin="1,-1,1,0" />
+
+        <!-- Minute Field -->
+        <TextBox x:Name="MinuteInput" Text="00" FontFamily="{StaticResource MonoFont}" FontSize="13"
+                 Background="Transparent" BorderThickness="0" Padding="0"
+                 VerticalContentAlignment="Center" HorizontalContentAlignment="Center"
+                 Width="24" MaxLength="2" Cursor="IBeam"
+                 PreviewTextInput="OnMinutePreviewTextInput"
+                 PreviewKeyDown="OnMinutePreviewKeyDown"
+                 GotKeyboardFocus="OnMinuteGotFocus"
+                 LostFocus="OnMinuteLostFocus"
+                 MouseWheel="OnMinuteMouseWheel"
+                 ToolTip="Minutes (use Up/Down arrow keys or scroll)" />
+
+        <!-- AM/PM Field (12-hour mode only) -->
+        <Button x:Name="AmPmButton" Content="AM" Click="OnAmPmClick"
+                FontFamily="{StaticResource MonoFont}" FontSize="11.5" FontWeight="SemiBold"
+                Foreground="{StaticResource Primary}" Background="Transparent"
+                BorderThickness="0" Padding="4,1" Margin="4,0,0,0" Height="22" Cursor="Hand"
+                PreviewKeyDown="OnAmPmPreviewKeyDown"
+                GotKeyboardFocus="OnAmPmGotFocus"
+                ToolTip="Click or press Space / Up / Down / A / P to toggle AM/PM" />
+      </StackPanel>
+
+      <!-- Up / Down Spin Buttons -->
+      <Grid Grid.Column="2" Margin="0,0,4,0" Width="20" VerticalAlignment="Center">
+        <Grid.RowDefinitions>
+          <RowDefinition Height="12" />
+          <RowDefinition Height="12" />
+        </Grid.RowDefinitions>
+        <Button x:Name="UpButton" Grid.Row="0" Click="OnSpinUpClick"
+                Background="Transparent" BorderThickness="0" Padding="0" Cursor="Hand" Focusable="False"
+                ToolTip="Increment (Up Arrow)">
+          <Path Data="M 0 4 L 4 0 L 8 4 Z" Fill="{StaticResource InkSoft}" Stretch="Uniform" Width="8" Height="6" />
+        </Button>
+        <Button x:Name="DownButton" Grid.Row="1" Click="OnSpinDownClick"
+                Background="Transparent" BorderThickness="0" Padding="0" Cursor="Hand" Focusable="False"
+                ToolTip="Decrement (Down Arrow)">
+          <Path Data="M 0 0 L 4 4 L 8 0 Z" Fill="{StaticResource InkSoft}" Stretch="Uniform" Width="8" Height="6" />
+        </Button>
+      </Grid>
+    </Grid>
+  </Border>
+</UserControl>

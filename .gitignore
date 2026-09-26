@@ -65,6 +65,8 @@ frontend/dist/
 
 # ── Android / Gradle ─────────────────────────────────────────────────────────
 .gradle/
+.kotlin/
+clients/android/.kotlin/
 clients/android/build/
 clients/android/**/build/
 clients/android/.gradle/

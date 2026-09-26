@@ -399,9 +399,56 @@ public sealed class IdentityService(
 
             if (row.RevokedAt is not null)
             {
-                // A revoked token being presented means a copy leaked and both
-                // parties are now walking the chain. Kill the family, not just
-                // this link (03 §2.4).
+                // Grace period: if this token was revoked by a normal rotation
+                // very recently, it is a concurrent request replaying the same
+                // token, not an attacker walking the chain. Return the successor
+                // instead of destroying the family (ADR-0002 §race-tolerance).
+                var isRecentRotation = row.RevokedReason == "rotated"
+                    && (clock.UtcNow - row.RevokedAt.Value).TotalSeconds < 30;
+
+                if (isRecentRotation)
+                {
+                    // Find the live successor that replaced this token.
+                    var successor = await connection.QuerySingleOrDefaultAsync<RefreshRow>(new CommandDefinition("""
+                        SELECT id, token_hash AS TokenHash, family_id AS FamilyId, user_id AS UserId, device_id AS DeviceId,
+                               client_kind AS ClientKind, client_version AS ClientVersion,
+                               expires_at AS ExpiresAt, revoked_at AS RevokedAt, revoked_reason AS RevokedReason
+                          FROM refresh_tokens
+                         WHERE family_id = @FamilyId AND revoked_at IS NULL AND expires_at > now()
+                         ORDER BY id DESC
+                         LIMIT 1
+                         FOR UPDATE
+                        """, new { row.FamilyId }, tx, cancellationToken: ct));
+
+                    if (successor is not null)
+                    {
+                        var graceUser = await LoadUserAsync(connection, tx, successor.UserId, ct)
+                            ?? throw AppException.Unauthorized(ErrorCodes.AuthTokenInvalid, "That session is no longer valid.");
+
+                        if (graceUser.DeletedAt is not null || graceUser.Status == UserStatuses.Suspended)
+                        {
+                            throw AppException.Unauthorized(ErrorCodes.AuthTokenInvalid, "That session is no longer valid.");
+                        }
+
+                        // Rotate the successor so the chain keeps advancing.
+                        await connection.ExecuteAsync(new CommandDefinition("""
+                            UPDATE refresh_tokens
+                               SET revoked_at = now(), revoked_reason = 'rotated', last_used_at = now()
+                             WHERE id = @Id
+                            """, new { successor.Id }, tx, cancellationToken: ct));
+
+                        var graceScopes = ScopesFor(successor.ClientKind, successor.DeviceId is not null);
+                        var gracePair = await MintPairAsync(connection, tx, graceUser, successor.ClientKind, successor.ClientVersion,
+                            successor.DeviceId, successor.FamilyId, graceScopes, ctx, ct);
+
+                        logger.LogInformation("Refresh token reuse within grace period for family {FamilyId}; issued successor", row.FamilyId);
+
+                        return new RefreshOutcome(gracePair, ReuseDetected: false);
+                    }
+                }
+
+                // Outside the grace window, or no successor found: a genuine
+                // reuse. Kill the family, not just this link (03 §2.4).
                 await connection.ExecuteAsync(new CommandDefinition("""
                     UPDATE refresh_tokens
                        SET revoked_at = now(), revoked_reason = 'reuse_detected'

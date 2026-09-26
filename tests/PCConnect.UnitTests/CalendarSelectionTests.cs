@@ -200,17 +200,18 @@ public sealed class CalendarSelectionTests : IDisposable
     [Fact]
     public void Multiple_consecutive_shift_clicks_adjust_the_range()
     {
-        Click(_month.AddDays(5));
-        SelectedDays().ShouldBe([_month.AddDays(5)]);
+        var baseDay = _calendar.Days[2].Date;
+        Click(baseDay.AddDays(5));
+        SelectedDays().ShouldBe([baseDay.AddDays(5)]);
 
-        Click(_month.AddDays(10), extend: true);
-        SelectedDays().ShouldBe(Enumerable.Range(5, 6).Select(_month.AddDays));
+        Click(baseDay.AddDays(10), extend: true);
+        SelectedDays().ShouldBe(Enumerable.Range(5, 6).Select(baseDay.AddDays));
 
-        Click(_month.AddDays(8), extend: true);
-        SelectedDays().ShouldBe(Enumerable.Range(5, 4).Select(_month.AddDays));
+        Click(baseDay.AddDays(8), extend: true);
+        SelectedDays().ShouldBe(Enumerable.Range(5, 4).Select(baseDay.AddDays));
 
-        Click(_month.AddDays(12), extend: true);
-        SelectedDays().ShouldBe(Enumerable.Range(5, 8).Select(_month.AddDays));
+        Click(baseDay.AddDays(12), extend: true);
+        SelectedDays().ShouldBe(Enumerable.Range(5, 8).Select(baseDay.AddDays));
     }
 
     [Fact]

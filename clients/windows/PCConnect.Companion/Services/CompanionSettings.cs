@@ -15,16 +15,28 @@ namespace PCConnect.Companion.Services;
 /// with Windows. A settings screen that could only read its values would not be
 /// a settings screen.
 /// </summary>
-public sealed class CompanionSettings(ILogger<CompanionSettings> logger)
+public sealed class CompanionSettings
 {
     private static readonly JsonSerializerOptions Json = new() { WriteIndented = true };
 
-    private static readonly string Path = System.IO.Path.Combine(
+    private static readonly string DefaultPath = System.IO.Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
         "PCConnect",
         "companion.json");
 
+    private readonly string _filePath;
+    private readonly ILogger<CompanionSettings> logger;
     private State _state = new();
+
+    public event Action? Loaded;
+    public event Action? TimeFormatChanged;
+
+    public CompanionSettings(ILogger<CompanionSettings> logger, string? customPath = null)
+    {
+        this.logger = logger;
+        _filePath = customPath ?? DefaultPath;
+        Load();
+    }
 
     /// <summary>The v1 client let people pick these to cope with eye strain.</summary>
     public string ReminderBackground
@@ -89,13 +101,31 @@ public sealed class CompanionSettings(ILogger<CompanionSettings> logger)
         set => Update(_state with { ThisDeviceId = value });
     }
 
+    public bool Use24HourClock
+    {
+        get => _state.Use24HourClock;
+        set
+        {
+            if (_state.Use24HourClock != value)
+            {
+                Update(_state with { Use24HourClock = value });
+                TimeFormatChanged?.Invoke();
+            }
+        }
+    }
+
+    public IReadOnlyList<string> DismissedReminders => _state.DismissedReminders ?? Array.Empty<string>();
+
+    public void SaveDismissedReminders(IEnumerable<string> value) =>
+        Update(_state with { DismissedReminders = value.Distinct(StringComparer.OrdinalIgnoreCase).ToArray() });
+
     public void Load()
     {
         try
         {
-            if (File.Exists(Path))
+            if (File.Exists(_filePath))
             {
-                var loaded = JsonSerializer.Deserialize<State>(File.ReadAllText(Path)) ?? new State();
+                var loaded = JsonSerializer.Deserialize<State>(File.ReadAllText(_filePath)) ?? new State();
                 _state = loaded with
                 {
                     PcName = string.IsNullOrWhiteSpace(loaded.PcName) ? Environment.MachineName : loaded.PcName,
@@ -107,14 +137,22 @@ public sealed class CompanionSettings(ILogger<CompanionSettings> logger)
                         .Where(CommandTypes.All.Contains)
                         .Distinct(StringComparer.Ordinal)
                         .ToArray(),
+                    DismissedReminders = (loaded.DismissedReminders ?? Array.Empty<string>())
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .ToArray(),
+                    Use24HourClock = loaded.Use24HourClock,
                 };
             }
         }
         catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
         {
             // Unreadable settings are defaults, not a crash on startup.
-            logger.LogWarning(ex, "Could not read {Path}; using defaults", Path);
+            logger.LogWarning(ex, "Could not read {Path}; using defaults", _filePath);
             _state = new State();
+        }
+        finally
+        {
+            Loaded?.Invoke();
         }
     }
 
@@ -124,12 +162,16 @@ public sealed class CompanionSettings(ILogger<CompanionSettings> logger)
 
         try
         {
-            Directory.CreateDirectory(System.IO.Path.GetDirectoryName(Path)!);
-            File.WriteAllText(Path, JsonSerializer.Serialize(_state, Json));
+            var dir = System.IO.Path.GetDirectoryName(_filePath);
+            if (!string.IsNullOrEmpty(dir))
+            {
+                Directory.CreateDirectory(dir);
+            }
+            File.WriteAllText(_filePath, JsonSerializer.Serialize(_state, Json));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            logger.LogWarning(ex, "Could not write {Path}", Path);
+            logger.LogWarning(ex, "Could not write {Path}", _filePath);
         }
     }
 
@@ -152,5 +194,9 @@ public sealed class CompanionSettings(ILogger<CompanionSettings> logger)
         public bool PasswordRequiredCommandsNeedSync { get; init; }
 
         public string? ThisDeviceId { get; init; }
+
+        public string[]? DismissedReminders { get; init; } = Array.Empty<string>();
+
+        public bool Use24HourClock { get; init; } = true;
     }
 }

@@ -22,7 +22,8 @@ public partial class ShellViewModel(
     RemindersViewModel reminders,
     AccountViewModel account,
     SettingsViewModel appSettings,
-    ILogger<ShellViewModel> logger) : ObservableObject
+    ILogger<ShellViewModel> logger,
+    ReminderSnoozeService? snoozeService = null) : ObservableObject
 {
     [ObservableProperty]
     private bool _isSignedIn;
@@ -61,6 +62,15 @@ public partial class ShellViewModel(
     [ObservableProperty]
     private bool _isAccountMenuOpen;
 
+    [ObservableProperty]
+    private EventDetailModalViewModel? _activeEventDetail;
+
+    [ObservableProperty]
+    private bool _isEventDetailOpen;
+
+    public event Action? EventDetailOpenRequested;
+    public event Action? EventDetailCloseRequested;
+
     public DevicesViewModel Devices => devices;
 
     public RemindersViewModel Reminders => reminders;
@@ -69,14 +79,14 @@ public partial class ShellViewModel(
 
     public SettingsViewModel AppSettings => appSettings;
 
-    /// <summary>The next seven days of reminders that will show on this screen.</summary>
+    /// <summary>The seven days of reminders that will show on this screen.</summary>
     public ObservableCollection<DayColumn> Week { get; } = [];
 
     public string ThisPcName => ThisPc?.DisplayName ?? Environment.MachineName;
 
     public bool HasThisPc => ThisPc is not null;
 
-    public string Today => DateTime.Now.ToString("dddd d MMMM · HH:mm", CultureInfo.CurrentCulture);
+    public string Today => $"{DateTime.Now.ToString("dddd d MMMM", CultureInfo.CurrentCulture)} · {TimeFormatting.FormatTime(DateTime.Now, settings.Use24HourClock)}";
 
     /// <summary>
     /// Startup: resolve the backend, check whether this build is still
@@ -86,6 +96,29 @@ public partial class ShellViewModel(
     {
         settings.Load();
         appSettings.Load();
+
+        settings.TimeFormatChanged += () =>
+        {
+            var dispatcher = Application.Current?.Dispatcher;
+            void Update()
+            {
+                OnPropertyChanged(nameof(Today));
+                RefreshLastCommand();
+                RebuildWeek();
+            }
+            if (dispatcher is null || dispatcher.CheckAccess()) Update();
+            else dispatcher.InvokeAsync(Update);
+        };
+
+        api.SignedOut += () => Application.Current.Dispatcher.InvokeAsync(async () =>
+        {
+            IsSignedIn = false;
+            IsAccountMenuOpen = false;
+            StatusMessage = "Your session has ended. Sign in again.";
+
+            try { await realtime.DisposeAsync(); }
+            catch { /* best-effort */ }
+        });
 
         try
         {
@@ -360,35 +393,57 @@ public partial class ShellViewModel(
         }
     }
 
-    /// <summary>The seven-day strip on "This PC": what will appear on this screen.</summary>
+    /// <summary>The Monday–Sunday week strip on "This PC": what will appear on this screen.</summary>
     public void RebuildWeek()
     {
         Week.Clear();
 
         var today = DateOnly.FromDateTime(DateTime.Today);
+        var daysFromMonday = ((int)today.DayOfWeek + 6) % 7;
+        var monday = today.AddDays(-daysFromMonday);
         var total = 0;
 
         for (var offset = 0; offset < 7; offset++)
         {
-            var day = today.AddDays(offset);
+            var day = monday.AddDays(offset);
+            var isToday = day == today;
 
             var items = reminders.Items
-                .Where(r => !(offset == 0 && r.IsCompleted))
                 .Where(r => Recurrence.OccursOn(r.Rrule, DateOnly.FromDateTime(r.DueAt.ToLocalTime().Date), day))
                 .OrderBy(r => r.DueAt.ToLocalTime().TimeOfDay)
-                .Select(r => new WeekItem(r.DueAt.ToLocalTime().ToString("HH:mm", CultureInfo.CurrentCulture), r.Body))
+                .Select(r =>
+                {
+                    var local = r.DueAt.ToLocalTime();
+                    ReminderSnoozeInfo? sInfo = null;
+                    var isSnoozed = snoozeService is not null && snoozeService.IsSnoozed(r.Id, out sInfo);
+                    var isDismissed = snoozeService is not null && snoozeService.IsDismissed(r.Id);
+                    var snoozeLabel = isSnoozed && sInfo is not null ? $"Snoozed for {sInfo.FormattedDuration}" : null;
+
+                    return new WeekItem(
+                        Time: TimeFormatting.FormatTime(local, settings.Use24HourClock),
+                        Body: r.Body,
+                        Id: r.Id,
+                        DayLabel: day.ToString("ddd", CultureInfo.CurrentCulture),
+                        FullDate: day.ToString("dddd d MMMM yyyy", CultureInfo.CurrentCulture),
+                        RecurrenceText: Recurrence.Describe(r.Rrule),
+                        TargetText: reminders.DescribeTargets(r.DeviceIds),
+                        IsCompleted: r.IsCompleted,
+                        IsSnoozed: isSnoozed,
+                        SnoozeLabel: snoozeLabel,
+                        IsDismissed: isDismissed);
+                })
                 .ToList();
 
             total += items.Count;
 
             Week.Add(new DayColumn(
-                Label: offset == 0 ? "Today" : day.ToString("ddd", CultureInfo.CurrentCulture),
+                Label: isToday ? "Today" : day.ToString("ddd", CultureInfo.CurrentCulture),
                 Number: day.ToString("d MMM", CultureInfo.CurrentCulture),
-                IsToday: offset == 0,
+                IsToday: isToday,
                 Items: items));
         }
 
-        WeekSummary = total == 1 ? "1 reminder in the next 7 days" : $"{total} reminders in the next 7 days";
+        WeekSummary = total == 1 ? "1 reminder this week" : $"{total} reminders this week";
     }
 
     private void RefreshLastCommand()
@@ -397,7 +452,165 @@ public partial class ShellViewModel(
 
         LastCommandSummary = last is null
             ? "Nothing yet"
-            : $"{Describe(last.Type)} · {last.IssuedAt.ToLocalTime():HH:mm}";
+            : $"{Describe(last.Type)} · {TimeFormatting.FormatTime(last.IssuedAt, settings.Use24HourClock)}";
+    }
+
+    [RelayCommand]
+    public void ShowEventDetail(object? item)
+    {
+        if (item is WeekItem wi)
+        {
+            var isCompleted = wi.IsCompleted;
+            var isSnoozed = wi.IsSnoozed;
+            var isDismissed = wi.IsDismissed;
+
+            string statusText;
+            string statusTone;
+            if (isCompleted)
+            {
+                statusText = "Completed";
+                statusTone = "Online";
+            }
+            else if (isSnoozed)
+            {
+                statusText = wi.SnoozeLabel ?? "Snoozed";
+                statusTone = "Warn";
+            }
+            else if (isDismissed)
+            {
+                statusText = "Won't rerun";
+                statusTone = "Danger";
+            }
+            else
+            {
+                statusText = "Scheduled";
+                statusTone = "Offline";
+            }
+
+            ActiveEventDetail = new EventDetailModalViewModel
+            {
+                Id = wi.Id,
+                Title = wi.Body,
+                TimeAndDate = $"{wi.FullDate} · {wi.Time}",
+                Recurrence = string.IsNullOrWhiteSpace(wi.RecurrenceText) ? "Does not repeat" : wi.RecurrenceText,
+                Targets = string.IsNullOrWhiteSpace(wi.TargetText) ? "All PCs" : wi.TargetText,
+                StatusText = statusText,
+                StatusTone = statusTone,
+                IsCompleted = isCompleted,
+                IsSnoozed = isSnoozed,
+                IsDismissed = isDismissed,
+            };
+
+            IsEventDetailOpen = true;
+            EventDetailOpenRequested?.Invoke();
+        }
+        else if (item is ReminderRow rr)
+        {
+            var reminder = reminders.Items.FirstOrDefault(r => r.Id == rr.Id);
+            string statusText;
+            string statusTone;
+            if (rr.IsCompleted)
+            {
+                statusText = "Completed";
+                statusTone = "Online";
+            }
+            else if (rr.IsSnoozed)
+            {
+                statusText = rr.SnoozeLabel ?? "Snoozed";
+                statusTone = "Warn";
+            }
+            else if (rr.IsDismissed)
+            {
+                statusText = "Won't rerun";
+                statusTone = "Danger";
+            }
+            else
+            {
+                statusText = "Scheduled";
+                statusTone = "Offline";
+            }
+
+            var fullDate = reminder is not null
+                ? reminder.DueAt.ToLocalTime().ToString("dddd d MMMM yyyy", CultureInfo.CurrentCulture)
+                : rr.DayLabel;
+
+            ActiveEventDetail = new EventDetailModalViewModel
+            {
+                Id = rr.Id,
+                Title = rr.Body,
+                TimeAndDate = $"{fullDate} · {rr.Time}",
+                Recurrence = reminder is not null ? Recurrence.Describe(reminder.Rrule) : "Does not repeat",
+                Targets = reminder is not null ? reminders.DescribeTargets(reminder.DeviceIds) : "All PCs",
+                StatusText = statusText,
+                StatusTone = statusTone,
+                IsCompleted = rr.IsCompleted,
+                IsSnoozed = rr.IsSnoozed,
+                IsDismissed = rr.IsDismissed,
+            };
+
+            IsEventDetailOpen = true;
+            EventDetailOpenRequested?.Invoke();
+        }
+    }
+
+    [RelayCommand]
+    public void CloseEventDetail()
+    {
+        EventDetailCloseRequested?.Invoke();
+    }
+
+    [RelayCommand]
+    public async Task ToggleActiveEventCompleteAsync()
+    {
+        if (ActiveEventDetail is null || string.IsNullOrEmpty(ActiveEventDetail.Id)) return;
+        var row = reminders.Rows.FirstOrDefault(r => r.Id == ActiveEventDetail.Id);
+        if (row is not null)
+        {
+            await reminders.CompleteCommand.ExecuteAsync(row);
+        }
+        else
+        {
+            var reminder = reminders.Items.FirstOrDefault(r => r.Id == ActiveEventDetail.Id);
+            if (reminder is not null)
+            {
+                await api.CompleteReminderAsync(reminder.Id, !reminder.IsCompleted);
+                await reminders.LoadAsync();
+            }
+        }
+
+        RebuildWeek();
+        CloseEventDetail();
+    }
+
+    [RelayCommand]
+    public void EditActiveEvent()
+    {
+        if (ActiveEventDetail is null || string.IsNullOrEmpty(ActiveEventDetail.Id)) return;
+        var row = reminders.Rows.FirstOrDefault(r => r.Id == ActiveEventDetail.Id)
+            ?? new ReminderRow(ActiveEventDetail.Id, "", "", ActiveEventDetail.Title, "", ActiveEventDetail.IsCompleted, false);
+
+        CloseEventDetail();
+        Page = CompanionPage.Reminders;
+        reminders.StartEdit(row);
+    }
+
+    [RelayCommand]
+    public async Task DeleteActiveEventAsync()
+    {
+        if (ActiveEventDetail is null || string.IsNullOrEmpty(ActiveEventDetail.Id)) return;
+        var row = reminders.Rows.FirstOrDefault(r => r.Id == ActiveEventDetail.Id);
+        if (row is not null)
+        {
+            await reminders.DeleteCommand.ExecuteAsync(row);
+        }
+        else
+        {
+            await api.DeleteReminderAsync(ActiveEventDetail.Id);
+            await reminders.LoadAsync();
+        }
+
+        RebuildWeek();
+        CloseEventDetail();
     }
 
     internal static string Describe(string commandType) => commandType switch

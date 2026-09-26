@@ -7,6 +7,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.Extensions.Logging;
 using PCConnect.Client;
+using PCConnect.Companion.Services;
 using PCConnect.Core.Contracts;
 
 namespace PCConnect.Companion.ViewModels;
@@ -18,9 +19,23 @@ namespace PCConnect.Companion.ViewModels;
 public partial class RemindersViewModel(
     PcConnectClient api,
     DevicesViewModel devices,
-    ILogger<RemindersViewModel> logger) : ObservableObject
+    ILogger<RemindersViewModel> logger,
+    ReminderSnoozeService? snoozeService = null,
+    CompanionSettings? settings = null) : ObservableObject
 {
+    public bool Use24HourClock
+    {
+        get => settings?.Use24HourClock ?? true;
+        set
+        {
+            if (settings is not null)
+            {
+                settings.Use24HourClock = value;
+            }
+        }
+    }
     private static readonly string[] DayInitials = ["M", "T", "W", "T", "F", "S", "S"];
+    private bool _isSnoozeHooked;
 
     private DateOnly _viewMonth = new(DateTime.Today.Year, DateTime.Today.Month, 1);
 
@@ -237,6 +252,81 @@ public partial class RemindersViewModel(
 
     public void Initialise()
     {
+        if (snoozeService is not null && !_isSnoozeHooked)
+        {
+            _isSnoozeHooked = true;
+            snoozeService.ReminderSnoozed += info =>
+            {
+                void Update()
+                {
+                    ShowStatus($"Reminder snoozed for {info.FormattedDuration}.", false);
+                    RebuildRows();
+                }
+
+                var dispatcher = Application.Current?.Dispatcher;
+                if (dispatcher is null || dispatcher.CheckAccess())
+                {
+                    Update();
+                }
+                else
+                {
+                    dispatcher.InvokeAsync(Update);
+                }
+            };
+
+            snoozeService.ReminderUnsnoozed += _ =>
+            {
+                var dispatcher = Application.Current?.Dispatcher;
+                if (dispatcher is null || dispatcher.CheckAccess())
+                {
+                    RebuildRows();
+                }
+                else
+                {
+                    dispatcher.InvokeAsync(RebuildRows);
+                }
+            };
+
+            snoozeService.ReminderDismissed += _ =>
+            {
+                var dispatcher = Application.Current?.Dispatcher;
+                if (dispatcher is null || dispatcher.CheckAccess())
+                {
+                    RebuildRows();
+                }
+                else
+                {
+                    dispatcher.InvokeAsync(RebuildRows);
+                }
+            };
+        }
+
+        if (settings is not null)
+        {
+            settings.TimeFormatChanged += () =>
+            {
+                void Update()
+                {
+                    OnPropertyChanged(nameof(Use24HourClock));
+                    if (TimeFormatting.TryParse(NewTime, out var t))
+                    {
+                        NewTime = TimeFormatting.FormatTime(t, Use24HourClock);
+                    }
+                    RebuildRows();
+                }
+
+                var dispatcher = Application.Current?.Dispatcher;
+                if (dispatcher is null || dispatcher.CheckAccess())
+                {
+                    Update();
+                }
+                else
+                {
+                    dispatcher.InvokeAsync(Update);
+                }
+            };
+        }
+
         if (RepeatChips.Count > 0)
         {
             return;
@@ -807,11 +897,17 @@ public partial class RemindersViewModel(
                     var isCompleted = string.IsNullOrEmpty(reminder.Rrule)
                         ? reminder.IsCompleted
                         : (reminder.IsCompleted && day == today);
-                    var past = day < today || isCompleted;
+                    ReminderSnoozeInfo? snoozeInfo = null;
+                    var isSnoozed = snoozeService is not null && snoozeService.IsSnoozed(reminder.Id, out snoozeInfo);
+                    var isDismissed = snoozeService is not null && snoozeService.IsDismissed(reminder.Id);
+                    var isPastTime = day < today || (day == today && local.TimeOfDay <= DateTime.Now.TimeOfDay);
+                    var past = !isSnoozed && (isPastTime || isCompleted);
+                    var snoozeLabel = isSnoozed && snoozeInfo is not null ? $"Snoozed for {snoozeInfo.FormattedDuration}" : null;
+                    var snoozeToolTip = isSnoozed && snoozeInfo is not null ? $"Snoozed for {snoozeInfo.FormattedDuration} (until {TimeFormatting.FormatTime(snoozeInfo.SnoozedUntil, Use24HourClock)})" : null;
 
                     _allRows.Add(new ReminderRow(
                         Id: reminder.Id,
-                        Time: local.ToString("HH:mm", CultureInfo.CurrentCulture),
+                        Time: TimeFormatting.FormatTime(local, Use24HourClock),
                         DayLabel: Describe(day),
                         Body: reminder.Body,
                         Detail: string.Join(" · ", new[]
@@ -820,7 +916,11 @@ public partial class RemindersViewModel(
                             DescribeTargets(reminder.DeviceIds),
                         }.Where(s => s.Length > 0)),
                         IsCompleted: isCompleted,
-                        IsPast: past));
+                        IsPast: past,
+                        IsSnoozed: isSnoozed,
+                        SnoozeLabel: snoozeLabel,
+                        SnoozeToolTip: snoozeToolTip,
+                        IsDismissed: isDismissed));
                 }
             }
 
@@ -874,9 +974,14 @@ public partial class RemindersViewModel(
                         var isCompleted = string.IsNullOrEmpty(reminder.Rrule)
                             ? reminder.IsCompleted
                             : (reminder.IsCompleted && day == today);
-                        var past = day < today || isCompleted;
+                        ReminderSnoozeInfo? snoozeInfo = null;
+                        var isSnoozed = snoozeService is not null && snoozeService.IsSnoozed(reminder.Id, out snoozeInfo);
+                        var isDismissed = snoozeService is not null && snoozeService.IsDismissed(reminder.Id);
+                        var isPastTime = day < today || (day == today && local.TimeOfDay <= DateTime.Now.TimeOfDay);
+                        var isFilteredPast = !isSnoozed && (day < today || isCompleted);
+                        var past = !isSnoozed && (isPastTime || isCompleted);
 
-                        if (past)
+                        if (isFilteredPast)
                         {
                             pastCount++;
                             if (!ShowCompletedReminders)
@@ -885,9 +990,12 @@ public partial class RemindersViewModel(
                             }
                         }
 
+                        var snoozeLabel = isSnoozed && snoozeInfo is not null ? $"Snoozed for {snoozeInfo.FormattedDuration}" : null;
+                        var snoozeToolTip = isSnoozed && snoozeInfo is not null ? $"Snoozed for {snoozeInfo.FormattedDuration} (until {TimeFormatting.FormatTime(snoozeInfo.SnoozedUntil, Use24HourClock)})" : null;
+
                         _allRows.Add(new ReminderRow(
                             Id: reminder.Id,
-                            Time: local.ToString("HH:mm", CultureInfo.CurrentCulture),
+                            Time: TimeFormatting.FormatTime(local, Use24HourClock),
                             DayLabel: Describe(day),
                             Body: reminder.Body,
                             Detail: string.Join(" · ", new[]
@@ -896,7 +1004,11 @@ public partial class RemindersViewModel(
                                 DescribeTargets(reminder.DeviceIds),
                             }.Where(s => s.Length > 0)),
                             IsCompleted: isCompleted,
-                            IsPast: past));
+                            IsPast: past,
+                            IsSnoozed: isSnoozed,
+                            SnoozeLabel: snoozeLabel,
+                            SnoozeToolTip: snoozeToolTip,
+                            IsDismissed: isDismissed));
                     }
                 }
 
@@ -928,7 +1040,7 @@ public partial class RemindersViewModel(
 
 
     /// <summary>"all PCs", or the names of the ones it was aimed at.</summary>
-    private string DescribeTargets(IReadOnlyList<string>? deviceIds)
+    internal string DescribeTargets(IReadOnlyList<string>? deviceIds)
     {
         if (deviceIds is null || deviceIds.Count == 0)
         {
@@ -1025,7 +1137,7 @@ public partial class RemindersViewModel(
     {
         var times = new List<TimeOnly>();
 
-        if (TimeOnly.TryParse(NewTime, CultureInfo.CurrentCulture, out var primary))
+        if (TimeFormatting.TryParse(NewTime, out var primary))
         {
             times.Add(primary);
         }
@@ -1044,9 +1156,9 @@ public partial class RemindersViewModel(
             return;
         }
 
-        if (!TimeOnly.TryParse(NewTime, CultureInfo.CurrentCulture, out _))
+        if (!TimeFormatting.TryParse(NewTime, out _))
         {
-            ShowStatus("That time is not valid. Use HH:mm.", true);
+            ShowStatus(Use24HourClock ? "That time is not valid. Use HH:mm." : "That time is not valid. Use hh:mm AM/PM.", true);
             return;
         }
 
@@ -1138,7 +1250,7 @@ public partial class RemindersViewModel(
                 NewBody = string.Empty;
                 ExtraTimes.Clear();
                 NewDate = DateTime.Today;
-                NewTime = DateTime.Now.AddHours(1).ToString("HH:00", CultureInfo.InvariantCulture);
+                NewTime = TimeFormatting.FormatTime(DateTime.Now.AddHours(1), Use24HourClock);
                 await LoadAsync();
                 ShowStatus(created == 1 ? "Reminder added." : $"{created} reminders added.", false);
             }
@@ -1179,7 +1291,7 @@ public partial class RemindersViewModel(
 
         var localDue = reminder.DueAt.ToLocalTime();
         NewDate = localDue.Date;
-        NewTime = localDue.ToString("HH:mm", CultureInfo.InvariantCulture);
+        NewTime = TimeFormatting.FormatTime(localDue, Use24HourClock);
         ExtraTimes.Clear();
 
         var (kind, days, interval) = Recurrence.FromRrule(reminder.Rrule);
@@ -1230,7 +1342,7 @@ public partial class RemindersViewModel(
         NewBody = string.Empty;
         ExtraTimes.Clear();
         NewDate = DateTime.Today;
-        NewTime = DateTime.Now.AddHours(1).ToString("HH:00", CultureInfo.InvariantCulture);
+        NewTime = TimeFormatting.FormatTime(DateTime.Now.AddHours(1), Use24HourClock);
         Repeat = RepeatKind.Once;
         IntervalWeeks = 1;
         Until = null;
@@ -1269,6 +1381,9 @@ public partial class RemindersViewModel(
             return;
         }
 
+        snoozeService?.CancelSnooze(id);
+        snoozeService?.ClearDismissed(id);
+
         IsBusy = true;
         try
         {
@@ -1298,6 +1413,9 @@ public partial class RemindersViewModel(
 
     public async Task RescheduleForTodayAsync(string reminderId)
     {
+        snoozeService?.CancelSnooze(reminderId);
+        snoozeService?.ClearDismissed(reminderId);
+
         var item = Items.FirstOrDefault(r => r.Id == reminderId);
         if (item is null)
         {
@@ -1332,7 +1450,7 @@ public partial class RemindersViewModel(
             {
                 await api.CompleteReminderAsync(item.Id, false);
                 await LoadAsync();
-                ShowStatus($"Reminder rescheduled for today at {localCandidate:HH:mm}.", false);
+                ShowStatus($"Reminder rescheduled for today at {TimeFormatting.FormatTime(localCandidate, Use24HourClock)}.", false);
             }
         }
         catch (Exception ex) when (ex is PcConnectApiException or HttpRequestException)
@@ -1350,6 +1468,9 @@ public partial class RemindersViewModel(
             return;
         }
 
+        snoozeService?.CancelSnooze(row.Id);
+        snoozeService?.ClearDismissed(row.Id);
+
         if (row.IsCompleted && row.IsPast && RequestReopenChoice is not null)
         {
             var choice = await RequestReopenChoice(row);
@@ -1363,6 +1484,11 @@ public partial class RemindersViewModel(
                 await RescheduleForTodayAsync(row.Id);
                 return;
             }
+
+            if (choice == ReopenChoice.KeepOverdue)
+            {
+                snoozeService?.MarkDismissed(row.Id);
+            }
         }
 
         try
@@ -1371,7 +1497,7 @@ public partial class RemindersViewModel(
             if (updated is not null)
             {
                 await LoadAsync();
-                ShowStatus(row.IsCompleted ? "Reminder reopened as overdue." : "Reminder completed.", false);
+                ShowStatus(row.IsCompleted ? "Reminder reopened." : "Reminder completed.", false);
             }
         }
         catch (Exception ex) when (ex is PcConnectApiException or HttpRequestException)

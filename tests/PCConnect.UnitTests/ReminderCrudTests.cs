@@ -231,16 +231,21 @@ public sealed class ReminderCrudTests : IDisposable
     }
 
     [Fact]
-    public void ReminderRow_IsOverdue_returns_true_only_when_past_and_incomplete()
+    public void ReminderRow_dismissed_badge_returns_true_only_when_dismissed_and_incomplete()
     {
-        var overdue = new ReminderRow("1", "10:00", "Yesterday", "Fix bug", "", false, true);
-        overdue.IsOverdue.ShouldBeTrue();
+        var pastIncomplete = new ReminderRow("1", "10:00", "Yesterday", "Fix bug", "", false, true);
+        pastIncomplete.IsDismissedBadgeVisible.ShouldBeFalse();
 
-        var completedPast = new ReminderRow("2", "10:00", "Yesterday", "Fix bug", "", true, true);
-        completedPast.IsOverdue.ShouldBeFalse();
+        var dismissed = pastIncomplete with { IsDismissed = true };
+        dismissed.IsDismissedBadgeVisible.ShouldBeTrue();
+        dismissed.DismissedLabel.ShouldBe("Won't rerun");
+        dismissed.DismissedToolTip.ShouldContain("will not alert again");
 
-        var upcoming = new ReminderRow("3", "10:00", "Tomorrow", "Fix bug", "", false, false);
-        upcoming.IsOverdue.ShouldBeFalse();
+        var completedPast = new ReminderRow("2", "10:00", "Yesterday", "Fix bug", "", true, true, IsDismissed: true);
+        completedPast.IsDismissedBadgeVisible.ShouldBeFalse();
+
+        var upcoming = new ReminderRow("3", "10:00", "Tomorrow", "Fix bug", "", false, false, IsDismissed: true);
+        upcoming.IsDismissedBadgeVisible.ShouldBeTrue();
     }
 
     [Fact]

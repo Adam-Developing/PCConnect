@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
+using PCConnect.Companion.Services;
 
 namespace PCConnect.Companion.Views;
 
@@ -10,6 +11,7 @@ public partial class ReminderWindow : Window
 {
     private readonly Func<Task>? _onDone;
     private readonly Action<TimeSpan>? _onSnooze;
+    private readonly Action? _onDismiss;
     private TimeSpan _selectedSnooze = TimeSpan.FromMinutes(10);
     private bool _isClosing;
 
@@ -20,16 +22,36 @@ public partial class ReminderWindow : Window
         string foreground,
         string pcName,
         Func<Task>? onDone = null,
-        Action<TimeSpan>? onSnooze = null)
+        Action<TimeSpan>? onSnooze = null,
+        TimeSpan? snoozedFor = null,
+        Action? onDismiss = null,
+        bool use24HourClock = true)
     {
         InitializeComponent();
 
         _onDone = onDone;
         _onSnooze = onSnooze;
+        _onDismiss = onDismiss;
 
         BodyText.Text = body;
         EyebrowText.Text = $"REMINDER · {pcName.ToUpperInvariant()}";
-        TimeText.Text = $"{Describe(dueAt)} at {dueAt.ToLocalTime():HH:mm}";
+
+        var timeStr = TimeFormatting.FormatTime(dueAt, use24HourClock);
+
+        if (snoozedFor is { } duration)
+        {
+            var formatted = Services.ReminderSnoozeInfo.FormatDuration(duration);
+            SnoozedBadge.Visibility = Visibility.Visible;
+            SnoozedBadgeText.Text = $"Snoozed for {formatted}";
+            TimeText.Text = $"{Describe(dueAt)} at {timeStr} · Snoozed for {formatted}";
+            _selectedSnooze = duration;
+            SnoozeDurationText.Text = formatted;
+        }
+        else
+        {
+            SnoozedBadge.Visibility = Visibility.Collapsed;
+            TimeText.Text = $"{Describe(dueAt)} at {timeStr}";
+        }
 
         // The v1 client let people pick the reminder colours to cope with eye
         // strain. That setting survives the rewrite; it was a real accessibility
@@ -62,13 +84,16 @@ public partial class ReminderWindow : Window
             CardScale.BeginAnimation(ScaleTransform.ScaleYProperty, scaleAnimation);
         };
 
-        // Escape dismisses. A full-screen window with no way out but the mouse
-        // is a window people learn to dread.
+        // Escape marks the reminder as completed.
         KeyDown += (_, e) =>
         {
             if (e.Key == Key.Escape)
             {
-                AnimateAndClose();
+                e.Handled = true;
+                if (!_isClosing && CompletedButton.IsEnabled)
+                {
+                    OnCompleted(this, new RoutedEventArgs());
+                }
             }
         };
     }
@@ -171,5 +196,5 @@ public partial class ReminderWindow : Window
         AnimateAndClose(() => _onSnooze?.Invoke(_selectedSnooze));
     }
 
-    private void OnDismiss(object sender, RoutedEventArgs e) => AnimateAndClose();
+    private void OnDismiss(object sender, RoutedEventArgs e) => AnimateAndClose(() => _onDismiss?.Invoke());
 }

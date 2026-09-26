@@ -45,6 +45,14 @@ public sealed partial class SettingsViewModel(
     private bool _startWithWindows;
 
     [ObservableProperty]
+    private bool _use24HourClock = true;
+
+    partial void OnUse24HourClockChanged(bool value)
+    {
+        settings.Use24HourClock = value;
+    }
+
+    [ObservableProperty]
     private bool _isActivityOpen;
 
     [ObservableProperty]
@@ -79,6 +87,8 @@ public sealed partial class SettingsViewModel(
 
     public string ActivityCount => Activity.Count.ToString();
 
+    public bool HasActivity => Activity.Count > 0;
+
     public void Load()
     {
         ReminderBackground = settings.ReminderBackground;
@@ -86,9 +96,11 @@ public sealed partial class SettingsViewModel(
         PcName = settings.PcName;
         _savedPcName = settings.PcName;
         StartWithWindows = startup.IsEnabled;
+        Use24HourClock = settings.Use24HourClock;
 
         RebuildSwatches();
         RebuildCommands(settings.AllowedCommands, settings.PasswordRequiredCommands);
+        RebuildActivity();
     }
 
     /// <summary>Binds the settings page to whichever account device is this machine.</summary>
@@ -181,6 +193,7 @@ public sealed partial class SettingsViewModel(
         }
 
         OnPropertyChanged(nameof(ActivityCount));
+        OnPropertyChanged(nameof(HasActivity));
     }
 
     partial void OnReminderBackgroundChanged(string value)

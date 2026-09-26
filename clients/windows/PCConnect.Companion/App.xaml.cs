@@ -59,6 +59,7 @@ public partial class App : Application
         builder.Services.AddSingleton<CompanionSettings>();
         builder.Services.AddSingleton<StartupRegistration>();
 
+        builder.Services.AddSingleton<ReminderSnoozeService>();
         builder.Services.AddSingleton<ShellViewModel>();
         builder.Services.AddSingleton<SettingsViewModel>();
         builder.Services.AddSingleton<DevicesViewModel>();

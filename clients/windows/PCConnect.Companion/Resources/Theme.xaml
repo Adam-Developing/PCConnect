@@ -75,8 +75,12 @@
     <Setter Property="Foreground" Value="{StaticResource Ink}" />
     <Setter Property="FontFamily" Value="{StaticResource Sans}" />
     <Setter Property="FontSize" Value="14" />
-    <Setter Property="TextOptions.TextFormattingMode" Value="Ideal" />
+    <Setter Property="TextOptions.TextFormattingMode" Value="Display" />
     <Setter Property="TextOptions.TextRenderingMode" Value="ClearType" />
+    <Setter Property="TextOptions.TextHintingMode" Value="Fixed" />
+    <Setter Property="UseLayoutRounding" Value="True" />
+    <Setter Property="SnapsToDevicePixels" Value="True" />
+    <Setter Property="RenderOptions.ClearTypeHint" Value="Enabled" />
   </Style>
 
   <!-- ═══ type ═══════════════════════════════════════════════════════ -->
@@ -87,6 +91,9 @@
        looking exactly like "Lock". -->
   <Style TargetType="TextBlock">
     <Setter Property="TextWrapping" Value="Wrap" />
+    <Setter Property="TextOptions.TextFormattingMode" Value="Display" />
+    <Setter Property="TextOptions.TextRenderingMode" Value="ClearType" />
+    <Setter Property="SnapsToDevicePixels" Value="True" />
   </Style>
 
   <Style x:Key="PageTitle" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">

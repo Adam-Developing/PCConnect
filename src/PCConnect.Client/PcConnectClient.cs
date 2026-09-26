@@ -312,13 +312,24 @@ public sealed class PcConnectClient(HttpClient http, PcConnectClientOptions opti
     private async Task<T?> SendAsync<T>(
         HttpMethod method, string path, object? body, bool authenticated, CancellationToken ct)
     {
+        // Capture the token that will actually be sent so the 401 branch can
+        // tell whether a concurrent caller has already refreshed it.
+        var tokenUsed = authenticated ? _accessToken : null;
         var response = await SendOnceAsync(method, path, body, authenticated, ct);
 
         // Refresh once on a 401, then give up. Retrying a refresh that failed is
         // how a client ends up hammering an endpoint it can never satisfy.
+        //
+        // Use compare-and-swap: only invalidate the cached token if it is still
+        // the same one that was rejected. When two requests race here, the first
+        // one refreshes and writes a new _accessToken; the second's CAS is a
+        // no-op, and GetAccessTokenAsync's inner double-check returns the token
+        // the first caller already obtained — no second refresh, no reuse.
         if (response.StatusCode == HttpStatusCode.Unauthorized && authenticated)
         {
             response.Dispose();
+
+            Interlocked.CompareExchange(ref _accessToken, null, tokenUsed);
             _accessTokenExpiresAt = DateTimeOffset.MinValue;
 
             if (await GetAccessTokenAsync(ct) is null)
