@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging.Abstractions;
+using PCConnect.Companion.ViewModels;
 using PCConnect.Infrastructure.Contexts.Commands;
 using PCConnect.Infrastructure.Recurrence;
 using PCConnect.LegacyMigrator;
@@ -150,5 +151,106 @@ public class CursorTests
     {
         var error = Should.Throw<PCConnect.Core.AppException>(() => Cursor.Decode(cursor));
         error.Code.ShouldBe(PCConnect.Core.ErrorCodes.ValidationFailed);
+    }
+}
+
+public class CompanionRecurrenceTests
+{
+    [Fact]
+    public void Generates_rrule_for_each_repeat_kind()
+    {
+        var start = new DateOnly(2026, 9, 26); // Saturday
+
+        Recurrence.ToRrule(RepeatKind.Once, [], 1, start).ShouldBeNull();
+        Recurrence.ToRrule(RepeatKind.Hourly, [], 1, start).ShouldBe("FREQ=HOURLY");
+        Recurrence.ToRrule(RepeatKind.Hourly, [], 3, start).ShouldBe("FREQ=HOURLY;INTERVAL=3");
+        Recurrence.ToRrule(RepeatKind.Daily, [], 1, start).ShouldBe("FREQ=DAILY");
+        Recurrence.ToRrule(RepeatKind.Daily, [], 2, start).ShouldBe("FREQ=DAILY;INTERVAL=2");
+        Recurrence.ToRrule(RepeatKind.Weekly, [DayOfWeek.Monday, DayOfWeek.Wednesday], 1, start)
+            .ShouldBe("FREQ=WEEKLY;BYDAY=MO,WE");
+        Recurrence.ToRrule(RepeatKind.Weekly, [DayOfWeek.Friday], 2, start)
+            .ShouldBe("FREQ=WEEKLY;INTERVAL=2;BYDAY=FR");
+        Recurrence.ToRrule(RepeatKind.Monthly, [], 1, start).ShouldBe("FREQ=MONTHLY");
+        Recurrence.ToRrule(RepeatKind.Monthly, [], 6, start).ShouldBe("FREQ=MONTHLY;INTERVAL=6");
+        Recurrence.ToRrule(RepeatKind.Yearly, [], 1, start).ShouldBe("FREQ=YEARLY");
+        Recurrence.ToRrule(RepeatKind.Yearly, [], 2, start).ShouldBe("FREQ=YEARLY;INTERVAL=2");
+    }
+
+    [Fact]
+    public void Parses_rrule_for_all_frequencies_and_intervals()
+    {
+        var (hKind, _, hInt) = Recurrence.FromRrule("FREQ=HOURLY;INTERVAL=4");
+        hKind.ShouldBe(RepeatKind.Hourly);
+        hInt.ShouldBe(4);
+
+        var (dKind, _, dInt) = Recurrence.FromRrule("FREQ=DAILY;INTERVAL=2");
+        dKind.ShouldBe(RepeatKind.Daily);
+        dInt.ShouldBe(2);
+
+        var (wKind, wDays, wInt) = Recurrence.FromRrule("FREQ=WEEKLY;INTERVAL=3;BYDAY=TU,TH");
+        wKind.ShouldBe(RepeatKind.Weekly);
+        wInt.ShouldBe(3);
+        wDays.ShouldBe([DayOfWeek.Tuesday, DayOfWeek.Thursday]);
+
+        var (mKind, _, mInt) = Recurrence.FromRrule("FREQ=MONTHLY;INTERVAL=2");
+        mKind.ShouldBe(RepeatKind.Monthly);
+        mInt.ShouldBe(2);
+
+        var (yKind, _, yInt) = Recurrence.FromRrule("FREQ=YEARLY");
+        yKind.ShouldBe(RepeatKind.Yearly);
+        yInt.ShouldBe(1);
+    }
+
+    [Fact]
+    public void Describes_frequencies_in_natural_english()
+    {
+        Recurrence.Describe("FREQ=HOURLY").ShouldBe("Every hour");
+        Recurrence.Describe("FREQ=HOURLY;INTERVAL=2").ShouldBe("Every 2 hours");
+        Recurrence.Describe("FREQ=DAILY").ShouldBe("Every day");
+        Recurrence.Describe("FREQ=DAILY;INTERVAL=3").ShouldBe("Every 3 days");
+        Recurrence.Describe("FREQ=WEEKLY;BYDAY=MO,WE").ShouldBe("Every Mon and Wed");
+        Recurrence.Describe("FREQ=WEEKLY;INTERVAL=2;BYDAY=FR").ShouldBe("Every 2 weeks on Fri");
+        Recurrence.Describe("FREQ=MONTHLY").ShouldBe("Every month");
+        Recurrence.Describe("FREQ=MONTHLY;INTERVAL=2").ShouldBe("Every 2 months");
+        Recurrence.Describe("FREQ=YEARLY").ShouldBe("Every year");
+    }
+
+    [Fact]
+    public void Summarises_schedule_with_times_and_dates()
+    {
+        var start = new DateOnly(2026, 9, 26);
+        var today = new DateOnly(2026, 9, 26);
+        var times = new List<TimeOnly> { new(9, 30), new(14, 0) };
+
+        var summary = Recurrence.Summarise(RepeatKind.Hourly, [], 2, start, times, null, today);
+        summary.ShouldContain("every 2 hours");
+        summary.ShouldContain("09:30 and 14:00");
+
+        var dailySummary = Recurrence.Summarise(RepeatKind.Daily, [], 1, start, [new(10, 0)], new DateOnly(2026, 12, 31), today);
+        dailySummary.ShouldContain("Every day");
+        dailySummary.ShouldContain("31 December 2026");
+        dailySummary.ShouldContain("10:00");
+
+        var summary12Hour = Recurrence.Summarise(RepeatKind.Hourly, [], 2, start, times, null, today, use24Hour: false);
+        summary12Hour.ShouldContain("every 2 hours");
+        summary12Hour.ShouldContain("9:30 AM and 2:00 PM");
+
+        var once12Hour = Recurrence.Summarise(RepeatKind.Once, [], 1, start, [new(17, 0)], null, today, use24Hour: false);
+        once12Hour.ShouldContain("Once — today");
+        once12Hour.ShouldContain("5:00 PM");
+    }
+
+    [Fact]
+    public void Determines_occurson_accurately()
+    {
+        var start = new DateOnly(2026, 9, 26); // Saturday
+        Recurrence.OccursOn("FREQ=DAILY", start, new DateOnly(2026, 9, 27)).ShouldBeTrue();
+        Recurrence.OccursOn("FREQ=DAILY", start, new DateOnly(2026, 9, 25)).ShouldBeFalse();
+
+        Recurrence.OccursOn("FREQ=WEEKLY;BYDAY=MO", start, new DateOnly(2026, 9, 28)).ShouldBeTrue(); // Monday
+        Recurrence.OccursOn("FREQ=WEEKLY;BYDAY=MO", start, new DateOnly(2026, 9, 29)).ShouldBeFalse(); // Tuesday
+
+        Recurrence.OccursOn("FREQ=MONTHLY", start, new DateOnly(2026, 10, 26)).ShouldBeTrue();
+        Recurrence.OccursOn("FREQ=MONTHLY", start, new DateOnly(2026, 10, 27)).ShouldBeFalse();
     }
 }

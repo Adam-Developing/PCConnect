@@ -1,0 +1,1081 @@
+<title>PCConnect Repository Audit</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@600;700&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&display=swap">
+
+<style>
+  :root {
+    --ground:      #F1F3F5;
+    --surface:     #FFFFFF;
+    --surface-alt: #E9ECF0;
+    --ink:         #171A1F;
+    --ink-soft:    #58616F;
+    --ink-faint:   #7D8694;
+    --rule:        #D6DAE1;
+    --rule-soft:   #E6E9ED;
+    --accent:      #2D4A7A;
+    --accent-soft: #6C88B5;
+
+    --crit:     #A32029;
+    --crit-bg:  #F7E4E5;
+    --high:     #A85A12;
+    --high-bg:  #F8EADA;
+    --med:      #7A6317;
+    --med-bg:   #F3EEDB;
+    --low:      #46536A;
+    --low-bg:   #E7EAEF;
+
+    --shadow: 0 1px 2px rgba(20,26,36,.06), 0 8px 24px rgba(20,26,36,.05);
+
+    --sans: "IBM Plex Sans", ui-sans-serif, system-ui, "Segoe UI", sans-serif;
+    --cond: "IBM Plex Sans Condensed", "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:      #0E1116;
+      --surface:     #161A21;
+      --surface-alt: #1D222B;
+      --ink:         #E3E7EC;
+      --ink-soft:    #98A2B1;
+      --ink-faint:   #6F7B8C;
+      --rule:        #262D38;
+      --rule-soft:   #1E242D;
+      --accent:      #86A6DA;
+      --accent-soft: #587297;
+
+      --crit:     #EE7B81;
+      --crit-bg:  #2E1619;
+      --high:     #E39A55;
+      --high-bg:  #2C1F12;
+      --med:      #D2B85E;
+      --med-bg:   #272215;
+      --low:      #9AA5B6;
+      --low-bg:   #1D222B;
+
+      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 28px rgba(0,0,0,.32);
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --ground:      #0E1116;
+    --surface:     #161A21;
+    --surface-alt: #1D222B;
+    --ink:         #E3E7EC;
+    --ink-soft:    #98A2B1;
+    --ink-faint:   #6F7B8C;
+    --rule:        #262D38;
+    --rule-soft:   #1E242D;
+    --accent:      #86A6DA;
+    --accent-soft: #587297;
+
+    --crit:     #EE7B81;
+    --crit-bg:  #2E1619;
+    --high:     #E39A55;
+    --high-bg:  #2C1F12;
+    --med:      #D2B85E;
+    --med-bg:   #272215;
+    --low:      #9AA5B6;
+    --low-bg:   #1D222B;
+
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 28px rgba(0,0,0,.32);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: 1040px;
+    margin: 0 auto;
+    padding: 0 28px 96px;
+  }
+
+  /* ---------- masthead ---------- */
+
+  .mast {
+    border-bottom: 2px solid var(--ink);
+    padding: 56px 0 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    font-weight: 500;
+    letter-spacing: .13em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+
+  h1 {
+    font-family: var(--cond);
+    font-weight: 700;
+    font-size: clamp(38px, 6.4vw, 62px);
+    line-height: 1.03;
+    letter-spacing: -.018em;
+    margin: 0;
+    text-wrap: balance;
+  }
+
+  .standfirst {
+    font-size: 18.5px;
+    line-height: 1.55;
+    color: var(--ink-soft);
+    max-width: 62ch;
+    margin: 0;
+  }
+
+  .meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0 30px;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--ink-faint);
+    padding-top: 6px;
+  }
+  .meta b { color: var(--ink-soft); font-weight: 500; }
+
+  /* ---------- severity strip ---------- */
+
+  .tally {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1px;
+    background: var(--rule);
+    border: 1px solid var(--rule);
+    margin: 34px 0 8px;
+  }
+  .tally div {
+    background: var(--surface);
+    padding: 16px 18px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .tally .n {
+    font-family: var(--cond);
+    font-weight: 700;
+    font-size: 34px;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+  }
+  .tally .l {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: .11em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+  }
+  .t-crit .n { color: var(--crit); }
+  .t-high .n { color: var(--high); }
+  .t-med  .n { color: var(--med); }
+  .t-low  .n { color: var(--low); }
+
+  .tally-note {
+    font-size: 13.5px;
+    color: var(--ink-faint);
+    margin: 0 0 44px;
+  }
+
+  /* ---------- sections ---------- */
+
+  section { padding-top: 52px; }
+
+  .sec-head {
+    display: flex;
+    align-items: baseline;
+    gap: 16px;
+    border-bottom: 1px solid var(--ink);
+    padding-bottom: 8px;
+    margin-bottom: 10px;
+  }
+  .sec-head h2 {
+    font-family: var(--cond);
+    font-weight: 700;
+    font-size: 27px;
+    letter-spacing: -.01em;
+    margin: 0;
+    flex: 1;
+  }
+  .sec-head .count {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--ink-faint);
+    letter-spacing: .06em;
+  }
+
+  .sec-intro {
+    color: var(--ink-soft);
+    max-width: 68ch;
+    margin: 0 0 8px;
+    font-size: 15.5px;
+  }
+
+  h3 {
+    font-family: var(--cond);
+    font-weight: 600;
+    font-size: 19.5px;
+    line-height: 1.25;
+    letter-spacing: -.005em;
+    margin: 0;
+    text-wrap: balance;
+  }
+
+  p { margin: 0; }
+
+  /* ---------- findings ---------- */
+
+  .findings { display: flex; flex-direction: column; gap: 1px; background: var(--rule-soft); margin-top: 22px; }
+
+  .finding {
+    background: var(--surface);
+    display: grid;
+    grid-template-columns: 132px 1fr;
+    gap: 0 26px;
+    padding: 22px 22px 24px;
+    border-left: 3px solid var(--rule);
+  }
+  .finding.s-crit { border-left-color: var(--crit); }
+  .finding.s-high { border-left-color: var(--high); }
+  .finding.s-med  { border-left-color: var(--med); }
+  .finding.s-low  { border-left-color: var(--low); }
+
+  .gut { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; padding-top: 2px; }
+
+  .sev {
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    padding: 3px 8px;
+    border-radius: 2px;
+  }
+  .s-crit .sev { color: var(--crit); background: var(--crit-bg); }
+  .s-high .sev { color: var(--high); background: var(--high-bg); }
+  .s-med  .sev { color: var(--med);  background: var(--med-bg); }
+  .s-low  .sev { color: var(--low);  background: var(--low-bg); }
+
+  .fid {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--ink-faint);
+    letter-spacing: .04em;
+  }
+  .comp {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: var(--ink-soft);
+    line-height: 1.4;
+  }
+
+  .fbody { display: flex; flex-direction: column; gap: 9px; min-width: 0; }
+  .fbody p { font-size: 15px; line-height: 1.58; color: var(--ink-soft); max-width: 72ch; }
+  .fbody p strong { color: var(--ink); font-weight: 600; }
+
+  .loc {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--accent);
+    overflow-x: auto;
+    white-space: nowrap;
+    padding-bottom: 2px;
+  }
+
+  code {
+    font-family: var(--mono);
+    font-size: .875em;
+    background: var(--surface-alt);
+    padding: .1em .35em;
+    border-radius: 2px;
+    color: var(--ink);
+  }
+
+  pre {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    line-height: 1.55;
+    background: var(--surface-alt);
+    border-left: 2px solid var(--accent-soft);
+    padding: 11px 14px;
+    margin: 2px 0;
+    overflow-x: auto;
+    color: var(--ink);
+  }
+
+  /* ---------- diagram ---------- */
+
+  .figure {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    padding: 26px 24px 20px;
+    margin-top: 24px;
+    box-shadow: var(--shadow);
+  }
+  .figure svg { display: block; width: 100%; height: auto; }
+  .figwrap { overflow-x: auto; }
+  .caption {
+    font-size: 13px;
+    color: var(--ink-faint);
+    margin-top: 16px;
+    padding-top: 12px;
+    border-top: 1px solid var(--rule-soft);
+    max-width: 76ch;
+  }
+
+  /* ---------- inventory table ---------- */
+
+  .tablewrap { overflow-x: auto; margin-top: 22px; border: 1px solid var(--rule); }
+  table { border-collapse: collapse; width: 100%; min-width: 640px; background: var(--surface); }
+  th, td { text-align: left; padding: 11px 15px; border-bottom: 1px solid var(--rule-soft); vertical-align: top; }
+  th {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    font-weight: 500;
+    background: var(--surface-alt);
+    border-bottom: 1px solid var(--rule);
+  }
+  td { font-size: 14px; color: var(--ink-soft); }
+  td:first-child { font-family: var(--mono); font-size: 12.5px; color: var(--ink); white-space: nowrap; }
+  td.num { font-variant-numeric: tabular-nums; }
+  tbody tr:last-child td { border-bottom: none; }
+
+  .state {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    padding: 2px 7px;
+    border-radius: 2px;
+    white-space: nowrap;
+  }
+  .st-live    { color: var(--low);  background: var(--low-bg); }
+  .st-broken  { color: var(--crit); background: var(--crit-bg); }
+  .st-orphan  { color: var(--high); background: var(--high-bg); }
+
+  /* ---------- sequence ---------- */
+
+  .seq { display: flex; flex-direction: column; gap: 1px; background: var(--rule-soft); margin-top: 22px; }
+  .step {
+    background: var(--surface);
+    display: grid;
+    grid-template-columns: 46px 1fr;
+    gap: 0 20px;
+    padding: 18px 22px 20px;
+  }
+  .step .ord {
+    font-family: var(--cond);
+    font-weight: 700;
+    font-size: 26px;
+    line-height: 1;
+    color: var(--accent-soft);
+    font-variant-numeric: tabular-nums;
+  }
+  .step .sbody { display: flex; flex-direction: column; gap: 7px; }
+  .step p { font-size: 14.5px; color: var(--ink-soft); max-width: 70ch; }
+  .step .refs { font-family: var(--mono); font-size: 11px; color: var(--ink-faint); }
+
+  footer {
+    margin-top: 64px;
+    padding-top: 20px;
+    border-top: 1px solid var(--rule);
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--ink-faint);
+    line-height: 1.7;
+  }
+
+  a { color: var(--accent); }
+  a:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  @media (max-width: 720px) {
+    .wrap { padding: 0 18px 72px; }
+    .finding { grid-template-columns: 1fr; gap: 12px; }
+    .gut { flex-direction: row; align-items: center; gap: 12px; flex-wrap: wrap; }
+    .tally { grid-template-columns: repeat(2, 1fr); }
+  }
+</style>
+
+<div class="wrap">
+
+  <header class="mast">
+    <span class="eyebrow">Full-repository audit</span>
+    <h1>PCConnect Repository Audit</h1>
+    <p class="standfirst">Six components, four mutually incompatible API contracts, and one shared secret that serves as password, session token, and encryption key at once. Findings across architecture, security, and technical debt.</p>
+    <div class="meta">
+      <span><b>Repo</b> PCConnect</span>
+      <span><b>Branch</b> Mobile-App</span>
+      <span><b>Commit</b> 0b47ea2</span>
+      <span><b>Tracked files</b> 255</span>
+      <span><b>Date</b> 2 Sep 2026</span>
+    </div>
+  </header>
+
+  <div class="tally">
+    <div class="t-crit"><span class="n">8</span><span class="l">Critical</span></div>
+    <div class="t-high"><span class="n">15</span><span class="l">High</span></div>
+    <div class="t-med"><span class="n">14</span><span class="l">Medium</span></div>
+    <div class="t-low"><span class="n">5</span><span class="l">Low</span></div>
+  </div>
+  <p class="tally-note">Severity reflects exploitability and blast radius for a system whose whole purpose is remotely powering off someone's computer. Every finding below cites the file it was read in.</p>
+
+  <!-- ============ SYSTEM MAP ============ -->
+  <section id="map">
+    <div class="sec-head">
+      <h2>How the pieces actually connect</h2>
+      <span class="count">System map</span>
+    </div>
+    <p class="sec-intro">Three shipped clients, two backends in the repository, and four distinct URL contracts between them. The endpoints the shipped clients call are not the endpoints the repository implements.</p>
+
+    <div class="figure">
+      <div class="figwrap">
+      <svg viewBox="0 0 900 430" role="img" aria-label="Diagram of PCConnect clients, four API surfaces, and the shared MySQL database. The Android and VB.NET clients call PHP endpoint families that do not exist in the repository; the PHP front controller is non-functional; only the Wails desktop client reaches the Node API.">
+        <defs>
+          <marker id="arw" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="var(--accent-soft)"/>
+          </marker>
+          <marker id="arwbad" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="var(--crit)"/>
+          </marker>
+        </defs>
+
+        <!-- column labels -->
+        <text x="12" y="20" font-family="IBM Plex Mono, monospace" font-size="10.5" letter-spacing="1.4" fill="var(--ink-faint)">CLIENTS</text>
+        <text x="318" y="20" font-family="IBM Plex Mono, monospace" font-size="10.5" letter-spacing="1.4" fill="var(--ink-faint)">API SURFACES</text>
+        <text x="742" y="20" font-family="IBM Plex Mono, monospace" font-size="10.5" letter-spacing="1.4" fill="var(--ink-faint)">STORAGE</text>
+
+        <!-- clients -->
+        <g font-family="IBM Plex Sans, sans-serif">
+          <rect x="12" y="44" width="196" height="58" rx="2" fill="var(--surface-alt)" stroke="var(--rule)"/>
+          <text x="26" y="68" font-size="14" font-weight="600" fill="var(--ink)">Android app</text>
+          <text x="26" y="87" font-size="11" font-family="IBM Plex Mono, monospace" fill="var(--ink-faint)">App/ · v7.2 · Java</text>
+
+          <rect x="12" y="130" width="196" height="58" rx="2" fill="var(--surface-alt)" stroke="var(--rule)"/>
+          <text x="26" y="154" font-size="14" font-weight="600" fill="var(--ink)">PCClient</text>
+          <text x="26" y="173" font-size="11" font-family="IBM Plex Mono, monospace" fill="var(--ink-faint)">PCClient/ · VB.NET 4.7.2</text>
+
+          <rect x="12" y="216" width="196" height="58" rx="2" fill="var(--surface-alt)" stroke="var(--rule)"/>
+          <text x="26" y="240" font-size="14" font-weight="600" fill="var(--ink)">PCClientWails</text>
+          <text x="26" y="259" font-size="11" font-family="IBM Plex Mono, monospace" fill="var(--ink-faint)">Go + React desktop</text>
+
+          <rect x="12" y="302" width="196" height="58" rx="2" fill="var(--surface-alt)" stroke="var(--rule)"/>
+          <text x="26" y="326" font-size="14" font-weight="600" fill="var(--ink)">Wails webview</text>
+          <text x="26" y="345" font-size="11" font-family="IBM Plex Mono, monospace" fill="var(--ink-faint)">frontend/src/lib</text>
+        </g>
+
+        <!-- surfaces -->
+        <g font-family="IBM Plex Sans, sans-serif">
+          <rect x="318" y="40" width="252" height="62" rx="2" fill="var(--surface)" stroke="var(--crit)" stroke-dasharray="4 3"/>
+          <text x="332" y="63" font-size="13.5" font-weight="600" fill="var(--ink)">api/pcconnect/*.php</text>
+          <text x="332" y="82" font-size="11" font-family="IBM Plex Mono, monospace" fill="var(--crit)">not in repository</text>
+
+          <rect x="318" y="126" width="252" height="62" rx="2" fill="var(--surface)" stroke="var(--crit)" stroke-dasharray="4 3"/>
+          <text x="332" y="149" font-size="13.5" font-weight="600" fill="var(--ink)">api/pcclient/*.php</text>
+          <text x="332" y="168" font-size="11" font-family="IBM Plex Mono, monospace" fill="var(--crit)">not in repository</text>
+
+          <rect x="318" y="212" width="252" height="62" rx="2" fill="var(--surface)" stroke="var(--rule)"/>
+          <text x="332" y="235" font-size="13.5" font-weight="600" fill="var(--ink)">api_node/ · Express + WS</text>
+          <text x="332" y="254" font-size="11" font-family="IBM Plex Mono, monospace" fill="var(--ink-faint)">the only working backend</text>
+
+          <rect x="318" y="298" width="252" height="62" rx="2" fill="var(--surface)" stroke="var(--crit)"/>
+          <text x="332" y="321" font-size="13.5" font-weight="600" fill="var(--ink)">api/index.php · v1 routes</text>
+          <text x="332" y="340" font-size="11" font-family="IBM Plex Mono, monospace" fill="var(--crit)">fatals — 0-byte classes</text>
+        </g>
+
+        <!-- legacy PHP still live -->
+        <rect x="318" y="384" width="252" height="34" rx="2" fill="var(--surface-alt)" stroke="var(--rule)"/>
+        <text x="332" y="406" font-family="IBM Plex Sans, sans-serif" font-size="12.5" fill="var(--ink-soft)">api/login.php · api/signup.php</text>
+
+        <!-- db -->
+        <rect x="686" y="150" width="196" height="122" rx="2" fill="var(--surface-alt)" stroke="var(--rule)"/>
+        <text x="700" y="180" font-family="IBM Plex Sans, sans-serif" font-size="14" font-weight="600" fill="var(--ink)">MySQL</text>
+        <text x="700" y="200" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--ink-faint)">130.162.164.140</text>
+        <text x="700" y="222" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--ink-soft)">users · pcnames</text>
+        <text x="700" y="238" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--ink-soft)">reminders</text>
+        <text x="700" y="260" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--crit)">api_key: no index</text>
+
+        <!-- edges -->
+        <g fill="none" stroke-width="1.4">
+          <path d="M208 73 L 316 71" stroke="var(--crit)" marker-end="url(#arwbad)"/>
+          <path d="M208 159 L 316 157" stroke="var(--crit)" marker-end="url(#arwbad)"/>
+          <path d="M208 245 L 316 243" stroke="var(--accent-soft)" marker-end="url(#arw)"/>
+          <path d="M208 331 L 316 329" stroke="var(--accent-soft)" marker-end="url(#arw)" stroke-dasharray="4 3"/>
+          <path d="M208 331 C 250 331, 258 250, 316 245" stroke="var(--accent-soft)" marker-end="url(#arw)"/>
+          <path d="M570 243 L 684 215" stroke="var(--accent-soft)" marker-end="url(#arw)"/>
+          <path d="M570 401 C 640 401, 660 300, 684 262" stroke="var(--accent-soft)" marker-end="url(#arw)"/>
+        </g>
+
+        <text x="222" y="356" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="var(--ink-faint)">hardcoded localhost:3000</text>
+      </svg>
+      </div>
+      <p class="caption">Solid red arrows are calls made by shipped, released clients to endpoint families that exist nowhere in this repository. The PHP front controller at <code>api/index.php</code> is wired but cannot boot. The webview's own API module bypasses the configurable base URL entirely and always dials <code>localhost:3000</code>.</p>
+    </div>
+
+    <div class="tablewrap">
+      <table>
+        <thead>
+          <tr><th>Component</th><th>Stack</th><th>Talks to</th><th>State</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>App/</td><td>Android, Java, minSdk 24</td><td>api/pcconnect/*.php</td><td><span class="state st-orphan">Orphaned contract</span></td></tr>
+          <tr><td>PCClient/</td><td>VB.NET, .NET Framework 4.7.2</td><td>api/pcclient/*.php</td><td><span class="state st-orphan">Orphaned contract</span></td></tr>
+          <tr><td>PCClientWails/</td><td>Go 1.25, Wails v2 + v3, React 18</td><td>api_node</td><td><span class="state st-live">Current</span></td></tr>
+          <tr><td>api_node/</td><td>Express 5, socket.io 4, mysql2</td><td>MySQL</td><td><span class="state st-live">Current</span></td></tr>
+          <tr><td>api/</td><td>PHP front controller</td><td>MySQL</td><td><span class="state st-broken">Non-functional</span></td></tr>
+          <tr><td>DB/</td><td>SQL dumps, Python migration scripts</td><td>MySQL</td><td><span class="state st-live">Tooling</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ============ SECURITY ============ -->
+  <section id="security">
+    <div class="sec-head">
+      <h2>Security</h2>
+      <span class="count">18 findings</span>
+    </div>
+    <p class="sec-intro">The system's threat model is unusual: a stolen credential does not leak data, it powers off, locks, or hibernates a physical machine. Several findings below hand that capability over cheaply.</p>
+
+    <div class="findings">
+
+      <article class="finding s-crit">
+        <div class="gut"><span class="sev">Critical</span><span class="fid">SEC-01</span><span class="comp">api</span></div>
+        <div class="fbody">
+          <h3>Live production database credentials sit in a file git is not ignoring</h3>
+          <p class="loc">api/db_config.php</p>
+          <p>Host <code>130.162.164.140</code>, user <code>pcconnect_new</code>, and a plaintext password are hardcoded. The file is currently <strong>untracked but not ignored</strong> — <code>git check-ignore</code> returns nothing for it, so a single <code>git add .</code> publishes the production database to history. These credentials are not yet in any commit, which is the one piece of good news, and it is a matter of luck rather than configuration.</p>
+          <p><strong>Do now:</strong> rotate the MySQL password, add <code>api/db_config.php</code> to <code>.gitignore</code>, and move the values to environment variables. Verify the database is not reachable from the public internet.</p>
+        </div>
+      </article>
+
+      <article class="finding s-crit">
+        <div class="gut"><span class="sev">Critical</span><span class="fid">SEC-02</span><span class="comp">api</span></div>
+        <div class="fbody">
+          <h3>hCaptcha secret key is hardcoded in a public-facing script</h3>
+          <p class="loc">api/signup.php:15</p>
+          <p>The server-side hCaptcha secret is embedded as a literal in the signup handler. A secret key lets anyone forge captcha verification against your site key, which turns the signup form into an unthrottled account-creation endpoint. Same remediation shape as SEC-01: rotate at hCaptcha, then read from the environment.</p>
+        </div>
+      </article>
+
+      <article class="finding s-crit">
+        <div class="gut"><span class="sev">Critical</span><span class="fid">SEC-03</span><span class="comp">api_node</span></div>
+        <div class="fbody">
+          <h3>Password change writes the new password to the database in cleartext</h3>
+          <p class="loc">api_node/routes.js:323-332</p>
+          <p>The profile endpoint compares <code>user[0].Password !== oldPassword</code> and then stores <code>newPassword</code> verbatim:</p>
+          <pre>updates.push("Password = ?");
+values.push(newPassword);</pre>
+          <p>Everywhere else in the system the <code>Password</code> column holds a SHA-256 hex digest. Any account that changes its password through this route ends up with a raw password in a column the rest of the system treats as a hash — so the account can no longer log in, <em>and</em> the plaintext is now at rest. <code>validatePassword()</code> exists in <code>helpers.js</code> with sensible rules and is never called from anywhere.</p>
+        </div>
+      </article>
+
+      <article class="finding s-crit">
+        <div class="gut"><span class="sev">Critical</span><span class="fid">SEC-04</span><span class="comp">all</span></div>
+        <div class="fbody">
+          <h3>The stored password hash is itself the credential</h3>
+          <p class="loc">App/.../LoginActivity.java:127 · PCClient/PCClient/Login.vb:95 · frontend/src/lib/api.ts:3</p>
+          <p>Every client hashes the password with unsalted SHA-256 <strong>before</strong> transmitting it, and the server compares that digest directly against the <code>Password</code> column. This means the column contents are a working login credential — anyone with read access to the <code>users</code> table can authenticate as any user without cracking anything. It also means the "hashing" provides no protection at all: the digest is the password, transmitted and stored identically.</p>
+          <p>Compounding it: SHA-256 is unsalted and fast, so the same password produces the same digest for every user, and the <code>Password varchar(64)</code> column is sized exactly for SHA-256 hex, leaving no room for a modern hash format without a migration.</p>
+          <p><strong>Fix shape:</strong> send the real password over TLS, hash server-side with bcrypt or argon2id, widen the column, and migrate on next successful login.</p>
+        </div>
+      </article>
+
+      <article class="finding s-crit">
+        <div class="gut"><span class="sev">Critical</span><span class="fid">SEC-05</span><span class="comp">App · PCClient</span></div>
+        <div class="fbody">
+          <h3>Login succeeds on any response that isn't the exact failure string</h3>
+          <p class="loc">App/.../LoginActivity.java:158 · PCClient/PCClient/Login.vb:98</p>
+          <p>Both clients decide authentication by string equality against the literal <code>"Invalid username or password."</code>:</p>
+          <pre>if (!"Invalid username or password.".equals(resp)) {
+    SharedPrefManager.getInstance(...).setApiKey(resp);
+    goToMain();
+}</pre>
+          <p>Neither checks the HTTP status code. A PHP warning, a maintenance page, a WAF block page, a 500 body, or a captive-portal interception are all stored as the API key and treated as a successful login. The user lands in the authenticated UI holding a garbage credential, and every later request fails with no explanation.</p>
+        </div>
+      </article>
+
+      <article class="finding s-crit">
+        <div class="gut"><span class="sev">Critical</span><span class="fid">SEC-06</span><span class="comp">PCClient</span></div>
+        <div class="fbody">
+          <h3>A network error is reported to the user as a successful login</h3>
+          <p class="loc">PCClient/PCClient/Login.vb:37-88</p>
+          <p><code>LoginFunction</code> has <code>Return</code> statements on its success paths but none in its three <code>Catch</code> blocks, so a connection failure falls out of the function returning <code>Nothing</code>. With <code>Option Strict Off</code> the caller's <code>If output &lt;&gt; "Invalid username or password."</code> coerces <code>Nothing</code> to an empty string, the comparison is true, and the client saves the credentials, shows <em>"Login Successful."</em>, and starts the polling loop with <code>apiKey = Nothing</code>.</p>
+        </div>
+      </article>
+
+      <article class="finding s-crit">
+        <div class="gut"><span class="sev">Critical</span><span class="fid">SEC-07</span><span class="comp">api_node · DB</span></div>
+        <div class="fbody">
+          <h3>The API key is simultaneously the session token and the AES key, and the server holds both</h3>
+          <p class="loc">api_node/helpers.js:89 · PCClientWails/internal/reminders/reminders.go:151</p>
+          <p>Reminders are AES-256-CBC encrypted with the user's API key used directly as the key bytes. That key is stored in plaintext in <code>users.api_key</code>, one row away from the ciphertext in <code>reminders.Reminder</code>. Anyone who can read the database can decrypt everything, so the encryption buys nothing against the threat it appears designed for.</p>
+          <p>It is also not end-to-end: <code>fetchUserReminders()</code> decrypts server-side before responding, so the plaintext transits the server anyway. Three further consequences — the ciphertext has no authentication tag (CBC without HMAC is malleable), the decryptors disagree (Node has a legacy double-base64 heuristic that Go lacks), and <strong>rotating an API key permanently orphans every reminder that user has ever created</strong>, which is likely why no rotation mechanism exists.</p>
+        </div>
+      </article>
+
+      <article class="finding s-high">
+        <div class="gut"><span class="sev">High</span><span class="fid">SEC-08</span><span class="comp">api_node</span></div>
+        <div class="fbody">
+          <h3>A real user's API key is committed across six documentation files</h3>
+          <p class="loc">api_node/CREATION_REPORT.md · INDEX.md · MANUAL_TEST_REPORT.md · QUICK_START.md · README_TESTING.md · TEST_MANIFEST.md</p>
+          <p>The key <code>51359fd1b13802000649a6bd2f3f10ba</code>, described in those files as belonging to the <code>admin</code> user (ID 1), appears in curl examples and test fixtures. It is in git history, so deleting the lines is not sufficient. Revoke and reissue the key; if this repository is or ever becomes public, treat it as fully compromised.</p>
+        </div>
+      </article>
+
+      <article class="finding s-high">
+        <div class="gut"><span class="sev">High</span><span class="fid">SEC-09</span><span class="comp">App</span></div>
+        <div class="fbody">
+          <h3>The biometric gate silently disappears when biometrics aren't enrolled</h3>
+          <p class="loc">App/.../MainActivity.java:171-174 · LoginActivity.java:89-92</p>
+          <p>Both biometric paths begin the same way:</p>
+          <pre>if (bm.canAuthenticate() != BiometricManager.BIOMETRIC_SUCCESS) {
+    sendStateChange(command, successMsg);   // proceed with no auth at all
+    return;
+}</pre>
+          <p>Turning off fingerprint enrolment removes the protection rather than falling back to it — an attacker with the unlocked phone can shut down or lock the paired PC with a single tap. There is a second, subtler path to the same place: the capability check uses the deprecated no-argument <code>canAuthenticate()</code> (which evaluates BIOMETRIC_WEAK), while the prompt then requests <code>BIOMETRIC_STRONG | DEVICE_CREDENTIAL</code>. A device that can satisfy the prompt can still fail the check and skip authentication.</p>
+          <p><strong>Fix:</strong> pass the same authenticator set to <code>canAuthenticate()</code> that the prompt requests, and on failure refuse the action rather than performing it. Also override <code>onAuthenticationError</code>, which is currently unimplemented in both classes.</p>
+        </div>
+      </article>
+
+      <article class="finding s-high">
+        <div class="gut"><span class="sev">High</span><span class="fid">SEC-10</span><span class="comp">PCClient</span></div>
+        <div class="fbody">
+          <h3>A reminder popup blocks the entire keyboard system-wide</h3>
+          <p class="loc">PCClient/PCClient/KeyboardBlocker.vb:27-33 · reminderWindow.vb:49</p>
+          <p><code>reminderWindow</code> installs a low-level <code>WH_KEYBOARD_LL</code> hook on load that swallows every keydown and keyup unconditionally, and the window sets <code>TopMost = True</code>. The only exit is clicking Dismiss with a mouse. Combined with the fact that reminders are delivered from the server, this gives anyone holding a user's API key the ability to display an undismissable topmost window and disable the victim's keyboard — behaviour indistinguishable from a lock-screen attack, and a reliable way to get the binary flagged by endpoint protection.</p>
+          <p>The hook is also leaked on repeat: <code>BlockKeyboard()</code> overwrites <code>hookID</code> without unhooking the previous handle, and <code>UnhookWindowsHookEx</code>'s return value is discarded. <code>DismissB_Click</code> calls the async <code>Complete()</code> without awaiting it, so an exception during the unhook path is silent.</p>
+        </div>
+      </article>
+
+      <article class="finding s-high">
+        <div class="gut"><span class="sev">High</span><span class="fid">SEC-11</span><span class="comp">api_node</span></div>
+        <div class="fbody">
+          <h3>Clients declare their own privilege level and the server believes them</h3>
+          <p class="loc">api_node/server.js:24,44 · internal/websocket/client.go:68</p>
+          <p><code>POST /v1/auth/session</code> accepts <code>clientType</code> from the request body and stores it as <code>role</code> in the session, which then determines whether the socket is treated as a controllable desktop or a controlling phone. Nothing validates the claim against the device record, so any holder of an API key can register as either role for any PC name.</p>
+        </div>
+      </article>
+
+      <article class="finding s-high">
+        <div class="gut"><span class="sev">High</span><span class="fid">SEC-12</span><span class="comp">api_node</span></div>
+        <div class="fbody">
+          <h3>CORS reflects any origin with credentials; socket.io accepts all origins</h3>
+          <p class="loc">api_node/server.js:11, 62 · api/index.php:5</p>
+          <p><code>cors({ origin: true, credentials: true })</code> echoes back whatever <code>Origin</code> the caller sends and permits credentialed requests — the standard bypass of the same-origin protection that <code>Access-Control-Allow-Origin</code> exists to provide. The socket.io server separately sets <code>cors: { origin: "*" }</code>, and the PHP gateway sets <code>Access-Control-Allow-Origin: *</code> on an API authenticated by a custom header. The session cookie is also issued with <code>secure: false</code> and the comment <em>"Since this runs locally"</em>, while the server binds <code>0.0.0.0:3000</code>.</p>
+          <p>Restrict the origin list to the actual client origins, and set <code>secure: true</code> behind TLS.</p>
+        </div>
+      </article>
+
+      <article class="finding s-high">
+        <div class="gut"><span class="sev">High</span><span class="fid">SEC-13</span><span class="comp">all</span></div>
+        <div class="fbody">
+          <h3>API keys have no expiry, no rotation path, and no rate limit protecting them</h3>
+          <p class="loc">api/signup.php:102 · api_node/helpers.js:21-38</p>
+          <p>Keys are 16 random bytes generated once at signup and valid forever. There is no revocation endpoint, no last-used timestamp, no scope, and no per-IP or per-account throttle on <code>/auth/login</code> or on any key-authenticated route. A leaked key is permanent access to power-control commands, and login is brute-forceable at whatever rate the host allows. Rotation is additionally blocked by SEC-07, since rotating destroys the user's reminders.</p>
+        </div>
+      </article>
+
+      <article class="finding s-high">
+        <div class="gut"><span class="sev">High</span><span class="fid">SEC-14</span><span class="comp">all clients</span></div>
+        <div class="fbody">
+          <h3>Every client stores the API key in plaintext at rest</h3>
+          <p class="loc">PCClientWails/app/app.go:210-211 · App/.../SharedPrefManager.java:24 · PCClient/PCClient/Login.vb:101</p>
+          <p>The Go client writes the key into <code>session.json</code> even though <code>internal/auth</code> already stores it correctly in Windows Credential Manager — the code says so in its own comment: <em>"keeping a masked or empty API key in JSON is safer, but for now we keep it"</em>. The Android app puts it in unencrypted <code>SharedPreferences</code> while the manifest sets <code>allowBackup="true"</code> with empty backup rules, so it travels into cloud backups and ADB backups. The VB client writes the password digest into <code>user.config</code> via <code>My.Settings</code>.</p>
+          <p>Given SEC-07, each of these files is also the decryption key for that user's reminders.</p>
+        </div>
+      </article>
+
+      <article class="finding s-high">
+        <div class="gut"><span class="sev">High</span><span class="fid">SEC-15</span><span class="comp">DB</span></div>
+        <div class="fbody">
+          <h3><code>users.api_key</code> has no index and no uniqueness constraint</h3>
+          <p class="loc">DB/pcconnect_new_schema.sql:12</p>
+          <p>Every authenticated request runs <code>SELECT id FROM users WHERE api_key = ?</code>, and the column is a plain nullable <code>varchar(512)</code> — so each one is a full table scan, and the lookup is not constant-time. Without <code>UNIQUE</code>, nothing structurally prevents two accounts sharing a key. Add a unique index; it fixes an availability problem and a correctness problem at once.</p>
+        </div>
+      </article>
+
+      <article class="finding s-med">
+        <div class="gut"><span class="sev">Medium</span><span class="fid">SEC-16</span><span class="comp">api</span></div>
+        <div class="fbody">
+          <h3>Error handlers return internal exception text to the caller</h3>
+          <p class="loc">api/index.php:60-63 · api/login.php:11 · api/signup.php:43</p>
+          <p>The gateway's catch-all ends with <code>Response::error($e->getMessage(), 500)</code>, and both legacy scripts call <code>die("Connection failed: " . $conn->connect_error)</code> — which prints MySQL's connection error, including host and user, straight to the HTTP response. Log the detail server-side and return a generic message.</p>
+        </div>
+      </article>
+
+      <article class="finding s-med">
+        <div class="gut"><span class="sev">Medium</span><span class="fid">SEC-17</span><span class="comp">App</span></div>
+        <div class="fbody">
+          <h3><code>MainActivity</code> is exported with no intent filter</h3>
+          <p class="loc">App/app/src/main/AndroidManifest.xml:42-43</p>
+          <p><code>android:exported="true"</code> without an <code>&lt;intent-filter&gt;</code> serves no purpose and lets any installed app launch the authenticated screen directly. Since <code>onResume</code> only redirects when the stored key is empty, a device with a saved session opens straight into the power-control UI, skipping the biometric prompt in <code>LoginActivity</code>. Set it to <code>false</code>.</p>
+          <p>Also over-declared: <code>WRITE_EXTERNAL_STORAGE</code>, which is a no-op above API 29 and is never used in the codebase.</p>
+        </div>
+      </article>
+
+      <article class="finding s-med">
+        <div class="gut"><span class="sev">Medium</span><span class="fid">SEC-18</span><span class="comp">api_node</span></div>
+        <div class="fbody">
+          <h3>Sessions live in a plain object that only grows</h3>
+          <p class="loc">api_node/server.js:20</p>
+          <p><code>const sessionTokens = {}</code> is never pruned. The cookie carries a <code>maxAge</code>, but that is enforced by the browser, not the server, so entries persist for the process lifetime and the map grows without bound. The Go client requests a fresh token on <em>every</em> reconnect attempt, and its reconnect loop retries every 2–5 seconds indefinitely, so a client that cannot reach the socket adds a permanent entry roughly every few seconds. Sessions are also lost entirely on restart, and cannot be shared if the API is ever run with more than one process.</p>
+        </div>
+      </article>
+
+    </div>
+  </section>
+
+  <!-- ============ ARCHITECTURE ============ -->
+  <section id="architecture">
+    <div class="sec-head">
+      <h2>Architecture</h2>
+      <span class="count">9 findings</span>
+    </div>
+    <p class="sec-intro">The recurring pattern is abandoned migrations: three successive rewrites of the backend, none finished, none removed, with the shipped clients still pointed at the oldest one.</p>
+
+    <div class="findings">
+
+      <article class="finding s-crit">
+        <div class="gut"><span class="sev">Critical</span><span class="fid">ARC-01</span><span class="comp">api</span></div>
+        <div class="fbody">
+          <h3>The PHP front controller cannot start — half its classes are empty files</h3>
+          <p class="loc">api/src/Database.php · Auth.php · Router.php · Controllers/AuthController.php</p>
+          <p><code>api/index.php</code> requires seven files and instantiates <code>Database</code>, <code>Auth</code>, <code>Router</code>, and three controllers. Four of those files are <strong>0 bytes</strong> and <code>ReminderController.php</code> is 3 bytes containing <code>}}</code>. Any request to this endpoint is an immediate fatal error. Only <code>Response.php</code> and <code>DeviceController.php</code> have real content.</p>
+          <p>This matters beyond the endpoint: <code>api_spec.md</code> documents this API as the current architecture, so the specification describes a surface that has never run.</p>
+        </div>
+      </article>
+
+      <article class="finding s-high">
+        <div class="gut"><span class="sev">High</span><span class="fid">ARC-02</span><span class="comp">repo</span></div>
+        <div class="fbody">
+          <h3>Four API contracts, and the shipped clients use the one that isn't here</h3>
+          <p class="loc">App/.../NetworkUtils.java:83 · PCClient/PCClient/PCClient.vb:11-17</p>
+          <p>The Android app (versionCode 702) calls <code>api/pcconnect/exchange.php</code>, <code>PCNames.php</code>, <code>checkinternet.php</code>, <code>reminder.php</code>, and <code>listreminders.php</code>. The VB client calls a different family under <code>api/pcclient/</code> — <code>findrequests.php</code>, <code>updaterequest.php</code>, <code>updatepctimedatabase.php</code>, <code>getreminder.php</code>, <code>completereminder.php</code>, <code>addpc.php</code>. <strong>Neither directory exists in this repository.</strong> The production server is running code that is not under version control.</p>
+          <p>The contracts also disagree where they overlap: the clients expect <code>checkinternet</code> to return the string <code>"yes"</code>, while both in-repo implementations return <code>"Pong"</code>; the Android app posts dates as <code>dd/MM/yyyy</code>, which <code>normalizeDateToSql</code> in <code>routes.js</code> rejects as an invalid date.</p>
+          <p><strong>First step:</strong> recover the live PHP into the repository before changing anything else — it is currently the only copy.</p>
+        </div>
+      </article>
+
+      <article class="finding s-high">
+        <div class="gut"><span class="sev">High</span><span class="fid">ARC-03</span><span class="comp">repo</span></div>
+        <div class="fbody">
+          <h3>The working tree and HEAD describe two different projects</h3>
+          <p class="loc">git status</p>
+          <p>166 tracked files are deleted in the working tree — the entire <code>PCClientWails/</code>, <code>api_node/</code>, and <code>DB/</code> script trees. In their place are eight untracked paths: <code>PCClient/</code> and the <code>api/</code> PHP files. Nothing is staged, nothing is committed, and the branch is <code>Mobile-App</code> while <code>main</code> is the integration branch.</p>
+          <p>Whatever the intent, the current state is unrecoverable by anyone but you and unreviewable by anyone at all. Decide which tree is authoritative and commit that decision; the untracked <code>api/</code> tree in particular exists in exactly one place on disk.</p>
+        </div>
+      </article>
+
+      <article class="finding s-high">
+        <div class="gut"><span class="sev">High</span><span class="fid">ARC-04</span><span class="comp">PCClientWails</span></div>
+        <div class="fbody">
+          <h3>Logging out on every shutdown</h3>
+          <p class="loc">PCClientWails/main.go:47-48</p>
+          <p><code>OnShutdown</code> calls <code>applicationInstance.ClearSession()</code>, which deletes the API key from Credential Manager and removes <code>session.json</code>. Closing the app is a full logout, so the user re-enters credentials on every launch — and <code>SetAutoStart</code> exists specifically to launch the app at boot into that state. The shutdown hook should stop the websocket manager and scheduler, not clear credentials.</p>
+        </div>
+      </article>
+
+      <article class="finding s-med">
+        <div class="gut"><span class="sev">Medium</span><span class="fid">ARC-05</span><span class="comp">frontend</span></div>
+        <div class="fbody">
+          <h3>The webview hardcodes <code>localhost:3000</code> and ignores the configured base URL</h3>
+          <p class="loc">frontend/src/lib/api.ts:9 · frontend/src/lib/socketClient.ts:4</p>
+          <p><code>Session.BaseURL</code> is a first-class field: <code>SaveSession</code> in Go validates it as required, persists it, and derives the websocket URL from it. The TypeScript layer then defines <code>const API_BASE_URL = 'http://localhost:3000/api_node'</code> and never reads the session value. The desktop client therefore cannot be pointed at the production server from its own UI, and all traffic is plaintext HTTP.</p>
+          <p><code>connectSocket(session)</code> compounds this — it accepts a <code>session</code> parameter and uses none of it, connecting anonymously to <code>http://localhost:3000</code>. The server's socket middleware rejects any connection without a valid <code>auth_token</code> cookie, and the webview never obtains one (the Go layer does the cookie handshake in its own HTTP client). That connection cannot succeed as written.</p>
+        </div>
+      </article>
+
+      <article class="finding s-med">
+        <div class="gut"><span class="sev">Medium</span><span class="fid">ARC-06</span><span class="comp">PCClientWails</span></div>
+        <div class="fbody">
+          <h3>Two Wails major versions in one module</h3>
+          <p class="loc">PCClientWails/go.mod:11-12</p>
+          <p><code>wails/v2 v2.12.0</code> and <code>wails/v3 v3.0.0-alpha.90</code> are both direct dependencies. <code>main.go</code> and <code>app/app.go</code> use the v2 runtime; <code>android/main_android.go</code> and the two iOS option files use v3's <code>pkg/application</code>. The mobile targets are behind build tags so the desktop build works, but the module carries a full alpha framework plus its transitive tree — including <code>go-git</code>, <code>echo</code>, and <code>circl</code> — for code that cannot currently be built alongside the desktop app.</p>
+        </div>
+      </article>
+
+      <article class="finding s-med">
+        <div class="gut"><span class="sev">Medium</span><span class="fid">ARC-07</span><span class="comp">DB</span></div>
+        <div class="fbody">
+          <h3>No uniqueness on <code>(UserID, PCName)</code>, and the code races on it</h3>
+          <p class="loc">DB/pcconnect_new_schema.sql:15-23 · api_node/helpers.js:55-61</p>
+          <p><code>requirePC</code> does a SELECT and then an INSERT if nothing came back. Two concurrent requests from the same PC both find nothing and both insert, and the schema has no constraint to stop them. Because commands are addressed by <code>PCID</code>, a duplicated device row means commands land on a PC record the client is no longer reading from. Add <code>UNIQUE KEY (UserID, PCName)</code> and switch to <code>INSERT ... ON DUPLICATE KEY UPDATE</code>.</p>
+          <p>Auto-registration is also unbounded: any valid key plus an arbitrary <code>PCName</code> header creates a row, with no cap per account.</p>
+        </div>
+      </article>
+
+      <article class="finding s-med">
+        <div class="gut"><span class="sev">Medium</span><span class="fid">ARC-08</span><span class="comp">DB</span></div>
+        <div class="fbody">
+          <h3>Dates and timestamps stored as <code>varchar(255)</code>, written in a format MySQL cannot parse</h3>
+          <p class="loc">DB/pcconnect_new_schema.sql:6,10 · api/signup.php:80</p>
+          <p><code>DateOfBirth</code>, <code>DateTimeOfSignup</code>, and <code>pcnames.Time</code> are all strings. Signup writes the timestamp with <code>date("Y-m-d h:i:sa")</code> — lowercase <code>h</code> is 12-hour and <code>a</code> appends <code>am</code>/<code>pm</code>, producing values like <code>2026-09-02 04:15:30pm</code>. They sort incorrectly as strings and cannot be cast to <code>DATETIME</code>. Meanwhile <code>pcnames.Time</code> is the heartbeat the spec uses to decide whether a device is online within a 5-second window, evaluated as string data.</p>
+        </div>
+      </article>
+
+      <article class="finding s-low">
+        <div class="gut"><span class="sev">Low</span><span class="fid">ARC-09</span><span class="comp">repo</span></div>
+        <div class="fbody">
+          <h3>No CI, and the only unit test covers the only unused package</h3>
+          <p class="loc">PCClientWails/internal/realtime/policy_test.go</p>
+          <p>There is no <code>.github/</code>, <code>.gitlab-ci.yml</code>, or any other pipeline config. <code>policy_test.go</code> is the single real test in the repository, and <code>internal/realtime</code> is imported by nothing — the fallback-polling policy it encodes was never wired up. The Android tests are the untouched Android Studio stubs. <code>api_node/package.json</code> declares jest and supertest as devDependencies while its <code>test</code> script is <code>echo "Error: no test specified" && exit 1</code>; the actual testing is six ad-hoc scripts (<code>run_tests.js</code>, <code>run_tests2.js</code>, <code>test2.js</code>, <code>test_all_endpoints.js</code>, <code>test_reminders.js</code>) that must be run by hand against a live database.</p>
+        </div>
+      </article>
+
+    </div>
+  </section>
+
+  <!-- ============ TECH DEBT ============ -->
+  <section id="debt">
+    <div class="sec-head">
+      <h2>Technical debt</h2>
+      <span class="count">15 findings</span>
+    </div>
+    <p class="sec-intro">Correctness bugs and maintenance load that aren't security issues but will keep producing them. The VB client accounts for a disproportionate share.</p>
+
+    <div class="findings">
+
+      <article class="finding s-high">
+        <div class="gut"><span class="sev">High</span><span class="fid">DEBT-01</span><span class="comp">PCClient</span></div>
+        <div class="fbody">
+          <h3>The desktop client makes roughly twelve HTTP requests per second, forever</h3>
+          <p class="loc">PCClient/PCClient/PCClient.vb:247-375</p>
+          <p><code>Running()</code> is a <code>While True</code> loop with a 0.5-second delay, and each pass issues six requests: get server time, post the time back, check internet, poll for requests, list reminders (twice — once via <code>GetRemindersFunction()</code> and once inline), and fetch the next reminder. That is ~12 requests per second per installed client, sustained. <code>GetRemindersFunction</code> creates a fresh <code>HttpClient</code> inside a <code>Using</code> block on every pass, so each one leaves a socket in <code>TIME_WAIT</code> — the classic route to port exhaustion.</p>
+          <p>The websocket design in <code>api_node</code> exists precisely to replace this loop.</p>
+        </div>
+      </article>
+
+      <article class="finding s-high">
+        <div class="gut"><span class="sev">High</span><span class="fid">DEBT-02</span><span class="comp">DB</span></div>
+        <div class="fbody">
+          <h3>The upload script drops thirteen production tables inside an un-rollbackable transaction</h3>
+          <p class="loc">DB/upload_remote.py:24-25</p>
+          <p>Before importing, <code>run_sql_file</code> executes <code>DROP TABLE IF EXISTS</code> across <code>users</code>, <code>pcnames</code>, <code>reminders</code>, and ten others. The whole body is wrapped in <code>try/except</code> ending in <code>connection.rollback()</code> — but DDL in MySQL causes an implicit commit, so <strong>the drop cannot be rolled back</strong>. Any failure during the import leaves the database empty with no recovery path, and the connection details at the top are placeholdered <code>'##'</code>, meaning whoever runs it fills in production by hand.</p>
+          <p>The parser is also unsafe for this data: it treats any line ending in <code>;</code> as a complete statement, which breaks on semicolons inside reminder text or feedback strings.</p>
+        </div>
+      </article>
+
+      <article class="finding s-high">
+        <div class="gut"><span class="sev">High</span><span class="fid">DEBT-03</span><span class="comp">PCClient</span></div>
+        <div class="fbody">
+          <h3>Async calls are fired and forgotten; exceptions are caught into empty blocks</h3>
+          <p class="loc">PCClient/PCClient/PCClient.vb:251, 314, 363-372 · ControlPanel.vb:91</p>
+          <p><code>GetRemindersFunction()</code>, <code>Running()</code>, <code>Complete()</code>, <code>AddReminderFunction()</code>, and <code>reminderWindow.Running()</code> are all declared <code>Async Function ... As Task</code> and all invoked without <code>Await</code>. Faults inside them are never observed, and the code immediately after reads state the task has not finished writing — <code>ControlPanel.RemindersTextEdit(ReminderListTextBox)</code> runs on the line after <code>GetRemindersFunction()</code> is launched.</p>
+          <p>The main loop's handler is worse than silent, it is deliberately empty:</p>
+          <pre>Catch ex As Exception
+    If ex.Message.Contains("An error occurred while sending the request.") Then
+        ControlPanel.internetChange(0)
+    ElseIf Not ex.Message.Contains("System.Collections.Generic.Dictionary") Then
+        ' nothing
+    End If
+End Try</pre>
+          <p>Every parse failure, null reference, and HTTP fault in a 100-line loop body disappears here.</p>
+        </div>
+      </article>
+
+      <article class="finding s-high">
+        <div class="gut"><span class="sev">High</span><span class="fid">DEBT-04</span><span class="comp">PCClient</span></div>
+        <div class="fbody">
+          <h3>The internet-status flag is set to the opposite of what it displays</h3>
+          <p class="loc">PCClient/PCClient/ControlPanel.vb:30-47</p>
+          <p><code>internetChange(0)</code> sets <code>Internet = 1</code> and shows <em>"Not Connected"</em>; <code>internetChange(1)</code> sets <code>Internet = 0</code> and shows <em>"Connected"</em>. The caller then guards on the field — <code>If ControlPanel.Internet = 0 Then internetChange(1)</code> — so the guard is inverted relative to the label the user sees, and the status indicator updates on the wrong transitions.</p>
+        </div>
+      </article>
+
+      <article class="finding s-med">
+        <div class="gut"><span class="sev">Medium</span><span class="fid">DEBT-05</span><span class="comp">PCClient</span></div>
+        <div class="fbody">
+          <h3>The reminder list string is appended to but never cleared</h3>
+          <p class="loc">PCClient/PCClient/PCClient.vb:213-244</p>
+          <p><code>GetRemindersFunction</code> concatenates every reminder onto <code>ReminderListTextBox</code> without resetting it first, and it runs twice per second from the polling loop. The string grows without bound for the life of the process, and the control panel shows the same reminders repeated once per poll. The inline copy of the same logic in <code>Running()</code> <em>does</em> reset it — the two implementations of identical formatting disagree, and one of them is wrong.</p>
+        </div>
+      </article>
+
+      <article class="finding s-med">
+        <div class="gut"><span class="sev">Medium</span><span class="fid">DEBT-06</span><span class="comp">PCClientWails</span></div>
+        <div class="fbody">
+          <h3><code>Stop()</code> cannot close the websocket because the connection is never stored</h3>
+          <p class="loc">PCClientWails/internal/websocket/client.go:79-98, 213-221</p>
+          <p><code>connectLoop</code> dials into a local <code>conn</code> and passes it to <code>readLoop</code>, but never assigns <code>m.conn</code> — the field is only ever set to <code>nil</code>. <code>Stop()</code> cancels the context and then closes <code>m.conn</code>, which is always nil, so the goroutine stays blocked in <code>conn.ReadMessage()</code> until the server drops it. <code>ClearSession</code> and reconnect both call <code>Stop()</code>, so a logout or a settings change leaks a goroutine and an open socket that is still delivering commands.</p>
+        </div>
+      </article>
+
+      <article class="finding s-med">
+        <div class="gut"><span class="sev">Medium</span><span class="fid">DEBT-07</span><span class="comp">PCClientWails</span></div>
+        <div class="fbody">
+          <h3>Reminders re-fire every year on the same date</h3>
+          <p class="loc">PCClientWails/internal/reminders/reminders.go:117-124</p>
+          <p>The scheduler builds a cron expression from the reminder's own timestamp:</p>
+          <pre>fmt.Sprintf("%d %d %d %d %d *",
+    Second, Minute, Hour, Day, Month)</pre>
+          <p>Cron has no year field, so <code>0 30 9 15 3 *</code> means "09:30:00 on 15 March, every year" rather than once in 2026. A one-off reminder becomes an annual one for as long as the client runs.</p>
+        </div>
+      </article>
+
+      <article class="finding s-med">
+        <div class="gut"><span class="sev">Medium</span><span class="fid">DEBT-08</span><span class="comp">PCClientWails</span></div>
+        <div class="fbody">
+          <h3>The scheduler keeps the API key it was constructed with</h3>
+          <p class="loc">PCClientWails/app/app.go:132 · internal/reminders/reminders.go:178</p>
+          <p><code>startWebSocket</code> guards scheduler creation with <code>if a.scheduler == nil</code>, so the key captured on first login persists across every later <code>SaveSession</code>. Signing in as a different account leaves the scheduler decrypting with the previous user's key. Given SEC-07 this fails closed rather than leaking, but it fails quietly — the resulting reminders read "Error decrypting", which the frontend rewrites to "Reminder text unavailable" and shows as normal content.</p>
+          <p>The decryption path is itself lenient: <code>DecryptReminder</code> returns <code>nil</code> error with raw bytes when PKCS#7 padding is invalid, so a wrong key yields binary garbage presented as a successful result rather than a detectable failure.</p>
+        </div>
+      </article>
+
+      <article class="finding s-med">
+        <div class="gut"><span class="sev">Medium</span><span class="fid">DEBT-09</span><span class="comp">App</span></div>
+        <div class="fbody">
+          <h3>Android polls every five seconds regardless of lifecycle, from leaking AsyncTasks</h3>
+          <p class="loc">App/.../MainActivity.java:66-69, 119, 260</p>
+          <p><code>internetChecker</code> reschedules itself every 5 seconds and is only cancelled in <code>onDestroy</code>, so it keeps running while the activity is backgrounded. <code>CheckInternetStatusTask</code> is a non-static inner class — it holds an implicit reference to the Activity and calls <code>btnSleep.setEnabled(...)</code> in <code>onPostExecute</code>, so an in-flight task after a configuration change touches a dead view hierarchy. <code>AsyncTask</code> has been deprecated since API 30 and the app targets 35.</p>
+          <p>Move the cancel to <code>onPause</code> and replace <code>AsyncTask</code> with the OkHttp client the class already uses elsewhere.</p>
+        </div>
+      </article>
+
+      <article class="finding s-med">
+        <div class="gut"><span class="sev">Medium</span><span class="fid">DEBT-10</span><span class="comp">App</span></div>
+        <div class="fbody">
+          <h3>A field initializer reads a singleton before the activity has a context</h3>
+          <p class="loc">App/.../ListRemindersActivity.java:23</p>
+          <p><code>String API_KEY = SharedPrefManager.getInstance(this).getApiKey();</code> runs during construction, before <code>attachBaseContext</code>. It only works because <code>LoginActivity</code> has already initialised the singleton, so <code>this</code> is discarded — change the launch order, or have the process restart directly into this activity, and it throws. The singleton itself permanently retains whichever Context first created it.</p>
+        </div>
+      </article>
+
+      <article class="finding s-med">
+        <div class="gut"><span class="sev">Medium</span><span class="fid">DEBT-11</span><span class="comp">App · PCClient</span></div>
+        <div class="fbody">
+          <h3>HTTP clients constructed per request</h3>
+          <p class="loc">App/.../NetworkUtils.java:81 · LoginActivity.java:135 · MainActivity.java:219 · PCClient/PCClient/*.vb</p>
+          <p><code>new OkHttpClient()</code> appears in four places, each inside a method that runs per user action or per poll, discarding the connection pool and thread pool each time. The VB side does the same with <code>Using httpClient As New HttpClient()</code>. Both libraries are designed around a single long-lived shared instance.</p>
+          <p>The Android app carries two HTTP stacks in parallel: OkHttp in <code>LoginActivity</code>, <code>NetworkUtils</code>, and <code>MainActivity.fetchPcNames</code>; raw <code>HttpURLConnection</code> in <code>HttpRequestHelper</code>, <code>ListRemindersActivity</code>, and <code>MainActivity</code>'s internet check — the latter with no timeouts configured and all exceptions swallowed into <code>printStackTrace()</code>.</p>
+        </div>
+      </article>
+
+      <article class="finding s-low">
+        <div class="gut"><span class="sev">Low</span><span class="fid">DEBT-12</span><span class="comp">repo</span></div>
+        <div class="fbody">
+          <h3>Build outputs and IDE state are committed</h3>
+          <p class="loc">App/app/release/app-release.apk · App/TutorialPagerAdapter.dex · .idea/</p>
+          <p>A 6.7 MB signed release APK is the largest file in the repository, alongside a stray <code>.dex</code>, two baseline-profile <code>.dm</code> files, and two Gradle wrapper JARs. Six <code>.idea/</code> files are tracked despite <code>.gitignore</code> listing <code>.idea/</code> — the ignore rule has no effect on files already added, so they need <code>git rm --cached</code>. <code>DB_schema_summary.txt</code> is a generated summary committed as UTF-16.</p>
+        </div>
+      </article>
+
+      <article class="finding s-low">
+        <div class="gut"><span class="sev">Low</span><span class="fid">DEBT-13</span><span class="comp">App · PCClientWails</span></div>
+        <div class="fbody">
+          <h3>Dead dependencies and duplicated implementations</h3>
+          <p class="loc">App/app/build.gradle.kts:41 · PCClientWails/app/executor_windows.go</p>
+          <p><code>mysql:mysql-connector-java:8.0.27</code> is declared in the Android app and never referenced — no JDBC import anywhere in the source. It ships in the APK because <code>isMinifyEnabled = false</code> for release builds. The same file wraps its entire Android config in <code>allprojects { }</code>, which applies the app's configuration to every project in the build.</p>
+          <p>In Go, <code>app/executor_windows.go</code> and <code>app/executor_stub.go</code> define an <code>executeCommand</code> that nothing calls — <code>app.go</code> uses <code>commands.Execute</code>, whose identical allowlist lives in <code>internal/commands/executor.go</code>. That file has no build tag, so it compiles on every platform while invoking <code>shutdown /s</code> and <code>rundll32.exe</code>.</p>
+        </div>
+      </article>
+
+      <article class="finding s-low">
+        <div class="gut"><span class="sev">Low</span><span class="fid">DEBT-14</span><span class="comp">PCClient</span></div>
+        <div class="fbody">
+          <h3><code>Option Strict Off</code>, untyped signatures, and unrelated imports</h3>
+          <p class="loc">PCClient/PCClient/PCClient.vbproj:60 · PCClient.vb:1-7</p>
+          <p><code>OptionStrict</code> is <code>Off</code> project-wide, which is what allows SEC-06's <code>Nothing</code>-to-string coercion to compile. <code>Function LoginFunction(Username, Password)</code>, <code>Function RemindersTextEdit(ReminderListTextBox)</code>, and <code>Public Function internetChange(value)</code> declare neither parameter nor return types; <code>ID</code> is declared <code>As String</code> and assigned <code>Integer.Parse(...)</code>. The file also imports <code>System.Runtime.Remoting</code>, <code>System.Web.UI.WebControls</code>, and <code>VisualStyleElement.StartPanel</code>, none of which it uses.</p>
+        </div>
+      </article>
+
+      <article class="finding s-low">
+        <div class="gut"><span class="sev">Low</span><span class="fid">DEBT-15</span><span class="comp">api_node</span></div>
+        <div class="fbody">
+          <h3>Six overlapping status documents and a broken import</h3>
+          <p class="loc">api_node/CREATION_REPORT.md · INDEX.md · MANUAL_TEST_REPORT.md · QUICK_START.md · README_TESTING.md · TEST_MANIFEST.md</p>
+          <p>Six markdown files describe the same twelve endpoints and the same test procedure, each with its own partially-stale copy — and each carrying the leaked API key from SEC-08. Consolidate to one README and one spec.</p>
+          <p><code>server.js:18</code> also reads <code>const { crypto } = require('crypto')</code>, which destructures a property the crypto module does not export, yielding <code>undefined</code>. It is harmless only because the code calls <code>require('crypto').randomBytes</code> inline instead.</p>
+        </div>
+      </article>
+
+    </div>
+  </section>
+
+  <!-- ============ SEQUENCE ============ -->
+  <section id="sequence">
+    <div class="sec-head">
+      <h2>Suggested order</h2>
+      <span class="count">Remediation sequence</span>
+    </div>
+    <p class="sec-intro">Ordered by dependency rather than severity — some fixes are blocked until an earlier one lands.</p>
+
+    <div class="seq">
+      <div class="step">
+        <span class="ord">1</span>
+        <div class="sbody">
+          <h3>Rotate the three exposed secrets, today</h3>
+          <p>The MySQL password, the hCaptcha secret, and the admin API key. The first two are not yet in git history and the third is — treat that one as already public. Then add <code>api/db_config.php</code> to <code>.gitignore</code> so it stays out.</p>
+          <p class="refs">SEC-01 · SEC-02 · SEC-08</p>
+        </div>
+      </div>
+
+      <div class="step">
+        <span class="ord">2</span>
+        <div class="sbody">
+          <h3>Get the live PHP under version control</h3>
+          <p>The <code>api/pcconnect/</code> and <code>api/pcclient/</code> directories that both shipped clients depend on exist only on the production server. Until they are committed, no refactor is reversible and no outage is recoverable. Resolve the working tree at the same time, so there is one authoritative state.</p>
+          <p class="refs">ARC-02 · ARC-03</p>
+        </div>
+      </div>
+
+      <div class="step">
+        <span class="ord">3</span>
+        <div class="sbody">
+          <h3>Fix the two authentication paths that fail open</h3>
+          <p>Check HTTP status before parsing login responses, and return an explicit failure from the VB catch blocks. Make the Android biometric gate refuse the action when it cannot authenticate rather than performing it. These are small, local, and independently shippable.</p>
+          <p class="refs">SEC-05 · SEC-06 · SEC-09</p>
+        </div>
+      </div>
+
+      <div class="step">
+        <span class="ord">4</span>
+        <div class="sbody">
+          <h3>Separate the three jobs the API key is doing</h3>
+          <p>Password verification, session identity, and reminder encryption are all the same 32-character string today, which is what makes key rotation destructive and makes a database read equivalent to full account access. Server-side bcrypt for passwords, a separate rotatable session token, and a per-user key derived independently of the credential. Add <code>UNIQUE</code> and an index to <code>api_key</code> while you are in the schema.</p>
+          <p class="refs">SEC-03 · SEC-04 · SEC-07 · SEC-13 · SEC-15</p>
+        </div>
+      </div>
+
+      <div class="step">
+        <span class="ord">5</span>
+        <div class="sbody">
+          <h3>Retire the polling loop and pick one backend</h3>
+          <p>The websocket layer in <code>api_node</code> already does what the VB loop's twelve requests per second approximate. Decide whether Node or PHP is the future, delete the other, and migrate the clients onto one documented contract. The empty <code>api/src</code> classes are either finished or removed — leaving them wired into <code>index.php</code> guarantees a fatal error for anyone who finds that URL.</p>
+          <p class="refs">ARC-01 · ARC-02 · DEBT-01</p>
+        </div>
+      </div>
+
+      <div class="step">
+        <span class="ord">6</span>
+        <div class="sbody">
+          <h3>Add a pipeline before adding features</h3>
+          <p>A build of all four components on push would have caught the empty PHP classes, the two Wails versions, and the localhost base URL. Point the existing jest and supertest devDependencies at the ad-hoc test scripts and make them a real suite.</p>
+          <p class="refs">ARC-06 · ARC-09 · DEBT-15</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    Audit scope: all 255 tracked files at 0b47ea2 plus the 8 untracked paths in the working tree.<br>
+    Components reviewed: App (Android/Java, 1,101 LOC) · PCClient (VB.NET, 1,819 LOC) · PCClientWails (Go + React) · api (PHP) · api_node (Express) · DB (SQL + Python).<br>
+    Every finding cites the file it was read in; no finding is inferred from documentation alone.
+  </footer>
+
+</div>

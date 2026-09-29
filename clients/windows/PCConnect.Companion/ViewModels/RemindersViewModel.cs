@@ -31,6 +31,8 @@ public partial class RemindersViewModel(
             if (settings is not null)
             {
                 settings.Use24HourClock = value;
+                OnPropertyChanged(nameof(Use24HourClock));
+                OnPropertyChanged(nameof(ScheduleSummary));
             }
         }
     }
@@ -54,7 +56,7 @@ public partial class RemindersViewModel(
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ScheduleSummary))]
     [NotifyPropertyChangedFor(nameof(PickedDateLabel))]
-    private DateTime _newDate = DateTime.Today;
+    private DateTime _newDate = DateTime.Now.AddHours(1).Date;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ScheduleSummary))]
@@ -62,12 +64,18 @@ public partial class RemindersViewModel(
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ScheduleSummary))]
+    [NotifyPropertyChangedFor(nameof(IsRepeating))]
+    [NotifyPropertyChangedFor(nameof(IsWeekly))]
+    [NotifyPropertyChangedFor(nameof(IsWeeklyOrCustom))]
+    [NotifyPropertyChangedFor(nameof(ShowDayBubbles))]
     [NotifyPropertyChangedFor(nameof(IsCustomRepeat))]
+    [NotifyPropertyChangedFor(nameof(RepeatIntervalUnit))]
     [NotifyPropertyChangedFor(nameof(DateLabel))]
     private RepeatKind _repeat = RepeatKind.Once;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ScheduleSummary))]
+    [NotifyPropertyChangedFor(nameof(RepeatIntervalUnit))]
     private int _intervalWeeks = 1;
 
     [ObservableProperty]
@@ -210,14 +218,27 @@ public partial class RemindersViewModel(
     public ObservableCollection<DayToggle> RepeatDays { get; } = [];
 
     /// <summary>Additional times, each of which becomes its own series.</summary>
-    public ObservableCollection<TimeOnly> ExtraTimes { get; } = [];
+    public ObservableCollection<ExtraTimeItem> ExtraTimes { get; } = [];
 
     /// <summary>The PCs on the account, each with whether this reminder names it.</summary>
     public ObservableCollection<TargetToggle> Targets { get; } = [];
 
-    public IReadOnlyList<int> IntervalOptions { get; } = [1, 2, 3, 4];
+    public IReadOnlyList<int> IntervalOptions { get; } = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 14, 21, 30];
 
+    public bool IsRepeating => Repeat != RepeatKind.Once;
+    public bool IsWeekly => Repeat == RepeatKind.Weekly || Repeat == RepeatKind.Custom;
+    public bool IsWeeklyOrCustom => IsWeekly;
+    public bool ShowDayBubbles => Repeat == RepeatKind.Weekly || Repeat == RepeatKind.Custom;
     public bool IsCustomRepeat => Repeat == RepeatKind.Custom;
+
+    public string RepeatIntervalUnit => Repeat switch
+    {
+        RepeatKind.Hourly => IntervalWeeks == 1 ? "hour" : "hours",
+        RepeatKind.Daily => IntervalWeeks == 1 ? "day" : "days",
+        RepeatKind.Monthly => IntervalWeeks == 1 ? "month" : "months",
+        RepeatKind.Yearly => IntervalWeeks == 1 ? "year" : "years",
+        _ => IntervalWeeks == 1 ? "week" : "weeks",
+    };
 
     public bool HasSelection => _selectedDays.Count > 0;
 
@@ -246,7 +267,8 @@ public partial class RemindersViewModel(
         DateOnly.FromDateTime(NewDate),
         AllTimes(),
         Until is { } u ? DateOnly.FromDateTime(u) : null,
-        DateOnly.FromDateTime(DateTime.Today));
+        DateOnly.FromDateTime(DateTime.Today),
+        Use24HourClock);
 
     public RemindersViewModel Self => this;
 
@@ -308,6 +330,7 @@ public partial class RemindersViewModel(
                 void Update()
                 {
                     OnPropertyChanged(nameof(Use24HourClock));
+                    OnPropertyChanged(nameof(ScheduleSummary));
                     if (TimeFormatting.TryParse(NewTime, out var t))
                     {
                         NewTime = TimeFormatting.FormatTime(t, Use24HourClock);
@@ -335,9 +358,11 @@ public partial class RemindersViewModel(
         foreach (var (kind, label) in new[]
                  {
                      (RepeatKind.Once, "Once"),
-                     (RepeatKind.Weekly, "Every week"),
-                     (RepeatKind.Monthly, "Every month"),
-                     (RepeatKind.Custom, "Custom"),
+                     (RepeatKind.Daily, "Daily"),
+                     (RepeatKind.Weekly, "Weekly"),
+                     (RepeatKind.Monthly, "Monthly"),
+                     (RepeatKind.Yearly, "Yearly"),
+                     (RepeatKind.Hourly, "Hourly"),
                  })
         {
             RepeatChips.Add(new RepeatChip { Kind = kind, Label = label, IsSelected = kind == RepeatKind.Once });
@@ -1079,11 +1104,33 @@ public partial class RemindersViewModel(
             return;
         }
 
-        Repeat = chip.Kind;
+        SetRepeat(chip.Kind);
+    }
+
+    public void SetRepeat(RepeatKind kind)
+    {
+        Repeat = kind;
 
         foreach (var option in RepeatChips)
         {
-            option.IsSelected = option.Kind == chip.Kind;
+            option.IsSelected = option.Kind == kind;
+        }
+
+        if (kind == RepeatKind.Once)
+        {
+            foreach (var day in RepeatDays)
+            {
+                day.IsOn = false;
+            }
+        }
+        else if ((kind == RepeatKind.Weekly || kind == RepeatKind.Custom) && RepeatDays.All(d => !d.IsOn))
+        {
+            var targetDay = DateOnly.FromDateTime(NewDate).DayOfWeek;
+            var match = RepeatDays.FirstOrDefault(d => d.Day == targetDay);
+            if (match is not null)
+            {
+                match.IsOn = true;
+            }
         }
 
         OnPropertyChanged(nameof(ScheduleSummary));
@@ -1098,6 +1145,22 @@ public partial class RemindersViewModel(
         }
 
         day.IsOn = !day.IsOn;
+
+        if (RepeatDays.Any(d => d.IsOn))
+        {
+            if (Repeat != RepeatKind.Weekly && Repeat != RepeatKind.Custom)
+            {
+                SetRepeat(RepeatKind.Weekly);
+            }
+        }
+        else
+        {
+            if (Repeat == RepeatKind.Weekly || Repeat == RepeatKind.Custom)
+            {
+                SetRepeat(RepeatKind.Once);
+            }
+        }
+
         OnPropertyChanged(nameof(ScheduleSummary));
     }
 
@@ -1107,19 +1170,21 @@ public partial class RemindersViewModel(
     [RelayCommand]
     private void AddTime()
     {
-        // A second time is a second series. The design shows them as chips; each
-        // one is saved separately so they can be ticked off separately.
-        var next = AllTimes().Max().AddHours(1);
-        ExtraTimes.Add(new TimeOnly(next.Hour, next.Minute));
+        var latest = AllTimes().Max();
+        var next = latest.AddHours(1);
+        var timeStr = next.ToString("HH:mm", CultureInfo.InvariantCulture);
+        var item = new ExtraTimeItem { TimeText = timeStr };
+        item.PropertyChanged += (_, _) => OnPropertyChanged(nameof(ScheduleSummary));
+        ExtraTimes.Add(item);
         OnPropertyChanged(nameof(ScheduleSummary));
     }
 
     [RelayCommand]
     private void RemoveTime(object? time)
     {
-        if (time is TimeOnly value)
+        if (time is ExtraTimeItem item)
         {
-            ExtraTimes.Remove(value);
+            ExtraTimes.Remove(item);
             OnPropertyChanged(nameof(ScheduleSummary));
         }
     }
@@ -1142,7 +1207,13 @@ public partial class RemindersViewModel(
             times.Add(primary);
         }
 
-        times.AddRange(ExtraTimes);
+        foreach (var extra in ExtraTimes)
+        {
+            if (TimeFormatting.TryParse(extra.TimeText, out var t))
+            {
+                times.Add(t);
+            }
+        }
 
         return times.Count == 0 ? [new TimeOnly(9, 0)] : times.Distinct().Order().ToList();
     }
@@ -1162,7 +1233,7 @@ public partial class RemindersViewModel(
             return;
         }
 
-        if (Repeat == RepeatKind.Custom && RepeatDays.All(d => !d.IsOn))
+        if ((Repeat == RepeatKind.Weekly || Repeat == RepeatKind.Custom) && RepeatDays.All(d => !d.IsOn))
         {
             ShowStatus("Pick at least one day.", true);
             return;
@@ -1249,8 +1320,9 @@ public partial class RemindersViewModel(
             {
                 NewBody = string.Empty;
                 ExtraTimes.Clear();
-                NewDate = DateTime.Today;
-                NewTime = TimeFormatting.FormatTime(DateTime.Now.AddHours(1), Use24HourClock);
+                var nextDefault = DateTime.Now.AddHours(1);
+                NewDate = nextDefault.Date;
+                NewTime = TimeFormatting.FormatTime(nextDefault, Use24HourClock);
                 await LoadAsync();
                 ShowStatus(created == 1 ? "Reminder added." : $"{created} reminders added.", false);
             }
@@ -1341,8 +1413,9 @@ public partial class RemindersViewModel(
         EditingReminderId = null;
         NewBody = string.Empty;
         ExtraTimes.Clear();
-        NewDate = DateTime.Today;
-        NewTime = TimeFormatting.FormatTime(DateTime.Now.AddHours(1), Use24HourClock);
+        var nextDefault = DateTime.Now.AddHours(1);
+        NewDate = nextDefault.Date;
+        NewTime = TimeFormatting.FormatTime(nextDefault, Use24HourClock);
         Repeat = RepeatKind.Once;
         IntervalWeeks = 1;
         Until = null;

@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Net.Http;
 using System.Windows;
+using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.Extensions.Logging;
@@ -57,6 +58,9 @@ public partial class ShellViewModel(
     private string _weekSummary = string.Empty;
 
     [ObservableProperty]
+    private DayColumn _todayColumn = new("Today", "", true, []);
+
+    [ObservableProperty]
     private string _lastCommandSummary = "Nothing yet";
 
     [ObservableProperty]
@@ -88,6 +92,44 @@ public partial class ShellViewModel(
 
     public string Today => $"{DateTime.Now.ToString("dddd d MMMM", CultureInfo.CurrentCulture)} · {TimeFormatting.FormatTime(DateTime.Now, settings.Use24HourClock)}";
 
+    private DispatcherTimer? _clockTimer;
+    private string _lastFormattedToday = string.Empty;
+    private DateOnly _lastDate = DateOnly.FromDateTime(DateTime.Today);
+
+    public void StartClock()
+    {
+        if (_clockTimer is not null) return;
+
+        var dispatcher = Application.Current?.Dispatcher;
+        if (dispatcher is null) return;
+
+        _clockTimer = new DispatcherTimer(TimeSpan.FromSeconds(1), DispatcherPriority.Normal, (_, _) => OnClockTick(), dispatcher);
+        _clockTimer.Start();
+    }
+
+    public void StopClock()
+    {
+        _clockTimer?.Stop();
+        _clockTimer = null;
+    }
+
+    public void OnClockTick()
+    {
+        var currentFormatted = Today;
+        if (currentFormatted != _lastFormattedToday)
+        {
+            _lastFormattedToday = currentFormatted;
+            OnPropertyChanged(nameof(Today));
+        }
+
+        var currentDate = DateOnly.FromDateTime(DateTime.Today);
+        if (currentDate != _lastDate)
+        {
+            _lastDate = currentDate;
+            RebuildWeek();
+        }
+    }
+
     /// <summary>
     /// Startup: resolve the backend, check whether this build is still
     /// supported, and restore the session if there is one (06 §1).
@@ -96,6 +138,7 @@ public partial class ShellViewModel(
     {
         settings.Load();
         appSettings.Load();
+        StartClock();
 
         settings.TimeFormatChanged += () =>
         {
@@ -444,6 +487,7 @@ public partial class ShellViewModel(
         }
 
         WeekSummary = total == 1 ? "1 reminder this week" : $"{total} reminders this week";
+        TodayColumn = Week.FirstOrDefault(d => d.IsToday) ?? new DayColumn("Today", "", true, []);
     }
 
     private void RefreshLastCommand()

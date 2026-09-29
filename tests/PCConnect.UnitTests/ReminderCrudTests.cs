@@ -30,7 +30,7 @@ public sealed class ReminderCrudTests : IDisposable
     [InlineData("", RepeatKind.Once, 1)]
     [InlineData("FREQ=WEEKLY", RepeatKind.Weekly, 1)]
     [InlineData("FREQ=MONTHLY", RepeatKind.Monthly, 1)]
-    [InlineData("FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,WE,FR", RepeatKind.Custom, 2)]
+    [InlineData("FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,WE,FR", RepeatKind.Weekly, 2)]
     public void Recurrence_FromRrule_parses_rules_accurately(string? rrule, RepeatKind expectedKind, int expectedInterval)
     {
         var (kind, days, interval) = Recurrence.FromRrule(rrule);

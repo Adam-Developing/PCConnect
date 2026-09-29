@@ -565,9 +565,9 @@
                     <DockPanel>
                       <Path Data="{StaticResource Icon.Smartphone}" Fill="{StaticResource InkFaint}"
                             Width="18" Height="18" Stretch="Uniform" DockPanel.Dock="Left"
-                            VerticalAlignment="Top" />
+                            VerticalAlignment="Center" />
                       <TextBlock Style="{StaticResource Subtle}" FontSize="13" Margin="10,0,0,0"
-                                 TextWrapping="Wrap" LineHeight="19">
+                                 TextWrapping="Wrap" LineHeight="19" VerticalAlignment="Center">
                         <Run Text="This PC is controlled from your phone. To control your other PCs from here, open" />
                         <Run Text="Other PCs" FontWeight="SemiBold" Foreground="{StaticResource Ink}" /><Run Text="." />
                       </TextBlock>
@@ -578,13 +578,9 @@
 
               <Border Grid.Column="1" Style="{StaticResource Card}" Margin="8,0,0,0" VerticalAlignment="Top">
                 <StackPanel>
-                  <DockPanel LastChildFill="False">
-                    <TextBlock Text="Today" Style="{StaticResource CardTitle}" DockPanel.Dock="Left" />
-                    <TextBlock Text="{Binding WeekSummary}" Style="{StaticResource Caption}"
-                               DockPanel.Dock="Right" VerticalAlignment="Center" />
-                  </DockPanel>
+                  <TextBlock Text="Today" Style="{StaticResource CardTitle}" />
 
-                  <ItemsControl ItemsSource="{Binding Week[0].Items}" Margin="0,8,0,0">
+                  <ItemsControl ItemsSource="{Binding TodayColumn.Items}" Margin="0,8,0,0">
                     <ItemsControl.ItemTemplate>
                       <DataTemplate>
                         <Grid Margin="0,6">
@@ -603,7 +599,7 @@
 
                   <TextBlock Text="Nothing on this screen today." Style="{StaticResource Caption}"
                              Margin="0,8,0,0"
-                             Visibility="{Binding Week[0].IsEmpty, Converter={StaticResource BoolToVis}}" />
+                             Visibility="{Binding TodayColumn.IsEmpty, Converter={StaticResource BoolToVis}}" />
                 </StackPanel>
               </Border>
             </Grid>
@@ -613,10 +609,15 @@
               <DockPanel>
                 <DockPanel DockPanel.Dock="Top" LastChildFill="False" Margin="0,0,0,12">
                   <TextBlock Text="This Week" Style="{StaticResource CardTitle}"
-                             DockPanel.Dock="Left" />
-                  <Button Content="Open Reminders →" Style="{StaticResource LinkButton}"
-                          DockPanel.Dock="Right" Command="{Binding NavigateCommand}"
-                          CommandParameter="{x:Static vm:CompanionPage.Reminders}" />
+                             DockPanel.Dock="Left" VerticalAlignment="Center" />
+                  <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" VerticalAlignment="Center">
+                    <TextBlock Text="{Binding WeekSummary}" Style="{StaticResource Caption}"
+                               Margin="0,0,16,0" VerticalAlignment="Center" />
+                    <Button Content="Open Reminders →" Style="{StaticResource LinkButton}"
+                            Command="{Binding NavigateCommand}"
+                            CommandParameter="{x:Static vm:CompanionPage.Reminders}"
+                            VerticalAlignment="Center" />
+                  </StackPanel>
                 </DockPanel>
 
                 <ItemsControl ItemsSource="{Binding Week}">
@@ -1021,7 +1022,7 @@
             <Grid Grid.Row="1" Margin="0,18,0,0">
               <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="320" />
+                <ColumnDefinition Width="330" />
               </Grid.ColumnDefinitions>
 
               <Border Style="{StaticResource Card}" Margin="0,0,16,0">
@@ -1470,7 +1471,7 @@
                       <Grid Margin="0,12,0,0">
                         <Grid.ColumnDefinitions>
                           <ColumnDefinition Width="*" />
-                          <ColumnDefinition Width="*" />
+                          <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
                         <StackPanel Margin="0,0,4,0">
                           <DockPanel Margin="0,0,0,4" MinHeight="18">
@@ -1483,11 +1484,47 @@
                             <TextBlock Text="Time" Style="{StaticResource FieldLabel}" VerticalAlignment="Center" />
                           </DockPanel>
                           <views:TimePickerBox TimeText="{Binding NewTime, Mode=TwoWay}"
-                                               Use24HourClock="{Binding Use24HourClock, Mode=OneWay}" />
+                                               Use24HourClock="{Binding Use24HourClock, Mode=OneWay}"
+                                               Width="146" />
                         </StackPanel>
                       </Grid>
 
-                      <TextBlock Text="Repeat" Style="{StaticResource FieldLabel}" Margin="0,12,0,6" />
+                      <!-- Extra times list -->
+                      <ItemsControl ItemsSource="{Binding ExtraTimes}" Margin="0,6,0,0">
+                        <ItemsControl.ItemTemplate>
+                          <DataTemplate>
+                            <DockPanel Margin="0,0,0,6">
+                              <Button DockPanel.Dock="Right"
+                                      Command="{Binding DataContext.RemoveTimeCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                      CommandParameter="{Binding}"
+                                      Width="30" Height="34" Margin="6,0,0,0" Padding="0"
+                                      Background="Transparent" BorderThickness="0" Cursor="Hand"
+                                      ToolTip="Remove this time">
+                                <Path Data="{StaticResource Icon.Close}" Fill="{StaticResource InkFaint}"
+                                      Width="13" Height="13" Stretch="Uniform" />
+                              </Button>
+                              <views:TimePickerBox TimeText="{Binding TimeText, Mode=TwoWay}"
+                                                   Use24HourClock="{Binding DataContext.Use24HourClock, RelativeSource={RelativeSource AncestorType=ItemsControl}, Mode=OneWay}"
+                                                   Width="146" HorizontalAlignment="Right" />
+                            </DockPanel>
+                          </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                      </ItemsControl>
+
+                      <!-- Add time button (hidden when editing an existing reminder) -->
+                      <Button Command="{Binding AddTimeCommand}"
+                              HorizontalAlignment="Left"
+                              Height="28" Padding="10,0" Margin="0,2,0,0"
+                              Visibility="{Binding IsEditing, Converter={StaticResource NotBoolToVis}}">
+                        <StackPanel Orientation="Horizontal">
+                          <Path Data="{StaticResource Icon.Add}" Fill="{StaticResource Primary}"
+                                Width="13" Height="13" Stretch="Uniform" VerticalAlignment="Center" />
+                          <TextBlock Text="Add another time" Foreground="{StaticResource Primary}"
+                                     FontSize="12" FontWeight="Medium" Margin="5,0,0,0" VerticalAlignment="Center" />
+                        </StackPanel>
+                      </Button>
+
+                      <TextBlock Text="Repeat" Style="{StaticResource FieldLabel}" Margin="0,14,0,6" />
                       <ItemsControl ItemsSource="{Binding RepeatChips}">
                         <ItemsControl.ItemsPanel>
                           <ItemsPanelTemplate>
@@ -1538,136 +1575,90 @@
                         </ItemsControl.ItemTemplate>
                       </ItemsControl>
 
-                      <!-- custom repeat -->
-                      <Border BorderBrush="{StaticResource Border}" BorderThickness="1" CornerRadius="10"
-                              Padding="12" Margin="0,6,0,0"
-                              Visibility="{Binding IsCustomRepeat, Converter={StaticResource BoolToVis}}">
-                        <StackPanel>
-                          <TextBlock Text="On these days" Style="{StaticResource FieldLabel}" />
-                          <ItemsControl ItemsSource="{Binding RepeatDays}">
-                            <ItemsControl.ItemsPanel>
-                              <ItemsPanelTemplate>
-                                <UniformGrid Columns="7" />
-                              </ItemsPanelTemplate>
-                            </ItemsControl.ItemsPanel>
-                            <ItemsControl.ItemTemplate>
-                              <DataTemplate>
-                                <Button Command="{Binding DataContext.ToggleRepeatDayCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
-                                        CommandParameter="{Binding}" Margin="1" Padding="0" Height="30" Cursor="Hand">
-                                  <Button.Template>
-                                    <ControlTemplate TargetType="Button">
-                                      <Border x:Name="Bd" CornerRadius="15" BorderThickness="1"
-                                              BorderBrush="{StaticResource Border}" Background="Transparent">
-                                        <TextBlock x:Name="Initial" Text="{Binding Initial}" FontSize="12.5"
-                                                   FontWeight="Medium" Foreground="{StaticResource InkSoft}"
-                                                   HorizontalAlignment="Center" VerticalAlignment="Center" />
-                                      </Border>
-                                      <ControlTemplate.Triggers>
-                                        <Trigger Property="IsMouseOver" Value="True">
-                                          <Setter TargetName="Bd" Property="Background" Value="{StaticResource Track}" />
-                                          <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource Primary}" />
-                                          <Setter TargetName="Initial" Property="Foreground" Value="{StaticResource Ink}" />
-                                        </Trigger>
-                                        <DataTrigger Binding="{Binding IsOn}" Value="True">
-                                          <Setter TargetName="Bd" Property="Background" Value="{StaticResource Primary}" />
-                                          <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource Primary}" />
-                                          <Setter TargetName="Initial" Property="Foreground" Value="White" />
-                                          <Setter TargetName="Initial" Property="FontWeight" Value="SemiBold" />
-                                        </DataTrigger>
-                                        <MultiDataTrigger>
-                                          <MultiDataTrigger.Conditions>
-                                            <Condition Binding="{Binding IsOn}" Value="True" />
-                                            <Condition Binding="{Binding IsMouseOver, RelativeSource={RelativeSource Self}}" Value="True" />
-                                          </MultiDataTrigger.Conditions>
-                                          <Setter TargetName="Bd" Property="Background" Value="#1D4FD8" />
-                                          <Setter TargetName="Bd" Property="BorderBrush" Value="#1D4FD8" />
-                                          <Setter TargetName="Initial" Property="Foreground" Value="White" />
-                                          <Setter TargetName="Initial" Property="FontWeight" Value="SemiBold" />
-                                        </MultiDataTrigger>
-                                      </ControlTemplate.Triggers>
-                                    </ControlTemplate>
-                                  </Button.Template>
-                                </Button>
-                              </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                          </ItemsControl>
+                      <!-- Google Alarms day bubbles: [M] [T] [W] [T] [F] [S] [S] -->
+                      <StackPanel Margin="0,4,0,0" Visibility="{Binding ShowDayBubbles, Converter={StaticResource BoolToVis}}">
+                        <ItemsControl ItemsSource="{Binding RepeatDays}">
+                          <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                              <UniformGrid Columns="7" />
+                            </ItemsPanelTemplate>
+                          </ItemsControl.ItemsPanel>
+                          <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                              <Button Command="{Binding DataContext.ToggleRepeatDayCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                      CommandParameter="{Binding}" Margin="2" Padding="0" Width="34" Height="34"
+                                      HorizontalAlignment="Center" Cursor="Hand">
+                                <Button.Template>
+                                  <ControlTemplate TargetType="Button">
+                                    <Border x:Name="Bd" CornerRadius="17" BorderThickness="1"
+                                            BorderBrush="{StaticResource Border}" Background="Transparent">
+                                      <TextBlock x:Name="Initial" Text="{Binding Initial}" FontSize="12.5"
+                                                 FontWeight="Medium" Foreground="{StaticResource InkSoft}"
+                                                 HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                    </Border>
+                                    <ControlTemplate.Triggers>
+                                      <Trigger Property="IsMouseOver" Value="True">
+                                        <Setter TargetName="Bd" Property="Background" Value="{StaticResource Track}" />
+                                        <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource Primary}" />
+                                        <Setter TargetName="Initial" Property="Foreground" Value="{StaticResource Ink}" />
+                                      </Trigger>
+                                      <DataTrigger Binding="{Binding IsOn}" Value="True">
+                                        <Setter TargetName="Bd" Property="Background" Value="{StaticResource Primary}" />
+                                        <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource Primary}" />
+                                        <Setter TargetName="Initial" Property="Foreground" Value="White" />
+                                        <Setter TargetName="Initial" Property="FontWeight" Value="SemiBold" />
+                                      </DataTrigger>
+                                      <MultiDataTrigger>
+                                        <MultiDataTrigger.Conditions>
+                                          <Condition Binding="{Binding IsOn}" Value="True" />
+                                          <Condition Binding="{Binding IsMouseOver, RelativeSource={RelativeSource Self}}" Value="True" />
+                                        </MultiDataTrigger.Conditions>
+                                        <Setter TargetName="Bd" Property="Background" Value="#1D4FD8" />
+                                        <Setter TargetName="Bd" Property="BorderBrush" Value="#1D4FD8" />
+                                        <Setter TargetName="Initial" Property="Foreground" Value="White" />
+                                        <Setter TargetName="Initial" Property="FontWeight" Value="SemiBold" />
+                                      </MultiDataTrigger>
+                                    </ControlTemplate.Triggers>
+                                  </ControlTemplate>
+                                </Button.Template>
+                              </Button>
+                            </DataTemplate>
+                          </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                      </StackPanel>
 
-                          <Grid Margin="0,12,0,0">
-                            <Grid.ColumnDefinitions>
-                              <ColumnDefinition Width="*" />
-                              <ColumnDefinition Width="*" />
-                            </Grid.ColumnDefinitions>
-                            <StackPanel Margin="0,0,4,0">
-                              <TextBlock Text="Repeat every" Style="{StaticResource FieldLabel}" />
-                              <ComboBox ItemsSource="{Binding IntervalOptions}" SelectedItem="{Binding IntervalWeeks}"
-                                        Height="34" />
-                            </StackPanel>
-                            <StackPanel Grid.Column="1" Margin="4,0,0,0">
-                              <TextBlock Text="Ends" Style="{StaticResource FieldLabel}" />
-                              <DockPanel>
-                                <Button DockPanel.Dock="Right" Command="{Binding ClearUntilCommand}"
-                                        Width="34" Height="34" Padding="0" Margin="4,0,0,0"
-                                        ToolTip="Never ends"
-                                        Visibility="{Binding Until, Converter={StaticResource NotNullToVis}}">
-                                  <Path Data="{StaticResource Icon.Close}" Fill="{StaticResource InkSoft}"
-                                        Width="16" Height="16" Stretch="Uniform" />
-                                </Button>
-                                <DatePicker SelectedDate="{Binding Until}" Height="34" />
-                              </DockPanel>
-                            </StackPanel>
-                          </Grid>
+                      <!-- Repeat interval: "Repeat every [ 1 ▼ ] [ week(s) / day(s) / hour(s) / month(s) / year(s) ]" -->
+                      <StackPanel Orientation="Horizontal" Margin="0,10,0,0"
+                                  Visibility="{Binding IsRepeating, Converter={StaticResource BoolToVis}}">
+                        <TextBlock Text="Repeat every" Style="{StaticResource FieldLabel}" VerticalAlignment="Center" Margin="0,0,10,0" />
+                        <ComboBox ItemsSource="{Binding IntervalOptions}" SelectedItem="{Binding IntervalWeeks}"
+                                  Width="70" Height="34" VerticalContentAlignment="Center" HorizontalContentAlignment="Center" />
+                        <TextBlock Text="{Binding RepeatIntervalUnit}" Style="{StaticResource Subtle}"
+                                   FontSize="13" VerticalAlignment="Center" Margin="10,0,0,0" />
+                      </StackPanel>
 
-                          <TextBlock Text="At these times" Style="{StaticResource FieldLabel}" Margin="0,12,0,4" />
-                          <WrapPanel>
-                            <ItemsControl ItemsSource="{Binding ExtraTimes}">
-                              <ItemsControl.ItemsPanel>
-                                <ItemsPanelTemplate>
-                                  <WrapPanel />
-                                </ItemsPanelTemplate>
-                              </ItemsControl.ItemsPanel>
-                              <ItemsControl.ItemTemplate>
-                                <DataTemplate>
-                                  <Border Background="{StaticResource Track}" CornerRadius="15"
-                                          Padding="10,0,6,0" Height="30" Margin="0,0,6,6">
-                                    <StackPanel Orientation="Horizontal">
-                                      <TextBlock Text="{Binding StringFormat=HH\\:mm}" Style="{StaticResource Mono}"
-                                                 FontSize="12.5" VerticalAlignment="Center" />
-                                      <Button Command="{Binding DataContext.RemoveTimeCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
-                                              CommandParameter="{Binding}" BorderThickness="0"
-                                              Background="Transparent" Padding="4" Margin="2,0,0,0">
-                                        <Path Data="{StaticResource Icon.Close}" Fill="{StaticResource InkFaint}"
-                                              Width="14" Height="14" Stretch="Uniform" />
-                                      </Button>
-                                    </StackPanel>
-                                  </Border>
-                                </DataTemplate>
-                              </ItemsControl.ItemTemplate>
-                            </ItemsControl>
-
-                            <Button Command="{Binding AddTimeCommand}" Height="30" Padding="8,0" Margin="0,0,6,6"
-                                    BorderBrush="{StaticResource InkDisabled}">
-                              <StackPanel Orientation="Horizontal">
-                                <Path Data="{StaticResource Icon.Add}" Fill="{StaticResource Primary}"
-                                      Width="16" Height="16" Stretch="Uniform" VerticalAlignment="Center" />
-                                <TextBlock Text="Add time" Foreground="{StaticResource Primary}"
-                                           FontSize="12.5" Margin="4,0,0,0" VerticalAlignment="Center" />
-                              </StackPanel>
-                            </Button>
-                          </WrapPanel>
-
-                          <TextBlock Style="{StaticResource Caption}" Margin="0,4,0,0" TextWrapping="Wrap"
-                                     LineHeight="17"
-                                     Text="Each time is saved as its own reminder, so they can be ticked off separately." />
-                        </StackPanel>
-                      </Border>
+                      <!-- End Date -->
+                      <StackPanel Margin="0,10,0,0" Visibility="{Binding IsRepeating, Converter={StaticResource BoolToVis}}">
+                        <TextBlock Text="End Date" Style="{StaticResource FieldLabel}" Margin="0,0,0,4" />
+                        <DockPanel>
+                          <Button DockPanel.Dock="Right" Command="{Binding ClearUntilCommand}"
+                                  Width="34" Height="34" Padding="0" Margin="6,0,0,0"
+                                  ToolTip="Clear end date (Never ends)"
+                                  Visibility="{Binding Until, Converter={StaticResource NotNullToVis}}">
+                            <Path Data="{StaticResource Icon.Close}" Fill="{StaticResource InkSoft}"
+                                  Width="14" Height="14" Stretch="Uniform" />
+                          </Button>
+                          <DatePicker SelectedDate="{Binding Until}" Height="34" />
+                        </DockPanel>
+                      </StackPanel>
 
                       <Border Style="{StaticResource Note}" Margin="0,12,0,0">
                         <DockPanel>
                           <Path Data="{StaticResource Icon.EventRepeat}" Fill="{StaticResource InkFaint}"
                                 Width="16" Height="16" Stretch="Uniform" DockPanel.Dock="Left"
-                                VerticalAlignment="Top" />
+                                VerticalAlignment="Center" Margin="0,0,10,0" />
                           <TextBlock Text="{Binding ScheduleSummary}" Style="{StaticResource Subtle}"
-                                     FontSize="12.5" Margin="8,0,0,0" TextWrapping="Wrap" LineHeight="18" />
+                                     FontSize="12.5" VerticalAlignment="Center" TextWrapping="Wrap" LineHeight="18" />
                         </DockPanel>
                       </Border>
 

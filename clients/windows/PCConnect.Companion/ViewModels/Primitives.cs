@@ -1,6 +1,7 @@
 using System.Globalization;
 using CommunityToolkit.Mvvm.ComponentModel;
 using PCConnect.Core.Domain;
+using PCConnect.Companion.Services;
 
 namespace PCConnect.Companion.ViewModels;
 
@@ -251,9 +252,18 @@ public sealed partial class EventDetailModalViewModel : ObservableObject
 public enum RepeatKind
 {
     Once,
+    Daily,
     Weekly,
     Monthly,
+    Yearly,
+    Hourly,
     Custom,
+}
+
+public sealed partial class ExtraTimeItem : ObservableObject
+{
+    [ObservableProperty]
+    private string _timeText = "12:00";
 }
 
 public sealed partial class RepeatChip : ObservableObject
@@ -300,24 +310,38 @@ public static class Recurrence
 
     public static string? ToRrule(RepeatKind kind, IReadOnlyList<DayOfWeek> days, int intervalWeeks, DateOnly start)
     {
+        var n = intervalWeeks > 0 ? intervalWeeks : 1;
+        var intervalStr = n > 1 ? $";INTERVAL={n}" : string.Empty;
+
         switch (kind)
         {
             case RepeatKind.Once:
                 return null;
 
+            case RepeatKind.Hourly:
+                return $"FREQ=HOURLY{intervalStr}";
+
+            case RepeatKind.Daily:
+                return $"FREQ=DAILY{intervalStr}";
+
             case RepeatKind.Weekly:
-                return "FREQ=WEEKLY";
+                if (days.Count == 0 && n == 1)
+                {
+                    return "FREQ=WEEKLY";
+                }
+                var chosenWeekly = days.Count > 0 ? days : [start.DayOfWeek];
+                return $"FREQ=WEEKLY{intervalStr};BYDAY={string.Join(",", chosenWeekly.Select(d => Codes[d]))}";
 
             case RepeatKind.Monthly:
-                return "FREQ=MONTHLY";
+                return n == 1 ? "FREQ=MONTHLY" : $"FREQ=MONTHLY{intervalStr}";
 
+            case RepeatKind.Yearly:
+                return n == 1 ? "FREQ=YEARLY" : $"FREQ=YEARLY{intervalStr}";
+
+            case RepeatKind.Custom:
             default:
-                // No day ticked means "the day it starts on", which is what a
-                // weekly rule does anyway — saying it keeps the rule stable if
-                // the start date is later moved.
                 var chosen = days.Count > 0 ? days : [start.DayOfWeek];
-                var interval = intervalWeeks > 1 ? $";INTERVAL={intervalWeeks}" : string.Empty;
-                return $"FREQ=WEEKLY{interval};BYDAY={string.Join(",", chosen.Select(d => Codes[d]))}";
+                return $"FREQ=WEEKLY{intervalStr};BYDAY={string.Join(",", chosen.Select(d => Codes[d]))}";
         }
     }
 
@@ -336,12 +360,18 @@ public static class Recurrence
             .ToDictionary(p => p[0].ToUpperInvariant(), p => p[1], StringComparer.Ordinal);
 
         var byDay = parts.GetValueOrDefault("BYDAY")?.Split(',') ?? [];
-        var interval = int.TryParse(parts.GetValueOrDefault("INTERVAL"), out var n) ? n : 1;
+        var interval = int.TryParse(parts.GetValueOrDefault("INTERVAL"), out var n) && n > 0 ? n : 1;
 
         return parts.GetValueOrDefault("FREQ")?.ToUpperInvariant() switch
         {
-            "DAILY" => "Every day",
-            "MONTHLY" => "Every month",
+            "HOURLY" when interval == 1 => "Every hour",
+            "HOURLY" => $"Every {interval} hours",
+            "DAILY" when interval == 1 => "Every day",
+            "DAILY" => $"Every {interval} days",
+            "MONTHLY" when interval == 1 => "Every month",
+            "MONTHLY" => $"Every {interval} months",
+            "YEARLY" when interval == 1 => "Every year",
+            "YEARLY" => $"Every {interval} years",
             "WEEKLY" when byDay.ToHashSet().SetEquals(["MO", "TU", "WE", "TH", "FR"]) => "Every weekday",
             "WEEKLY" when byDay.Length == 0 && interval == 1 => "Every week",
             "WEEKLY" when byDay.Length == 0 => $"Every {interval} weeks",
@@ -366,31 +396,46 @@ public static class Recurrence
 
         var freq = parts.GetValueOrDefault("FREQ")?.ToUpperInvariant();
         var byDay = parts.GetValueOrDefault("BYDAY")?.Split(',') ?? [];
-        var interval = int.TryParse(parts.GetValueOrDefault("INTERVAL"), out var n) ? n : 1;
+        var interval = int.TryParse(parts.GetValueOrDefault("INTERVAL"), out var n) && n > 0 ? n : 1;
+
+        if (freq == "HOURLY")
+        {
+            return (RepeatKind.Hourly, [], interval);
+        }
+
+        if (freq == "DAILY")
+        {
+            return (RepeatKind.Daily, [], interval);
+        }
+
+        if (freq == "YEARLY")
+        {
+            return (RepeatKind.Yearly, [], interval);
+        }
 
         if (freq == "MONTHLY")
         {
-            return (RepeatKind.Monthly, [], 1);
+            return (RepeatKind.Monthly, [], interval);
         }
 
-        if (freq == "WEEKLY" && byDay.Length == 0 && interval == 1)
+        if (freq == "WEEKLY")
         {
-            return (RepeatKind.Weekly, [], 1);
+            var codeToDay = new Dictionary<string, DayOfWeek>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["MO"] = DayOfWeek.Monday,
+                ["TU"] = DayOfWeek.Tuesday,
+                ["WE"] = DayOfWeek.Wednesday,
+                ["TH"] = DayOfWeek.Thursday,
+                ["FR"] = DayOfWeek.Friday,
+                ["SA"] = DayOfWeek.Saturday,
+                ["SU"] = DayOfWeek.Sunday,
+            };
+
+            var days = byDay.Where(codeToDay.ContainsKey).Select(c => codeToDay[c]).ToList();
+            return (RepeatKind.Weekly, days, interval);
         }
 
-        var codeToDay = new Dictionary<string, DayOfWeek>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["MO"] = DayOfWeek.Monday,
-            ["TU"] = DayOfWeek.Tuesday,
-            ["WE"] = DayOfWeek.Wednesday,
-            ["TH"] = DayOfWeek.Thursday,
-            ["FR"] = DayOfWeek.Friday,
-            ["SA"] = DayOfWeek.Saturday,
-            ["SU"] = DayOfWeek.Sunday,
-        };
-
-        var days = byDay.Where(codeToDay.ContainsKey).Select(c => codeToDay[c]).ToList();
-        return (RepeatKind.Custom, days, interval);
+        return (RepeatKind.Once, [], 1);
     }
 
     /// <summary>The sentence under the repeat editor, so a rule can be read back before it is saved.</summary>
@@ -401,32 +446,56 @@ public static class Recurrence
         DateOnly date,
         IReadOnlyList<TimeOnly> times,
         DateOnly? until,
-        DateOnly today)
+        DateOnly today,
+        bool use24Hour = true)
     {
-        var timeList = JoinNaturally(times.Order().Select(t => t.ToString("HH\\:mm", CultureInfo.InvariantCulture)).ToList());
+        var timeList = times.Count == 0 ? "at scheduled time" : JoinNaturally(times.Order().Select(t => TimeFormatting.FormatTime(t, use24Hour)).ToList());
         var longDate = date.ToString("dddd d MMMM", CultureInfo.CurrentCulture);
         var start = date == today ? "today" : date == today.AddDays(1) ? "tomorrow" : $"on {longDate}";
         var ends = until is { } u
-            ? $" Ends on {u.ToString("d MMMM", CultureInfo.CurrentCulture)}."
+            ? $" Ends on {u.ToString("d MMMM yyyy", CultureInfo.CurrentCulture)}."
             : kind == RepeatKind.Once ? string.Empty : " Doesn't end.";
+
+        var n = intervalWeeks > 0 ? intervalWeeks : 1;
 
         return kind switch
         {
             RepeatKind.Once =>
                 $"Once — {(date == today || date == today.AddDays(1) ? $"{start}, {longDate}" : longDate)}, at {timeList}.",
 
-            RepeatKind.Weekly =>
+            RepeatKind.Hourly =>
+                (n > 1 ? $"Every {n} hours" : "Every hour") +
+                $" at {timeList}, starting {start}.{ends}",
+
+            RepeatKind.Daily =>
+                (n > 1 ? $"Every {n} days" : "Every day") +
+                $" at {timeList}, starting {start}.{ends}",
+
+            RepeatKind.Weekly or RepeatKind.Custom when days.Count == 0 && n == 1 =>
                 $"Every {date.ToString("dddd", CultureInfo.CurrentCulture)} at {timeList}, starting {start}.{ends}",
 
-            RepeatKind.Monthly =>
-                $"On the {Ordinal(date.Day)} of every month at {timeList}, starting {start}.{ends}",
+            RepeatKind.Weekly or RepeatKind.Custom when days.Count == 0 =>
+                $"Every {n} weeks on {date.ToString("dddd", CultureInfo.CurrentCulture)} at {timeList}, starting {start}.{ends}",
 
-            _ when days.Count == 0 => "Pick at least one day.",
-
-            _ => (intervalWeeks > 1
-                    ? $"Every {intervalWeeks} weeks on {JoinNaturally(days.Select(FullName).ToList())}"
+            RepeatKind.Weekly or RepeatKind.Custom =>
+                (n > 1
+                    ? $"Every {n} weeks on {JoinNaturally(days.Select(FullName).ToList())}"
                     : $"Every {JoinNaturally(days.Select(FullName).ToList())}") +
                 $" at {timeList}, starting {start}.{ends}",
+
+            RepeatKind.Monthly =>
+                (n > 1
+                    ? $"On the {Ordinal(date.Day)} of every {n} months"
+                    : $"On the {Ordinal(date.Day)} of every month") +
+                $" at {timeList}, starting {start}.{ends}",
+
+            RepeatKind.Yearly =>
+                (n > 1
+                    ? $"Every {n} years on {date.ToString("d MMMM", CultureInfo.CurrentCulture)}"
+                    : $"Every year on {date.ToString("d MMMM", CultureInfo.CurrentCulture)}") +
+                $" at {timeList}, starting {start}.{ends}",
+
+            _ => "Pick recurrence options.",
         };
     }
 
@@ -461,11 +530,19 @@ public static class Recurrence
 
         switch (parts.GetValueOrDefault("FREQ")?.ToUpperInvariant())
         {
+            case "HOURLY":
+                return day >= seriesStart;
+
             case "DAILY":
                 return (day.DayNumber - seriesStart.DayNumber) % interval == 0;
 
             case "MONTHLY":
-                return day.Day == seriesStart.Day;
+                var months = (day.Year - seriesStart.Year) * 12 + (day.Month - seriesStart.Month);
+                return months >= 0 && months % interval == 0 && day.Day == seriesStart.Day;
+
+            case "YEARLY":
+                var years = day.Year - seriesStart.Year;
+                return years >= 0 && years % interval == 0 && day.Month == seriesStart.Month && day.Day == seriesStart.Day;
 
             case "WEEKLY":
                 var weeks = (day.DayNumber - StartOfWeek(seriesStart).DayNumber) / 7;

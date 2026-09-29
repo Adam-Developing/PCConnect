@@ -710,22 +710,23 @@
     <Setter Property="Padding" Value="8,0,0,0" />
     <Setter Property="VerticalContentAlignment" Value="Center" />
     <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+    <Setter Property="TextWrapping" Value="NoWrap" />
     <Setter Property="Template">
       <Setter.Value>
         <ControlTemplate TargetType="{x:Type primitives:DatePickerTextBox}">
           <Grid>
             <ScrollViewer x:Name="PART_ContentHost"
-                          Margin="0"
+                          Margin="0,-2,0,0"
                           VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
                           HorizontalScrollBarVisibility="Hidden"
                           VerticalScrollBarVisibility="Hidden"
                           Focusable="False" />
             <ContentControl x:Name="PART_Watermark"
-                            Content="Select date"
+                            Content=""
                             Foreground="{StaticResource InkFaint}"
                             Focusable="False"
                             IsHitTestVisible="False"
-                            Margin="8,0,0,0"
+                            Margin="8,-2,0,0"
                             VerticalAlignment="Center"
                             Visibility="Collapsed" />
           </Grid>

@@ -108,9 +108,10 @@ cd clients/android && ./gradlew assembleDebug
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
-The debug build points at `http://127.0.0.1:5080`. `make mobile` runs `adb reverse` so that
-address reaches the API on the development workstation from either an emulator or a USB device.
-The debug application has its own `.debug` package and cannot inherit a saved production API URL.
+The debug build points at `http://127.0.0.1:5080`. `make mobile` defaults to a connected physical
+Android device (via USB or wireless debugging) when available, falling back to an emulator, and runs
+`adb reverse` so that address reaches the API on the development workstation. The debug application
+has its own `.debug` package and cannot inherit a saved production API URL.
 
 ---
 

@@ -1,0 +1,768 @@
+<title>PCConnect Modernisation Architecture</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&display=swap">
+
+<style>
+/* ─── tokens: light is the base ─────────────────────────────────────────── */
+:root{
+  --ground:#EEF1F4;
+  --surface:#FFFFFF;
+  --surface-2:#F6F8FA;
+  --ink:#131A21;
+  --ink-2:#5C6976;
+  --ink-3:#8794A1;
+  --rule:#D5DCE3;
+  --rule-soft:#E4E9EE;
+
+  --accent:#AE560F;          /* signal copper */
+  --accent-ink:#8A4409;
+  --accent-soft:#FAEDE1;
+
+  --sev1:#B5342A;            /* exploitable now */
+  --sev1-soft:#FBE9E7;
+  --sev2:#95700A;            /* serious defect */
+  --sev2-soft:#FAF1DC;
+  --sev3:#5F6E7C;            /* cost of change */
+  --sev3-soft:#EBEFF3;
+  --keep:#12704F;            /* worth keeping */
+  --keep-soft:#E2F2EB;
+
+  --shadow:0 1px 2px rgba(19,26,33,.05), 0 8px 24px -14px rgba(19,26,33,.28);
+
+  --measure:68ch;
+  --step--1:.8125rem;
+  --step-0:1rem;
+  --step-1:1.1875rem;
+  --step-2:1.5rem;
+  --step-3:2.05rem;
+  --step-4:2.9rem;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --ground:#10151A;
+    --surface:#181F26;
+    --surface-2:#1E262E;
+    --ink:#E4EAF0;
+    --ink-2:#98A5B2;
+    --ink-3:#74828F;
+    --rule:#2A333C;
+    --rule-soft:#232B33;
+
+    --accent:#E9944A;
+    --accent-ink:#F0AA6C;
+    --accent-soft:#2E2016;
+
+    --sev1:#E9756A;  --sev1-soft:#2E1A18;
+    --sev2:#D6A93A;  --sev2-soft:#2B2413;
+    --sev3:#93A2B0;  --sev3-soft:#222A32;
+    --keep:#46C193;  --keep-soft:#132A22;
+
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 10px 30px -16px rgba(0,0,0,.7);
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#10151A;
+  --surface:#181F26;
+  --surface-2:#1E262E;
+  --ink:#E4EAF0;
+  --ink-2:#98A5B2;
+  --ink-3:#74828F;
+  --rule:#2A333C;
+  --rule-soft:#232B33;
+
+  --accent:#E9944A;
+  --accent-ink:#F0AA6C;
+  --accent-soft:#2E2016;
+
+  --sev1:#E9756A;  --sev1-soft:#2E1A18;
+  --sev2:#D6A93A;  --sev2-soft:#2B2413;
+  --sev3:#93A2B0;  --sev3-soft:#222A32;
+  --keep:#46C193;  --keep-soft:#132A22;
+
+  --shadow:0 1px 2px rgba(0,0,0,.4), 0 10px 30px -16px rgba(0,0,0,.7);
+}
+
+*{box-sizing:border-box}
+body{
+  background:var(--ground);
+  color:var(--ink);
+  font-family:"IBM Plex Sans","Segoe UI",system-ui,-apple-system,sans-serif;
+  font-size:var(--step-0);
+  line-height:1.62;
+  -webkit-font-smoothing:antialiased;
+}
+:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:2px}
+
+.wrap{max-width:1120px;margin:0 auto;padding:0 clamp(18px,4vw,44px)}
+.flow{display:flex;flex-direction:column;gap:1.05rem}
+.prose{max-width:var(--measure)}
+.prose p{margin:0}
+
+h1,h2,h3,h4{font-family:Archivo,"Archivo",Helvetica,Arial,sans-serif;text-wrap:balance;margin:0;line-height:1.14}
+h1{font-size:var(--step-4);font-weight:700;letter-spacing:-.024em}
+h2{font-size:var(--step-3);font-weight:700;letter-spacing:-.018em}
+h3{font-size:var(--step-1);font-weight:600;letter-spacing:-.006em}
+h4{font-size:var(--step-0);font-weight:600}
+
+.eyebrow{
+  font-family:"IBM Plex Mono",ui-monospace,monospace;
+  font-size:.6875rem;font-weight:500;
+  letter-spacing:.16em;text-transform:uppercase;
+  color:var(--accent);
+}
+.mono{font-family:"IBM Plex Mono",ui-monospace,"Cascadia Mono",monospace}
+code{
+  font-family:"IBM Plex Mono",ui-monospace,monospace;
+  font-size:.875em;
+  background:var(--surface-2);
+  border:1px solid var(--rule-soft);
+  border-radius:3px;padding:.08em .34em;
+}
+a{color:var(--accent-ink);text-underline-offset:3px;text-decoration-thickness:1px}
+a:hover{text-decoration-thickness:2px}
+strong{font-weight:600}
+
+/* ─── masthead ──────────────────────────────────────────────────────────── */
+.masthead{
+  border-bottom:1px solid var(--rule);
+  background:var(--surface);
+  padding:clamp(32px,6vw,60px) 0 clamp(26px,4vw,38px);
+}
+.mast-grid{display:grid;gap:clamp(20px,3vw,40px);grid-template-columns:1fr}
+@media(min-width:860px){.mast-grid{grid-template-columns:minmax(0,1fr) 250px;align-items:end}}
+.mast-sub{color:var(--ink-2);font-size:var(--step-1);max-width:56ch;margin:.85rem 0 0}
+.mast-meta{
+  display:flex;flex-direction:column;gap:.45rem;
+  font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:.75rem;
+  color:var(--ink-2);
+  border-left:2px solid var(--accent);padding-left:.9rem;
+}
+.mast-meta b{color:var(--ink);font-weight:600}
+
+/* ─── sections ──────────────────────────────────────────────────────────── */
+section{padding:clamp(40px,6vw,72px) 0;border-bottom:1px solid var(--rule-soft)}
+.sec-head{display:flex;flex-direction:column;gap:.5rem;margin-bottom:1.9rem;max-width:var(--measure)}
+.sec-head p{margin:.35rem 0 0;color:var(--ink-2)}
+
+/* ─── the alert ─────────────────────────────────────────────────────────── */
+.alert{
+  background:var(--sev1-soft);
+  border:1px solid color-mix(in srgb,var(--sev1) 34%,transparent);
+  border-left:4px solid var(--sev1);
+  border-radius:4px;
+  padding:clamp(18px,3vw,28px);
+  display:flex;flex-direction:column;gap:.7rem;
+}
+.alert-tag{
+  font-family:"IBM Plex Mono",ui-monospace,monospace;
+  font-size:.6875rem;letter-spacing:.15em;text-transform:uppercase;
+  color:var(--sev1);font-weight:600;
+}
+.alert h3{color:var(--ink)}
+.alert p{margin:0;color:var(--ink-2);max-width:74ch}
+
+/* ─── card grids ────────────────────────────────────────────────────────── */
+.grid{display:grid;gap:14px}
+.g3{grid-template-columns:repeat(auto-fit,minmax(258px,1fr))}
+.g2{grid-template-columns:repeat(auto-fit,minmax(320px,1fr))}
+.card{
+  background:var(--surface);
+  border:1px solid var(--rule);
+  border-radius:5px;
+  padding:20px;
+  display:flex;flex-direction:column;gap:.55rem;
+  box-shadow:var(--shadow);
+}
+.card p{margin:0;color:var(--ink-2);font-size:.9375rem}
+.card .kicker{
+  font-family:"IBM Plex Mono",ui-monospace,monospace;
+  font-size:.6875rem;letter-spacing:.13em;text-transform:uppercase;color:var(--ink-3);
+}
+
+/* ─── severity tallies ──────────────────────────────────────────────────── */
+.tally{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));margin-bottom:1.7rem}
+.tally-item{
+  background:var(--surface);border:1px solid var(--rule);border-radius:5px;
+  padding:16px 18px;display:flex;flex-direction:column;gap:.15rem;
+  border-top:3px solid var(--sv,var(--rule));
+}
+.tally-n{
+  font-family:Archivo,sans-serif;font-weight:700;font-size:2.3rem;line-height:1;
+  font-variant-numeric:tabular-nums;color:var(--sv,var(--ink));
+}
+.tally-l{font-weight:600;font-size:.9375rem}
+.tally-d{color:var(--ink-2);font-size:.8125rem;line-height:1.45}
+
+/* ─── findings table ────────────────────────────────────────────────────── */
+.tablewrap{overflow-x:auto;border:1px solid var(--rule);border-radius:5px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;min-width:660px;font-size:.9375rem}
+thead th{
+  text-align:left;padding:11px 16px;
+  font-family:"IBM Plex Mono",ui-monospace,monospace;
+  font-size:.6875rem;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--ink-2);font-weight:600;
+  background:var(--surface-2);border-bottom:1px solid var(--rule);
+  white-space:nowrap;
+}
+tbody td{padding:12px 16px;border-bottom:1px solid var(--rule-soft);vertical-align:top}
+tbody tr:last-child td{border-bottom:0}
+td.id{font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:.8125rem;font-weight:500;white-space:nowrap;color:var(--ink-2)}
+td.fix{color:var(--ink-2);font-size:.875rem}
+
+.chip{
+  display:inline-block;
+  font-family:"IBM Plex Mono",ui-monospace,monospace;
+  font-size:.6875rem;font-weight:600;letter-spacing:.06em;
+  padding:.18em .5em;border-radius:3px;white-space:nowrap;
+}
+.s1{background:var(--sev1-soft);color:var(--sev1);border:1px solid color-mix(in srgb,var(--sev1) 30%,transparent)}
+.s2{background:var(--sev2-soft);color:var(--sev2);border:1px solid color-mix(in srgb,var(--sev2) 30%,transparent)}
+.s3{background:var(--sev3-soft);color:var(--sev3);border:1px solid color-mix(in srgb,var(--sev3) 30%,transparent)}
+
+/* ─── the five changes ──────────────────────────────────────────────────── */
+.change{
+  display:grid;gap:.35rem 1.15rem;
+  grid-template-columns:auto 1fr;
+  padding:18px 0;border-bottom:1px solid var(--rule-soft);
+}
+.change:last-child{border-bottom:0}
+.change-id{
+  font-family:"IBM Plex Mono",ui-monospace,monospace;
+  font-size:.8125rem;font-weight:600;color:var(--accent);
+  padding-top:.18rem;grid-row:span 2;
+}
+.change p{margin:0;color:var(--ink-2);max-width:70ch}
+.closes{
+  display:flex;flex-wrap:wrap;gap:.3rem;margin-top:.45rem;
+  grid-column:2;
+}
+
+/* ─── phase rail ────────────────────────────────────────────────────────── */
+.railwrap{overflow-x:auto;padding-bottom:6px}
+.rail{display:flex;align-items:stretch;gap:0;min-width:1000px}
+.phase{
+  flex:1 1 0;min-width:0;
+  background:var(--surface);
+  border:1px solid var(--rule);
+  border-radius:5px;
+  padding:15px 16px 17px;
+  display:flex;flex-direction:column;gap:.4rem;
+}
+.phase.now{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.phase-n{
+  font-family:"IBM Plex Mono",ui-monospace,monospace;
+  font-size:.6875rem;font-weight:600;letter-spacing:.1em;color:var(--accent);
+}
+.phase h4{font-size:.9375rem}
+.phase p{margin:0;font-size:.8125rem;color:var(--ink-2);line-height:1.5}
+.phase .dur{
+  margin-top:auto;padding-top:.6rem;
+  font-family:"IBM Plex Mono",ui-monospace,monospace;
+  font-size:.6875rem;color:var(--ink-3);
+}
+.gate{
+  flex:0 0 74px;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:.3rem;
+  padding:0 4px;text-align:center;
+}
+.gate-bar{width:100%;height:1px;background:var(--rule)}
+.gate-txt{
+  font-family:"IBM Plex Mono",ui-monospace,monospace;
+  font-size:.5625rem;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--ink-3);line-height:1.35;
+}
+.rail-note{margin:1rem 0 0;color:var(--ink-2);font-size:.875rem;max-width:var(--measure)}
+
+/* ─── decisions ─────────────────────────────────────────────────────────── */
+.adr{
+  display:grid;gap:.3rem .95rem;grid-template-columns:auto 1fr;
+  padding:14px 0;border-bottom:1px solid var(--rule-soft);
+}
+.adr:last-child{border-bottom:0}
+.adr-n{font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:.8125rem;color:var(--ink-3);padding-top:.15rem}
+.adr-t{font-weight:600}
+.adr-w{grid-column:2;color:var(--ink-2);font-size:.875rem;margin:0}
+
+/* ─── file index ────────────────────────────────────────────────────────── */
+.files{display:grid;gap:0;border:1px solid var(--rule);border-radius:5px;overflow:hidden;background:var(--surface)}
+.file{
+  display:grid;gap:.15rem .9rem;grid-template-columns:minmax(0,270px) 1fr;
+  padding:11px 16px;border-bottom:1px solid var(--rule-soft);align-items:baseline;
+}
+.file:last-child{border-bottom:0}
+.file:nth-child(odd){background:var(--surface-2)}
+.file .fp{font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:.8125rem;color:var(--ink);word-break:break-all}
+.file .fd{color:var(--ink-2);font-size:.875rem}
+@media(max-width:620px){.file{grid-template-columns:1fr}}
+
+/* ─── kept ──────────────────────────────────────────────────────────────── */
+.kept{
+  background:var(--keep-soft);
+  border:1px solid color-mix(in srgb,var(--keep) 28%,transparent);
+  border-radius:5px;padding:20px 22px;
+}
+.kept ul{margin:.7rem 0 0;padding-left:1.1rem;display:flex;flex-direction:column;gap:.4rem;color:var(--ink-2);font-size:.9375rem}
+.kept li strong{color:var(--ink)}
+.kept .eyebrow{color:var(--keep)}
+
+footer{padding:36px 0 56px;color:var(--ink-3);font-size:.8125rem}
+footer p{margin:0;max-width:var(--measure)}
+
+@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+
+<header class="masthead">
+  <div class="wrap mast-grid">
+    <div>
+      <p class="eyebrow">Architecture · v1.0 · Proposed</p>
+      <h1>PCConnect Modernisation Architecture</h1>
+      <p class="mast-sub">
+        Moving a live remote-PC-control product from three parallel API generations and four
+        clients to one secure, contract-driven system — without breaking the installed clients
+        carrying today's traffic.
+      </p>
+    </div>
+    <div class="mast-meta">
+      <span>Assessed <b>2026-09-02</b></span>
+      <span>Branch <b>Mobile-App @ 0b47ea2</b></span>
+      <span>Findings <b>39</b> · all traced</span>
+      <span>Docs <b>22 files · 5,200 lines</b></span>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <!-- ── containment ─────────────────────────────────────────────────── -->
+  <section>
+    <div class="alert">
+      <span class="alert-tag">Before anything else · Phase 0</span>
+      <h3>Live production database credentials are sitting in the working tree</h3>
+      <p>
+        <code>api/db_config.php</code> holds the plaintext MySQL host, user and password for the
+        production database. The file is <strong>untracked but not gitignored</strong> — one
+        <code>git add -A</code> from permanent publication. The host is a public IP, which suggests
+        the database is directly reachable from the internet. Alongside it,
+        <code>DB/pcconnect.sql</code> holds roughly ten thousand rows of real user names, dates of
+        birth, emails and password hashes.
+      </p>
+      <p>
+        Verified: the credential has <em>not</em> entered git history. It still needs rotating —
+        it has lived unencrypted on a workstation. Nothing else in this architecture matters until
+        that is contained.
+      </p>
+    </div>
+  </section>
+
+  <!-- ── the problem ─────────────────────────────────────────────────── -->
+  <section>
+    <div class="sec-head">
+      <p class="eyebrow">The situation</p>
+      <h2>Two complete systems, and only one of them has users</h2>
+      <p>
+        PCConnect lets someone shut down their PC from their phone. That makes remote code
+        execution on a personal computer its core primitive — and today that primitive is guarded
+        by a single permanent, unscoped, unrotatable bearer token, derived from a password the
+        <em>client</em> hashes with unsalted SHA-256 before sending.
+      </p>
+    </div>
+
+    <div class="grid g3">
+      <article class="card">
+        <span class="kicker">Backend</span>
+        <h3>Three API generations</h3>
+        <p>
+          The live PHP endpoints — not present in this repository — serve 100% of traffic. A PHP
+          front-controller in <code>api/</code> cannot execute: four of its classes are zero-byte
+          files. A working Node gateway in <code>api_node/</code> serves nobody. The only written
+          spec documents endpoints no implementation provides.
+        </p>
+      </article>
+      <article class="card">
+        <span class="kicker">Clients</span>
+        <h3>Two client generations</h3>
+        <p>
+          A VB.NET WinForms client on .NET Framework 4.7.2 and a Java Android app on deprecated
+          <code>AsyncTask</code> carry all production traffic. A Go/Wails desktop client and a
+          Flutter mobile app are prototypes that have never touched production. Neither generation
+          can talk to the other's backend.
+        </p>
+      </article>
+      <article class="card">
+        <span class="kicker">Data</span>
+        <h3>A schema that causes bugs</h3>
+        <p>
+          No timezone anywhere, so reminders fire at UK time for users in Kolkata and Lima.
+          <code>utf8mb3</code>, so reminder text cannot hold an emoji. And a single mutable row
+          used as a command mailbox, so a shutdown queued at 09:00 executes when the laptop opens
+          at 18:00.
+        </p>
+      </article>
+    </div>
+  </section>
+
+  <!-- ── findings ────────────────────────────────────────────────────── -->
+  <section>
+    <div class="sec-head">
+      <p class="eyebrow">Findings register</p>
+      <h2>39 findings, every one traced to a control</h2>
+      <p>
+        Each finding cites the file and line it came from, and maps forward to the control that
+        closes it and the migration phase that ships it.
+      </p>
+    </div>
+
+    <div class="tally">
+      <div class="tally-item" style="--sv:var(--sev1)">
+        <span class="tally-n">15</span>
+        <span class="tally-l">S1 · Exploitable now</span>
+        <span class="tally-d">Credentials, command authorisation, cryptography</span>
+      </div>
+      <div class="tally-item" style="--sv:var(--sev2)">
+        <span class="tally-n">14</span>
+        <span class="tally-l">S2 · Broken or blocking</span>
+        <span class="tally-d">Correctness defects and blockers to modernisation</span>
+      </div>
+      <div class="tally-item" style="--sv:var(--sev3)">
+        <span class="tally-n">10</span>
+        <span class="tally-l">S3 · Cost of change</span>
+        <span class="tally-d">No CI, no migrations, no staging, no observability</span>
+      </div>
+    </div>
+
+    <div class="tablewrap">
+      <table>
+        <thead>
+          <tr><th>ID</th><th>Sev</th><th>Finding</th><th>Closed by</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="id">S1-03</td><td><span class="chip s1">S1</span></td>
+            <td>Passwords hashed client-side with unsalted SHA-256 — the stored hash <em>is</em> a working credential for every user</td>
+            <td class="fix">Server-side Argon2id, upgrade-on-next-login</td>
+          </tr>
+          <tr>
+            <td class="id">S1-05</td><td><span class="chip s1">S1</span></td>
+            <td>A permanent, unscoped, unrotatable API key authorises everything, including remote shutdown</td>
+            <td class="fix">Token pair with scopes and expiry; separate device credential</td>
+          </tr>
+          <tr>
+            <td class="id">S1-06</td><td><span class="chip s1">S1</span></td>
+            <td>That same API key <em>is</em> the AES key for reminder text — rotating it destroys all reminder data</td>
+            <td class="fix">AES-256-GCM envelope encryption, per-user data key</td>
+          </tr>
+          <tr>
+            <td class="id">S1-08</td><td><span class="chip s1">S1</span></td>
+            <td>Device identity is a self-asserted header that auto-registers any name it is given</td>
+            <td class="fix">User-confirmed pairing code; authorisation by authenticated device id</td>
+          </tr>
+          <tr>
+            <td class="id">S1-11</td><td><span class="chip s1">S1</span></td>
+            <td><code>cors({origin:true, credentials:true})</code> — any website can drive the authenticated API in a victim's browser</td>
+            <td class="fix">Explicit origin allow-list; bearer-only API, no cookie auth</td>
+          </tr>
+          <tr>
+            <td class="id">S2-01</td><td><span class="chip s2">S2</span></td>
+            <td>The PHP front-controller cannot run: four required classes are zero-byte files</td>
+            <td class="fix">Deleted; replaced by the TypeScript API</td>
+          </tr>
+          <tr>
+            <td class="id">S2-03</td><td><span class="chip s2">S2</span></td>
+            <td>Commands never expire — a shutdown queued this morning fires when the PC comes online tonight</td>
+            <td class="fix">Mandatory TTL, default 120 s; expired commands never execute</td>
+          </tr>
+          <tr>
+            <td class="id">S2-06</td><td><span class="chip s2">S2</span></td>
+            <td>WebSocket sessions live in a process-local object — lost on restart, never swept, single-instance only</td>
+            <td class="fix">Handshake token auth; Valkey adapter for rooms and presence</td>
+          </tr>
+          <tr>
+            <td class="id">S2-07</td><td><span class="chip s2">S2</span></td>
+            <td>Reminder times are naive wall-clock with no timezone, for a user base spanning four continents</td>
+            <td class="fix">UTC instant plus IANA timezone; RFC 5545 recurrence</td>
+          </tr>
+          <tr>
+            <td class="id">S2-10</td><td><span class="chip s2">S2</span></td>
+            <td><code>go.mod</code> requires both Wails v2 and v3-alpha; six branches attempt the same upgrade, none merged</td>
+            <td class="fix">Pin v2 stable; consolidate to one branch; v3 gated on GA</td>
+          </tr>
+          <tr>
+            <td class="id">S3-02</td><td><span class="chip s3">S3</span></td>
+            <td>No migration tooling — the committed schema dump describes a different generation than the code queries</td>
+            <td class="fix"><code>dbmate</code> plain-SQL migrations, baselined from production</td>
+          </tr>
+          <tr>
+            <td class="id">S3-07</td><td><span class="chip s3">S3</span></td>
+            <td>No staging environment. Every change is tested in production, against real users' computers</td>
+            <td class="fix">Staging with an anonymised monthly refresh</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ── the five changes ────────────────────────────────────────────── -->
+  <section>
+    <div class="sec-head">
+      <p class="eyebrow">The design</p>
+      <h2>Five changes carry the architecture</h2>
+      <p>Everything else in the document set is detail hanging off these.</p>
+    </div>
+
+    <div>
+      <div class="change">
+        <span class="change-id">C-1</span>
+        <div>
+          <h3>Identity replaces bearer keys</h3>
+          <p>
+            Three credentials with different lifetimes and scopes: a password verified server-side
+            with Argon2id, a 15-minute scoped access token, and a rotating refresh token with
+            family-based reuse detection — plus a separate per-device secret in the OS keychain.
+            A stolen phone token can issue commands but never receive them; a stolen device secret
+            can execute on one PC but cannot read a reminder. No single credential does everything
+            any more.
+          </p>
+        </div>
+        <div class="closes">
+          <span class="chip s1">S1-03</span><span class="chip s1">S1-04</span><span class="chip s1">S1-05</span><span class="chip s1">S1-10</span>
+        </div>
+      </div>
+
+      <div class="change">
+        <span class="change-id">C-2</span>
+        <div>
+          <h3>Devices are paired, not asserted</h3>
+          <p>
+            The agent requests a short-lived pairing code, the user confirms it in the app, and the
+            server issues a device id and secret. <code>PCName</code> stops being an identity claim
+            and becomes what it always should have been: a label you can rename.
+          </p>
+        </div>
+        <div class="closes"><span class="chip s1">S1-08</span></div>
+      </div>
+
+      <div class="change">
+        <span class="change-id">C-3</span>
+        <div>
+          <h3>Commands become an expiring, append-only lifecycle</h3>
+          <p>
+            The mutable mailbox row becomes an append-only table with a state machine, a
+            client-generated id that makes retry idempotent, a mandatory TTL, and a per-command
+            acknowledgement carrying the real outcome. Every transition writes an audit row —
+            these are destructive actions on someone's computer, and "who asked for this, and did
+            it happen" must be answerable.
+          </p>
+        </div>
+        <div class="closes">
+          <span class="chip s2">S2-03</span><span class="chip s2">S2-04</span><span class="chip s2">S2-05</span>
+        </div>
+      </div>
+
+      <div class="change">
+        <span class="change-id">C-4</span>
+        <div>
+          <h3>Encryption is decoupled from authentication</h3>
+          <p>
+            A per-user data key, wrapped by a key held outside the database, with AES-256-GCM
+            replacing unauthenticated CBC. Rotating a credential no longer destroys data — which is
+            what currently makes credential rotation impossible in practice.
+          </p>
+        </div>
+        <div class="closes"><span class="chip s1">S1-06</span><span class="chip s1">S1-07</span></div>
+      </div>
+
+      <div class="change">
+        <span class="change-id">C-5</span>
+        <div>
+          <h3>The contract is the schema</h3>
+          <p>
+            Route schemas validate requests and responses at runtime and generate the OpenAPI
+            document at build time; every client's model layer is generated from it and a breaking
+            change fails CI. This is what stops three parallel API generations from happening
+            again — the failure was that the contract was prose.
+          </p>
+        </div>
+        <div class="closes"><span class="chip s2">Contract drift</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── phases ──────────────────────────────────────────────────────── -->
+  <section>
+    <div class="sec-head">
+      <p class="eyebrow">Migration</p>
+      <h2>Seven phases, gated rather than scheduled</h2>
+      <p>
+        A strangler-fig migration. Each phase advances when its exit criteria are met, not when an
+        estimate elapses. The gates between them are the load-bearing part.
+      </p>
+    </div>
+
+    <div class="railwrap">
+      <div class="rail">
+        <div class="phase now">
+          <span class="phase-n">P0</span>
+          <h4>Contain</h4>
+          <p>Rotate the credential, take the database off the public internet, verify a restore.</p>
+          <span class="dur">~1 week</span>
+        </div>
+        <div class="gate"><span class="gate-bar"></span><span class="gate-txt">Backup restored</span><span class="gate-bar"></span></div>
+
+        <div class="phase">
+          <span class="phase-n">P1</span>
+          <h4>Foundation</h4>
+          <p>One repo, CI, migration tooling, a staging environment, baseline observability.</p>
+          <span class="dur">2–3 weeks</span>
+        </div>
+        <div class="gate"><span class="gate-bar"></span><span class="gate-txt">Schema reproducible</span><span class="gate-bar"></span></div>
+
+        <div class="phase">
+          <span class="phase-n">P2</span>
+          <h4>Backend</h4>
+          <p>One TypeScript API behind <code>/v2</code>, with a byte-faithful shim for old clients.</p>
+          <span class="dur">4–6 weeks</span>
+        </div>
+        <div class="gate"><span class="gate-bar"></span><span class="gate-txt">Shadow traffic clean 7d</span><span class="gate-bar"></span></div>
+
+        <div class="phase">
+          <span class="phase-n">P3</span>
+          <h4>Identity</h4>
+          <p>Argon2id, token pairs, device pairing, envelope encryption. The phase the plan exists for.</p>
+          <span class="dur">3–4 weeks</span>
+        </div>
+        <div class="gate"><span class="gate-bar"></span><span class="gate-txt">All S1 closed</span><span class="gate-bar"></span></div>
+
+        <div class="phase">
+          <span class="phase-n">P4</span>
+          <h4>Data</h4>
+          <p>Expand, dual-write, backfill, verify, cut over, contract. Reversible until the last step.</p>
+          <span class="dur">3–4 weeks</span>
+        </div>
+        <div class="gate"><span class="gate-bar"></span><span class="gate-txt">Verification zero 7d</span><span class="gate-bar"></span></div>
+
+        <div class="phase">
+          <span class="phase-n">P5</span>
+          <h4>Clients</h4>
+          <p>Flutter and the Go agent reach parity and ship; the old two get one final update prompt.</p>
+          <span class="dur">6–8 weeks</span>
+        </div>
+        <div class="gate"><span class="gate-bar"></span><span class="gate-txt">Legacy under 1% for 14d</span><span class="gate-bar"></span></div>
+
+        <div class="phase">
+          <span class="phase-n">P6</span>
+          <h4>Decommission</h4>
+          <p>Legacy endpoints return 410, old tables drop, dead clients leave the default branch.</p>
+          <span class="dur">~2 weeks</span>
+        </div>
+      </div>
+    </div>
+
+    <p class="rail-note">
+      Every phase before P6 is reversible by reverting the application — the legacy schema and
+      endpoints stay live and written throughout. P6 is the only one-way door, which is why it is
+      last and gated on measured client traffic rather than a date.
+    </p>
+  </section>
+
+  <!-- ── decisions ───────────────────────────────────────────────────── -->
+  <section>
+    <div class="sec-head">
+      <p class="eyebrow">Decision records</p>
+      <h2>Eight decisions, each with its honest cost</h2>
+      <p>Every ADR states what the choice buys, what it costs, and the condition that should reopen it.</p>
+    </div>
+
+    <div>
+      <div class="adr">
+        <span class="adr-n">0001</span>
+        <span class="adr-t">Node 22 + TypeScript on Fastify — port <code>api_node</code>, don't rewrite it</span>
+        <p class="adr-w">Cost: a build step, and Argon2id must be kept off the event loop. Revisit if CPU-bound work stops fitting.</p>
+      </div>
+      <div class="adr">
+        <span class="adr-n">0002</span>
+        <span class="adr-t">Argon2id, scoped JWT access tokens, rotating refresh tokens, separate device secrets</span>
+        <p class="adr-w">Cost: every client must ship first — while a client pre-hashes, no account can be upgraded.</p>
+      </div>
+      <div class="adr">
+        <span class="adr-n">0003</span>
+        <span class="adr-t">Socket.IO with a Valkey adapter; at-most-once delivery bounded by a TTL</span>
+        <p class="adr-w">Cost: a new runtime dependency, and a new user-visible failure — "your PC was offline". Correct, but needs explaining.</p>
+      </div>
+      <div class="adr">
+        <span class="adr-n">0004</span>
+        <span class="adr-t">AES-256-GCM envelope encryption — and a documented rejection of end-to-end</span>
+        <p class="adr-w">Cost: this protects against a stolen dump, not a compromised server. Said plainly rather than implied away.</p>
+      </div>
+      <div class="adr">
+        <span class="adr-n">0005</span>
+        <span class="adr-t">Stay on MySQL 8.4; adopt <code>dbmate</code> plain-SQL migrations</span>
+        <p class="adr-w">Cost: hand-written down-migrations, and the production drift gets baselined in rather than pretended away.</p>
+      </div>
+      <div class="adr">
+        <span class="adr-n">0006</span>
+        <span class="adr-t">Go + Wails, pinned to v2 stable; the v3 upgrade waits for GA</span>
+        <p class="adr-w">Cost: the transparent reminder window needs a v2 implementation, and the upgrade still has to happen later.</p>
+      </div>
+      <div class="adr">
+        <span class="adr-n">0007</span>
+        <span class="adr-t">Flutter for Android and iOS; retire the Java app</span>
+        <p class="adr-w">Cost: existing Android users install a new app rather than receiving an update. A real user-facing cost.</p>
+      </div>
+      <div class="adr">
+        <span class="adr-n">0008</span>
+        <span class="adr-t">Path versioning, a legacy shim, and a sunset gated on measurement</span>
+        <p class="adr-w">Cost: the shim carries one weak behaviour forward — confined, logged, rate-limited, and it dies with the shim.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── kept ────────────────────────────────────────────────────────── -->
+  <section>
+    <div class="kept">
+      <p class="eyebrow">Not everything needs replacing</p>
+      <h3>What the existing code already gets right</h3>
+      <ul>
+        <li><strong>The command allow-list</strong> in <code>executor.go</code> — enumerated argv, no shell, reject by default. It becomes the second of two enforcement points rather than the only one.</li>
+        <li><strong>The fallback-polling policy</strong> in <code>realtime/policy.go</code> — exponential backoff, poll only when the socket is unhealthy. Small, tested, correct. It gains jitter and nothing else.</li>
+        <li><strong>The Socket.IO room model</strong> — per-user and per-device rooms with presence broadcast. The right shape; the auth around it is what changes.</li>
+        <li><strong>Windows Credential Manager integration</strong> — already the right home for a device secret.</li>
+        <li><strong>The Flutter client's structure</strong> — feature-first, secure storage, biometrics. A good foundation to finish rather than restart.</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ── index ───────────────────────────────────────────────────────── -->
+  <section style="border-bottom:0">
+    <div class="sec-head">
+      <p class="eyebrow">The deliverable</p>
+      <h2>Where everything lives</h2>
+      <p>All under <code>docs/architecture/</code> in the repository.</p>
+    </div>
+
+    <div class="files">
+      <div class="file"><span class="fp">README.md</span><span class="fd">Index, the problem and answer in one page each, open questions for the maintainer</span></div>
+      <div class="file"><span class="fp">00-current-state.md</span><span class="fd">Component inventory, the three-way contract drift table, all 39 findings with file and line</span></div>
+      <div class="file"><span class="fp">01-target-architecture.md</span><span class="fd">Goals, topology, bounded contexts, the five changes, and what gets deleted</span></div>
+      <div class="file"><span class="fp">02-data-architecture.md</span><span class="fd">Entity model, index strategy, expand/contract stages, field-by-field legacy mapping</span></div>
+      <div class="file"><span class="fp">03-security-architecture.md</span><span class="fd">Threat model, credential design, the eight checks on a command, findings-to-controls matrix</span></div>
+      <div class="file"><span class="fp">04-api-contract.md</span><span class="fd">The v2 surface, error envelope, versioning rules, the legacy shim's endpoint map</span></div>
+      <div class="file"><span class="fp">05-realtime-architecture.md</span><span class="fd">Command state machine, delivery walkthrough, fallback polling, failure modes</span></div>
+      <div class="file"><span class="fp">06-client-architecture.md</span><span class="fd">Desktop agent, mobile app, web dashboard, and how the old two are sunset</span></div>
+      <div class="file"><span class="fp">07-migration-plan.md</span><span class="fd">Seven gated phases, risk register, sequencing rationale, definition of done</span></div>
+      <div class="file"><span class="fp">08-platform-and-delivery.md</span><span class="fd">Hosting, environments, secrets, CI/CD gates, the five alerts that matter, runbooks</span></div>
+      <div class="file"><span class="fp">adr/0001–0008 + template</span><span class="fd">Eight decision records, each with options, consequences and a revisit trigger</span></div>
+      <div class="file"><span class="fp">openapi/pcconnect-v2.yaml</span><span class="fd">The contract — 25 paths, 14 schemas, validated. Generates every client.</span></div>
+      <div class="file"><span class="fp">schema/v2_target_schema.sql</span><span class="fd">Target DDL, annotated with the finding each decision closes</span></div>
+      <div class="file"><span class="fp">schema/migration_v1_to_v2.sql</span><span class="fd">Expand, backfill, verify, contract — including the guard that refuses to drop the API key while reminders are still encrypted with it</span></div>
+    </div>
+  </section>
+
+</main>
+
+<footer class="wrap">
+  <p>
+    Assessment is a snapshot of one day against one branch. Every finding cites the file and line it
+    came from — re-derive rather than trusting the summary.
+  </p>
+</footer>
