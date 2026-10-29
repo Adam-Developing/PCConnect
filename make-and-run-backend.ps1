@@ -2,6 +2,13 @@
 param(
     [ValidateRange(1, 65535)]
     [int]$PostgresPort = 15432,
+
+    [ValidateRange(1, 65535)]
+    [int]$ValkeyPort = 56379,
+
+    [ValidateRange(1, 65535)]
+    [int]$ApiPort = 5080,
+
     [switch]$DependenciesOnly
 )
 
@@ -29,16 +36,72 @@ function Invoke-Checked {
     }
 }
 
+function Invoke-Quiet {
+    param(
+        [Parameter(Mandatory = $true)][string]$FilePath,
+        [Parameter(Mandatory = $true)][string[]]$Arguments
+    )
+
+    $prevPref = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        $output = & $FilePath @Arguments 2>$null
+        return [PSCustomObject]@{
+            ExitCode = $LASTEXITCODE
+            Output   = (@($output) -join "`n").Trim()
+        }
+    }
+    finally {
+        $ErrorActionPreference = $prevPref
+    }
+}
+
+function Stop-ProjectProcesses {
+    param(
+        [Parameter(Mandatory = $true)][string[]]$ExecutableNames,
+        [Parameter(Mandatory = $true)][string]$DotnetCommandPattern
+    )
+
+    $pids = [System.Collections.Generic.HashSet[int]]::new()
+
+    foreach ($exe in $ExecutableNames) {
+        $procName = [System.IO.Path]::GetFileNameWithoutExtension($exe)
+        Get-Process -Name $procName -ErrorAction SilentlyContinue |
+            Where-Object { $_.Id -ne $PID } |
+            ForEach-Object { [void]$pids.Add($_.Id) }
+    }
+
+    Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+        Where-Object { $_.ProcessId -ne $PID -and $_.Name -ieq 'dotnet.exe' -and $_.CommandLine -match $DotnetCommandPattern } |
+        ForEach-Object { [void]$pids.Add([int]$_.ProcessId) }
+
+    if ($pids.Count -gt 0) {
+        Write-Host "Stopping running backend process(es) ($($pids -join ', '))..." -ForegroundColor DarkGray
+        foreach ($procId in $pids) {
+            try {
+                $proc = Get-Process -Id $procId -ErrorAction SilentlyContinue
+                if ($null -ne $proc) {
+                    Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
+                    $proc.WaitForExit(5000) | Out-Null
+                }
+            }
+            catch {
+                # Process already exited
+            }
+        }
+    }
+}
+
 function Ensure-Container {
     param(
         [Parameter(Mandatory = $true)][string]$Name,
         [Parameter(Mandatory = $true)][string[]]$CreateArguments
     )
 
-    & docker container inspect $Name *> $null
-    if ($LASTEXITCODE -eq 0) {
-        $isRunning = (& docker inspect --format "{{.State.Running}}" $Name 2>$null).Trim()
-        if ($isRunning -ne "true") {
+    $inspect = Invoke-Quiet "docker" @("container", "inspect", $Name)
+    if ($inspect.ExitCode -eq 0) {
+        $runningCheck = Invoke-Quiet "docker" @("inspect", "--format", "{{.State.Running}}", $Name)
+        if ($runningCheck.Output -ne "true") {
             Write-Host "Starting existing container $Name..." -ForegroundColor Cyan
             Invoke-Checked "docker" @("start", $Name) "Could not start $Name."
         }
@@ -60,7 +123,7 @@ function Assert-AvailablePort {
         $listener.Start()
     }
     catch {
-        throw "Local port $Port is in use or reserved by Windows. Run this script with -PostgresPort <available-port>. To see Windows reservations: netsh interface ipv4 show excludedportrange protocol=tcp"
+        throw "Local port $Port is in use or reserved by Windows. Run this script with -PostgresPort <available-port> (or -ValkeyPort / -ApiPort). To see Windows reservations: netsh interface ipv4 show excludedportrange protocol=tcp"
     }
     finally {
         $listener.Stop()
@@ -69,11 +132,12 @@ function Assert-AvailablePort {
 
 function Ensure-PostgresContainer {
     $name = "pcconnect-dev-pg"
-    $existingJson = & docker container inspect $name 2>$null
-    if ($LASTEXITCODE -ne 0) {
+    $inspect = Invoke-Quiet "docker" @("container", "inspect", $name)
+    if ($inspect.ExitCode -ne 0) {
         Assert-AvailablePort $PostgresPort
         Ensure-Container $name @(
             "run", "-d", "--name", $name,
+            "-e", "POSTGRES_DB=pcconnect",
             "-e", "POSTGRES_PASSWORD=postgres",
             "-p", "127.0.0.1:${PostgresPort}:5432",
             "postgres:18-alpine"
@@ -81,7 +145,7 @@ function Ensure-PostgresContainer {
         return
     }
 
-    $existing = @($existingJson | ConvertFrom-Json)[0]
+    $existing = @($inspect.Output | ConvertFrom-Json)[0]
     $bindings = @($existing.HostConfig.PortBindings.'5432/tcp')
     if ($bindings.Count -eq 1 -and $bindings[0].HostPort -eq "$PostgresPort") {
         if (-not $existing.State.Running) {
@@ -146,8 +210,8 @@ function Ensure-PostgresContainer {
     }
     catch {
         $failure = $_
-        & docker container inspect $name *> $null
-        if ($LASTEXITCODE -eq 0) {
+        $checkNew = Invoke-Quiet "docker" @("container", "inspect", $name)
+        if ($checkNew.ExitCode -eq 0) {
             Invoke-Checked "docker" @("rename", $name, "$backupName-failed") "The original is preserved as $backupName; restoring its name failed."
         }
         Invoke-Checked "docker" @("rename", $backupName, $name) "The original is preserved as $backupName; restoring its name failed."
@@ -158,56 +222,64 @@ function Ensure-PostgresContainer {
 Assert-Command "dotnet"
 Assert-Command "docker"
 
-& docker info *> $null
-if ($LASTEXITCODE -ne 0) {
+$dockerCheck = Invoke-Quiet "docker" @("info")
+if ($dockerCheck.ExitCode -ne 0) {
     throw "Docker is not running. Open Docker Desktop, wait for it to finish starting, then run this file again."
 }
 
-Set-Location $repoRoot
-
-Ensure-PostgresContainer
-
-Ensure-Container "pcconnect-dev-valkey" @(
-    "run", "-d", "--name", "pcconnect-dev-valkey",
-    "-p", "56379:6379",
-    "valkey/valkey:8-alpine"
-)
-
-Write-Host "Waiting for PostgreSQL..." -ForegroundColor Cyan
-$postgresReady = $false
-for ($attempt = 0; $attempt -lt 30; $attempt++) {
-    & docker exec pcconnect-dev-pg pg_isready -U postgres -d pcconnect *> $null
-    if ($LASTEXITCODE -eq 0) {
-        $postgresReady = $true
-        break
-    }
-    Start-Sleep -Seconds 2
-}
-if (-not $postgresReady) {
-    throw "PostgreSQL did not become ready within 60 seconds. Check: docker logs pcconnect-dev-pg"
-}
-
-if ($DependenciesOnly) {
-    Write-Host "Dependencies are ready. PostgreSQL: localhost:$PostgresPort; Valkey: localhost:56379" -ForegroundColor Green
-    return
-}
-
-# Stop any previously running PCConnect processes to avoid file locking during build
-Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
-    Where-Object { $_.Name -eq 'dotnet.exe' -and $_.CommandLine -match 'PCConnect\.(Worker|Api)' } |
-    ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
-
-Write-Host "Building backend projects..." -ForegroundColor Cyan
-Invoke-Checked "dotnet" @("build", "src\PCConnect.Api\PCConnect.Api.csproj", "--nologo") "The API build failed."
-Invoke-Checked "dotnet" @("build", "src\PCConnect.Worker\PCConnect.Worker.csproj", "--nologo") "The worker build failed."
-
-$env:ASPNETCORE_ENVIRONMENT = "Development"
-$env:DOTNET_ENVIRONMENT = "Development"
-$env:PCCONNECT_DATABASE__CONNECTIONSTRING = "Host=127.0.0.1;Port=$PostgresPort;Database=pcconnect;Username=postgres;Password=postgres"
-$env:PCCONNECT_CACHE__CONNECTIONSTRING = "127.0.0.1:56379"
-
+Push-Location $repoRoot
 $worker = $null
 try {
+    Ensure-PostgresContainer
+
+    Ensure-Container "pcconnect-dev-valkey" @(
+        "run", "-d", "--name", "pcconnect-dev-valkey",
+        "-p", "127.0.0.1:${ValkeyPort}:6379",
+        "valkey/valkey:8-alpine"
+    )
+
+    Write-Host "Waiting for PostgreSQL..." -ForegroundColor Cyan
+    $postgresReady = $false
+    for ($attempt = 0; $attempt -lt 30; $attempt++) {
+        $ready = Invoke-Quiet "docker" @("exec", "pcconnect-dev-pg", "pg_isready", "-U", "postgres")
+        if ($ready.ExitCode -eq 0) {
+            $postgresReady = $true
+            break
+        }
+        Start-Sleep -Seconds 2
+    }
+    if (-not $postgresReady) {
+        throw "PostgreSQL did not become ready within 60 seconds. Check: docker logs pcconnect-dev-pg"
+    }
+
+    $dbExists = Invoke-Quiet "docker" @("exec", "pcconnect-dev-pg", "psql", "-U", "postgres", "-d", "postgres", "-tAc", "SELECT 1 FROM pg_database WHERE datname = 'pcconnect'")
+    if ($dbExists.Output -ne "1") {
+        Write-Host "Creating database 'pcconnect'..." -ForegroundColor Cyan
+        Invoke-Checked "docker" @("exec", "pcconnect-dev-pg", "createdb", "-U", "postgres", "pcconnect") "Could not create database 'pcconnect'."
+    }
+
+    if ($DependenciesOnly) {
+        Write-Host "Dependencies are ready. PostgreSQL: 127.0.0.1:$PostgresPort; Valkey: 127.0.0.1:$ValkeyPort" -ForegroundColor Green
+        return
+    }
+
+    # Stop any previously running PCConnect backend processes to avoid file locking during build
+    Stop-ProjectProcesses -ExecutableNames @("PCConnect.Api.exe", "PCConnect.Worker.exe") -DotnetCommandPattern 'PCConnect\.(Worker|Api)'
+
+    Write-Host "Building backend and migrator projects..." -ForegroundColor Cyan
+    Invoke-Checked "dotnet" @("build", "src\PCConnect.DbMigrator\PCConnect.DbMigrator.csproj", "-c", "Debug", "--nologo") "The database migrator build failed."
+    Invoke-Checked "dotnet" @("build", "src\PCConnect.Api\PCConnect.Api.csproj", "-c", "Debug", "--nologo") "The API build failed."
+    Invoke-Checked "dotnet" @("build", "src\PCConnect.Worker\PCConnect.Worker.csproj", "-c", "Debug", "--nologo") "The worker build failed."
+
+    $env:ASPNETCORE_ENVIRONMENT = "Development"
+    $env:DOTNET_ENVIRONMENT = "Development"
+    $env:PCCONNECT_DATABASE__CONNECTIONSTRING = "Host=127.0.0.1;Port=$PostgresPort;Database=pcconnect;Username=postgres;Password=postgres"
+    $env:PCCONNECT_CACHE__CONNECTIONSTRING = "127.0.0.1:$ValkeyPort"
+    $env:PCCONNECT_DISCOVERY__REALTIMEURL = "ws://localhost:${ApiPort}/rt"
+
+    Write-Host "Applying database migrations..." -ForegroundColor Cyan
+    Invoke-Checked "dotnet" @("src\PCConnect.DbMigrator\bin\Debug\net10.0\pcconnect-migrate.dll", "up", "--allow-destructive") "Database migration failed."
+
     Write-Host "Starting the background worker..." -ForegroundColor Cyan
     $worker = Start-Process `
         -FilePath "dotnet" `
@@ -217,14 +289,14 @@ try {
         -PassThru
 
     Write-Host ""
-    Write-Host "Backend is starting at http://localhost:5080" -ForegroundColor Green
-    Write-Host "Discovery: http://localhost:5080/v2/meta/discovery"
+    Write-Host "Backend is starting at http://localhost:$ApiPort" -ForegroundColor Green
+    Write-Host "Discovery: http://localhost:$ApiPort/v2/meta/discovery"
     Write-Host "Press Ctrl+C to stop the API and worker. PostgreSQL and Valkey will remain running."
     Write-Host ""
 
     Push-Location (Join-Path $repoRoot "src\PCConnect.Api")
     try {
-        & dotnet "bin\Debug\net10.0\PCConnect.Api.dll" --urls "http://localhost:5080"
+        & dotnet "bin\Debug\net10.0\PCConnect.Api.dll" --urls "http://localhost:$ApiPort"
     }
     finally {
         Pop-Location
@@ -236,4 +308,5 @@ finally {
         Stop-Process -Id $worker.Id -Force -ErrorAction SilentlyContinue
         $worker.WaitForExit(5000) | Out-Null
     }
+    Pop-Location
 }

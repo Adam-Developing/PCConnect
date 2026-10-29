@@ -1,5 +1,10 @@
 [CmdletBinding()]
-param()
+param(
+    [ValidateRange(1, 65535)]
+    [int]$ApiPort = 5080,
+
+    [string]$BaseAddress = ""
+)
 
 $ErrorActionPreference = "Stop"
 $repoRoot = $PSScriptRoot
@@ -25,26 +30,72 @@ function Invoke-Checked {
     }
 }
 
+function Stop-ProjectProcesses {
+    param(
+        [Parameter(Mandatory = $true)][string[]]$ExecutableNames,
+        [Parameter(Mandatory = $true)][string]$DotnetCommandPattern
+    )
+
+    $pids = [System.Collections.Generic.HashSet[int]]::new()
+
+    foreach ($exe in $ExecutableNames) {
+        $procName = [System.IO.Path]::GetFileNameWithoutExtension($exe)
+        Get-Process -Name $procName -ErrorAction SilentlyContinue |
+            Where-Object { $_.Id -ne $PID } |
+            ForEach-Object { [void]$pids.Add($_.Id) }
+    }
+
+    Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+        Where-Object { $_.ProcessId -ne $PID -and $_.Name -ieq 'dotnet.exe' -and $_.CommandLine -match $DotnetCommandPattern } |
+        ForEach-Object { [void]$pids.Add([int]$_.ProcessId) }
+
+    if ($pids.Count -gt 0) {
+        Write-Host "Stopping running Windows client process(es) ($($pids -join ', '))..." -ForegroundColor DarkGray
+        foreach ($procId in $pids) {
+            try {
+                $proc = Get-Process -Id $procId -ErrorAction SilentlyContinue
+                if ($null -ne $proc) {
+                    Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
+                    $proc.WaitForExit(5000) | Out-Null
+                }
+            }
+            catch {
+                # Process already exited
+            }
+        }
+    }
+}
+
 Assert-Command "dotnet"
-Set-Location $repoRoot
 
-Write-Host "Checking the local API..." -ForegroundColor Cyan
-try {
-    Invoke-RestMethod -Uri "http://localhost:5080/v2/meta/discovery" -TimeoutSec 5 | Out-Null
+$effectiveBaseAddress = if ([string]::IsNullOrWhiteSpace($BaseAddress)) {
+    "http://localhost:$ApiPort"
 }
-catch {
-    throw "The backend is not available at http://localhost:5080. Run .\make-and-run-backend.ps1 first."
+else {
+    $BaseAddress.TrimEnd('/')
 }
 
-Write-Host "Building the Windows agent and companion..." -ForegroundColor Cyan
-Invoke-Checked "dotnet" @("build", "clients\windows\PCConnect.Agent\PCConnect.Agent.csproj", "--nologo") "The Windows agent build failed."
-Invoke-Checked "dotnet" @("build", "clients\windows\PCConnect.Companion\PCConnect.Companion.csproj", "--nologo") "The Windows companion build failed."
-
-$env:PCCONNECT_AGENT_AGENT__BASEADDRESS = "http://localhost:5080"
-$env:PCCONNECT_COMPANION_COMPANION__BASEADDRESS = "http://localhost:5080"
-
+Push-Location $repoRoot
 $agent = $null
 try {
+    Write-Host "Checking the API at $effectiveBaseAddress..." -ForegroundColor Cyan
+    try {
+        Invoke-RestMethod -Uri "$effectiveBaseAddress/v2/meta/discovery" -TimeoutSec 5 | Out-Null
+    }
+    catch {
+        throw "The backend is not available at $effectiveBaseAddress. Run .\make-and-run-backend.cmd (or .\make-and-run-backend.ps1) first."
+    }
+
+    # Stop any previously running Agent or Companion (including minimized-to-tray instances) so DLLs are not locked
+    Stop-ProjectProcesses -ExecutableNames @("PCConnect.Agent.exe", "PCConnect.Companion.exe") -DotnetCommandPattern 'PCConnect\.(Agent|Companion)'
+
+    Write-Host "Building the Windows agent and companion..." -ForegroundColor Cyan
+    Invoke-Checked "dotnet" @("build", "clients\windows\PCConnect.Agent\PCConnect.Agent.csproj", "-c", "Debug", "--nologo") "The Windows agent build failed."
+    Invoke-Checked "dotnet" @("build", "clients\windows\PCConnect.Companion\PCConnect.Companion.csproj", "-c", "Debug", "--nologo") "The Windows companion build failed."
+
+    $env:PCCONNECT_AGENT_AGENT__BASEADDRESS = $effectiveBaseAddress
+    $env:PCCONNECT_COMPANION_COMPANION__BASEADDRESS = $effectiveBaseAddress
+
     Write-Host "Starting the Windows agent..." -ForegroundColor Cyan
     $agent = Start-Process `
         -FilePath "dotnet" `
@@ -71,4 +122,5 @@ finally {
         Stop-Process -Id $agent.Id -Force -ErrorAction SilentlyContinue
         $agent.WaitForExit(5000) | Out-Null
     }
+    Pop-Location
 }

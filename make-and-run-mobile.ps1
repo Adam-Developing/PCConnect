@@ -3,12 +3,61 @@ param(
     [Parameter(Position = 0)]
     [string]$Device,
 
-    [switch]$Emulator
+    [switch]$Emulator,
+
+    [ValidateRange(1, 65535)]
+    [int]$ApiPort = 5080,
+
+    [switch]$SkipBackendCheck
 )
 
 $ErrorActionPreference = "Stop"
 $repoRoot = $PSScriptRoot
 $androidRoot = Join-Path $repoRoot "clients\android"
+
+function Invoke-Checked {
+    param(
+        [Parameter(Mandatory = $true)][string]$FilePath,
+        [Parameter(Mandatory = $true)][string[]]$Arguments,
+        [Parameter(Mandatory = $true)][string]$FailureMessage
+    )
+
+    & $FilePath @Arguments
+    if ($LASTEXITCODE -ne 0) {
+        throw $FailureMessage
+    }
+}
+
+function Invoke-Quiet {
+    param(
+        [Parameter(Mandatory = $true)][string]$FilePath,
+        [Parameter(Mandatory = $true)][string[]]$Arguments
+    )
+
+    $prevPref = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        $output = & $FilePath @Arguments 2>$null
+        return [PSCustomObject]@{
+            ExitCode = $LASTEXITCODE
+            Output   = (@($output) -join "`n").Trim()
+        }
+    }
+    finally {
+        $ErrorActionPreference = $prevPref
+    }
+}
+
+function Get-DeviceProp {
+    param(
+        [Parameter(Mandatory = $true)][string]$Adb,
+        [Parameter(Mandatory = $true)][string]$Serial,
+        [Parameter(Mandatory = $true)][string]$Property
+    )
+
+    $res = Invoke-Quiet $Adb @("-s", $Serial, "shell", "getprop", $Property)
+    return $res.Output
+}
 
 function Resolve-AndroidSdk {
     $candidates = @(
@@ -91,15 +140,8 @@ function Resolve-JavaHome {
                 New-Item -ItemType Directory -Path $targetTemurin -Force | Out-Null
             }
 
-            curl.exe -L "https://api.adoptium.net/v3/binary/latest/17/ga/windows/x64/jdk/hotspot/normal/eclipse" -o $tempZip
-            if ($LASTEXITCODE -ne 0) {
-                throw "Failed to download Eclipse Temurin JDK 17."
-            }
-
-            tar.exe -xf $tempZip -C $targetTemurin --strip-components 1
-            if ($LASTEXITCODE -ne 0) {
-                throw "Failed to extract Eclipse Temurin JDK 17."
-            }
+            Invoke-Checked "curl.exe" @("-L", "https://api.adoptium.net/v3/binary/latest/17/ga/windows/x64/jdk/hotspot/normal/eclipse", "-o", $tempZip) "Failed to download Eclipse Temurin JDK 17."
+            Invoke-Checked "tar.exe" @("-xf", $tempZip, "-C", $targetTemurin, "--strip-components", "1") "Failed to extract Eclipse Temurin JDK 17."
         }
         finally {
             Remove-Item $tempZip -Force -ErrorAction SilentlyContinue
@@ -144,15 +186,13 @@ function Get-AdbDevices {
                 $isEmulator = $true
             }
             elseif ($isUsb) {
-                # Physically connected via USB controller
                 $isEmulator = $false
             }
             elseif ($state -eq "device") {
-                # For network/wireless debugging devices, query system properties
-                $qemu = (& $Adb -s $serial shell getprop ro.kernel.qemu 2>$null).Trim()
-                $bootQemu = (& $Adb -s $serial shell getprop ro.boot.qemu 2>$null).Trim()
-                $hardware = (& $Adb -s $serial shell getprop ro.hardware 2>$null).Trim()
-                $characteristics = (& $Adb -s $serial shell getprop ro.build.characteristics 2>$null).Trim()
+                $qemu = Get-DeviceProp -Adb $Adb -Serial $serial -Property "ro.kernel.qemu"
+                $bootQemu = Get-DeviceProp -Adb $Adb -Serial $serial -Property "ro.boot.qemu"
+                $hardware = Get-DeviceProp -Adb $Adb -Serial $serial -Property "ro.hardware"
+                $characteristics = Get-DeviceProp -Adb $Adb -Serial $serial -Property "ro.build.characteristics"
 
                 if ($qemu -eq "1" -or $bootQemu -eq "1" -or $hardware -match '^(goldfish|ranchu|vbox86|cuttlefish)' -or $characteristics -match 'emulator') {
                     $isEmulator = $true
@@ -203,14 +243,12 @@ function Start-And-Wait-Emulator {
 
     & $Adb wait-for-device
     Write-Host "Waiting for Android emulator to finish booting..." -ForegroundColor Cyan
-    $booted = $false
     for ($attempt = 0; $attempt -lt 90; $attempt++) {
         $devices = Get-AdbDevices $Adb
         $booting = @($devices | Where-Object { $_.IsEmulator -and $_.State -eq "device" })
         if ($booting.Count -gt 0) {
-            $bootState = (& $Adb -s $booting[0].Serial shell getprop sys.boot_completed 2>$null).Trim()
+            $bootState = Get-DeviceProp -Adb $Adb -Serial $booting[0].Serial -Property "sys.boot_completed"
             if ($bootState -eq "1") {
-                $booted = $true
                 return $booting[0]
             }
         }
@@ -314,6 +352,15 @@ function Select-TargetDevice {
     return Start-And-Wait-Emulator -Adb $Adb -EmulatorExe $EmulatorExe
 }
 
+if (-not $SkipBackendCheck) {
+    try {
+        Invoke-RestMethod -Uri "http://localhost:$ApiPort/v2/meta/discovery" -TimeoutSec 3 | Out-Null
+    }
+    catch {
+        Write-Warning "Local backend was not detected at http://localhost:$ApiPort. Run .\make-and-run-backend.cmd (or .\make-and-run-backend.ps1) if the mobile app should connect locally."
+    }
+}
+
 $androidSdk = Resolve-AndroidSdk
 $env:JAVA_HOME = Resolve-JavaHome
 $env:ANDROID_SDK_ROOT = $androidSdk
@@ -322,38 +369,31 @@ $env:Path = "$(Join-Path $env:JAVA_HOME 'bin');$(Join-Path $androidSdk 'platform
 $adbExe = Join-Path $androidSdk "platform-tools\adb.exe"
 $emulatorExe = Join-Path $androidSdk "emulator\emulator.exe"
 
-& $adbExe start-server | Out-Null
+[void](Invoke-Quiet $adbExe @("start-server"))
 
 $targetDevice = Select-TargetDevice -Adb $adbExe -EmulatorExe $emulatorExe -RequestedDevice $Device -ForceEmulator:$Emulator
 $selectedSerial = $targetDevice.Serial
 $env:ANDROID_SERIAL = $selectedSerial
 
-Write-Host "Forwarding the device's localhost:5080 to the local API..." -ForegroundColor Cyan
-& $adbExe -s $selectedSerial reverse tcp:5080 tcp:5080
-if ($LASTEXITCODE -ne 0) {
-    throw "adb could not expose the local API to $selectedSerial."
-}
+Write-Host "Forwarding the device's localhost:5080 to the local API (port $ApiPort)..." -ForegroundColor Cyan
+Invoke-Checked $adbExe @("-s", $selectedSerial, "reverse", "tcp:5080", "tcp:$ApiPort") "adb could not expose the local API to $selectedSerial."
 
-Set-Location $androidRoot
-Write-Host "Building the Android debug app..." -ForegroundColor Cyan
-& ".\gradlew.bat" assembleDebug
-if ($LASTEXITCODE -ne 0) {
-    throw "The Android build failed."
-}
+Push-Location $androidRoot
+try {
+    Write-Host "Building the Android debug app..." -ForegroundColor Cyan
+    Invoke-Checked ".\gradlew.bat" @("assembleDebug") "The Android build failed."
 
-$apkPath = Join-Path $androidRoot "app\build\outputs\apk\debug\app-debug.apk"
-if (-not (Test-Path $apkPath)) {
-    throw "Build succeeded but APK was not found at '$apkPath'."
-}
+    $apkPath = Join-Path $androidRoot "app\build\outputs\apk\debug\app-debug.apk"
+    if (-not (Test-Path $apkPath)) {
+        throw "Build succeeded but APK was not found at '$apkPath'."
+    }
 
-Write-Host "Installing the debug app on $($targetDevice.DisplayName)..." -ForegroundColor Cyan
-& $adbExe -s $selectedSerial install -r -d $apkPath
-if ($LASTEXITCODE -ne 0) {
-    throw "The APK installation on $($targetDevice.DisplayName) failed."
-}
+    Write-Host "Installing the debug app on $($targetDevice.DisplayName)..." -ForegroundColor Cyan
+    Invoke-Checked $adbExe @("-s", $selectedSerial, "install", "-r", "-d", $apkPath) "The APK installation on $($targetDevice.DisplayName) failed."
 
-Write-Host "Launching PCConnect on $($targetDevice.DisplayName)..." -ForegroundColor Green
-& $adbExe -s $selectedSerial shell am start -n "uk.co.adamkhattab.pcconnect.debug/uk.co.adamkhattab.pcconnect.MainActivity"
-if ($LASTEXITCODE -ne 0) {
-    throw "The app installed, but Android could not launch it."
+    Write-Host "Launching PCConnect on $($targetDevice.DisplayName)..." -ForegroundColor Green
+    Invoke-Checked $adbExe @("-s", $selectedSerial, "shell", "am", "start", "-n", "uk.co.adamkhattab.pcconnect.debug/uk.co.adamkhattab.pcconnect.MainActivity") "The app installed, but Android could not launch it."
+}
+finally {
+    Pop-Location
 }
