@@ -136,24 +136,11 @@ class PcConnectApi(
             StepUpVerifyRequest(challengeId, StepUpMethods.PASSWORD, password = password),
         )
 
-    /** Confirms a destructive command with a passkey instead of a password. */
-    suspend fun verifyStepUpWithPasskey(challengeId: String, assertion: PasskeyAssertionRequest): StepUpToken =
+    suspend fun verifyStepUpWithBiometric(challengeId: String): StepUpToken =
         post(
             "/v2/auth/step-up/verify",
-            StepUpVerifyRequest(challengeId, StepUpMethods.PASSKEY, passkey = assertion),
+            StepUpVerifyRequest(challengeId, StepUpMethods.BIOMETRIC),
         )
-
-    // ── passkeys ─────────────────────────────────────────────────────────────
-
-    suspend fun passkeys(): List<PasskeySummary> = get<Page<PasskeySummary>>("/v2/auth/passkeys").items
-
-    suspend fun beginPasskeyRegistration(): PasskeyRegistrationOptions =
-        post("/v2/auth/passkeys/register/start", Unit)
-
-    suspend fun finishPasskeyRegistration(request: PasskeyRegistrationRequest): PasskeySummary =
-        post("/v2/auth/passkeys/register/finish", request)
-
-    suspend fun deletePasskey(passkeyId: String) = delete("/v2/auth/passkeys/$passkeyId")
 
     // ── devices, commands, reminders ─────────────────────────────────────────
 
@@ -161,6 +148,9 @@ class PcConnectApi(
 
     suspend fun renameDevice(deviceId: String, displayName: String): Device =
         patch("/v2/devices/$deviceId", UpdateDeviceRequest(displayName = displayName))
+
+    suspend fun updateDevice(deviceId: String, request: UpdateDeviceRequest): Device =
+        patch("/v2/devices/$deviceId", request)
 
     suspend fun revokeDevice(deviceId: String) = delete("/v2/devices/$deviceId")
 
@@ -195,7 +185,38 @@ class PcConnectApi(
     suspend fun completeReminder(reminderId: String, completed: Boolean = true): Reminder =
         post("/v2/reminders/$reminderId/complete", CompleteReminderRequest(completed))
 
+    suspend fun completeOccurrence(reminderId: String, occurrenceAt: String, completed: Boolean = true): Reminder =
+        post("/v2/reminders/$reminderId/complete", CompleteReminderRequest(completed = completed, occurrenceAt = occurrenceAt))
+
+    suspend fun getReminderOccurrences(
+        reminderId: String,
+        from: String? = null,
+        to: String? = null,
+        limit: Int = 50,
+    ): List<ReminderOccurrenceResponse> {
+        val query = mutableListOf("limit=$limit")
+        if (from != null) query.add("from=${java.net.URLEncoder.encode(from, "UTF-8")}")
+        if (to != null) query.add("to=${java.net.URLEncoder.encode(to, "UTF-8")}")
+        val qs = query.joinToString("&")
+        return get("/v2/reminders/$reminderId/occurrences?$qs")
+    }
+
+    suspend fun updateReminderOccurrence(
+        reminderId: String,
+        request: UpdateReminderOccurrenceRequest,
+    ): ReminderOccurrenceResponse = post("/v2/reminders/$reminderId/occurrences", request)
+
+    suspend fun deleteReminderOccurrence(
+        reminderId: String,
+        occursAt: String,
+    ) {
+        val encoded = java.net.URLEncoder.encode(occursAt, "UTF-8")
+        delete("/v2/reminders/$reminderId/occurrences?occursAt=$encoded")
+    }
+
     suspend fun deleteReminder(reminderId: String) = delete("/v2/reminders/$reminderId")
+
+    suspend fun restoreReminder(reminderId: String): Reminder = post("/v2/reminders/$reminderId/restore", Unit)
 
     suspend fun profile(): Profile = get("/v2/account/profile")
 

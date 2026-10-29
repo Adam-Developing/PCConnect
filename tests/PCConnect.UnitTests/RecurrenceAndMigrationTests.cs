@@ -64,6 +64,18 @@ public class RecurrenceExpanderTests
     }
 
     [Fact]
+    public void Stops_after_rrule_count_occurrences()
+    {
+        var start = new DateTimeOffset(2026, 3, 2, 9, 0, 0, TimeSpan.Zero);
+
+        Create().TryValidate("FREQ=DAILY;COUNT=4", start, out _).ShouldBeTrue();
+        var occurrences = Create().Expand("FREQ=DAILY;COUNT=4", start, "Etc/UTC", start, start.AddDays(30), null);
+
+        occurrences.Count.ShouldBe(4);
+        occurrences[^1].ShouldBe(start.AddDays(3));
+    }
+
+    [Fact]
     public void Returns_nothing_rather_than_throwing_on_a_rule_it_cannot_parse()
     {
         var start = DateTimeOffset.UtcNow;
@@ -216,6 +228,33 @@ public class CompanionRecurrenceTests
     }
 
     [Fact]
+    public void Describes_recurrence_pattern_with_date_and_time_naturally()
+    {
+        static DateTimeOffset Local(int year, int month, int day, int hour, int minute) =>
+            new(new DateTime(year, month, day, hour, minute, 0, DateTimeKind.Local));
+
+        var thursday2pm = Local(2026, 10, 8, 14, 0);
+        Recurrence.Describe("FREQ=WEEKLY;BYDAY=TH", thursday2pm, use24Hour: false).ShouldBe("Every Thursday at 2 pm");
+        Recurrence.Describe("FREQ=WEEKLY;BYDAY=TH", thursday2pm, use24Hour: true).ShouldBe("Every Thursday at 14:00");
+        Recurrence.Describe("FREQ=WEEKLY", thursday2pm, use24Hour: false).ShouldBe("Every Thursday at 2 pm");
+
+        var oct83pm = Local(2026, 10, 8, 15, 0);
+        Recurrence.Describe("FREQ=YEARLY", oct83pm, use24Hour: false).ShouldBe("Every 8 October at 3 pm");
+        Recurrence.Describe("FREQ=YEARLY", oct83pm, use24Hour: true).ShouldBe("Every 8 October at 15:00");
+
+        var sep27midnight10 = Local(2026, 9, 27, 0, 10);
+        Recurrence.Describe("FREQ=YEARLY", sep27midnight10, use24Hour: false).ShouldBe("Every 27 September at 12:10 am");
+        Recurrence.Describe("FREQ=YEARLY", sep27midnight10, use24Hour: true).ShouldBe("Every 27 September at 00:10");
+
+        Recurrence.Describe("FREQ=MONTHLY", oct83pm, use24Hour: false).ShouldBe("Every month on the 8th at 3 pm");
+        Recurrence.Describe("FREQ=DAILY", Local(2026, 10, 8, 8, 0), use24Hour: false).ShouldBe("Every day at 8 am");
+        Recurrence.Describe("FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR", Local(2026, 10, 8, 9, 0), use24Hour: false).ShouldBe("Every weekday at 9 am");
+        Recurrence.Describe("FREQ=WEEKLY;BYDAY=MO,WE", Local(2026, 10, 8, 10, 30), use24Hour: false).ShouldBe("Every Monday and Wednesday at 10:30 am");
+        Recurrence.Describe("FREQ=HOURLY", oct83pm, use24Hour: false).ShouldBe("Every hour");
+        Recurrence.Describe("FREQ=HOURLY;INTERVAL=2", oct83pm, use24Hour: false).ShouldBe("Every 2 hours");
+    }
+
+    [Fact]
     public void Summarises_schedule_with_times_and_dates()
     {
         var start = new DateOnly(2026, 9, 26);
@@ -253,4 +292,145 @@ public class CompanionRecurrenceTests
         Recurrence.OccursOn("FREQ=MONTHLY", start, new DateOnly(2026, 10, 26)).ShouldBeTrue();
         Recurrence.OccursOn("FREQ=MONTHLY", start, new DateOnly(2026, 10, 27)).ShouldBeFalse();
     }
+
+    [Fact]
+    public void Supports_occurrence_count_in_rrule_generation_parsing_summary_and_occurson()
+    {
+        var start = new DateOnly(2026, 10, 28); // Wednesday
+        var today = start;
+
+        var yearlyRule = Recurrence.ToRrule(RepeatKind.Yearly, [], 5, start, count: 3);
+        yearlyRule.ShouldBe("FREQ=YEARLY;INTERVAL=5;COUNT=3");
+        Recurrence.ParseCount(yearlyRule).ShouldBe(3);
+        Recurrence.ParseCount("FREQ=DAILY").ShouldBeNull();
+        Recurrence.ParseCount(null).ShouldBeNull();
+
+        Recurrence.Describe(yearlyRule).ShouldBe("Every 5 years (3 times)");
+        Recurrence.Summarise(RepeatKind.Yearly, [], 5, start, [new(15, 0)], null, today, use24Hour: false, count: 3)
+            .ShouldContain("Ends after 3 occurrences.");
+        Recurrence.Summarise(RepeatKind.Daily, [], 1, start, [new(9, 0)], null, today, use24Hour: true, count: 1)
+            .ShouldContain("Ends after 1 occurrence.");
+
+        Recurrence.OccursOn(yearlyRule, start, new DateOnly(2026, 10, 28)).ShouldBeTrue();
+        Recurrence.OccursOn(yearlyRule, start, new DateOnly(2031, 10, 28)).ShouldBeTrue();
+        Recurrence.OccursOn(yearlyRule, start, new DateOnly(2036, 10, 28)).ShouldBeTrue();
+        Recurrence.OccursOn(yearlyRule, start, new DateOnly(2041, 10, 28)).ShouldBeFalse();
+
+        var dailyRule = Recurrence.ToRrule(RepeatKind.Daily, [], 2, start, count: 2);
+        dailyRule.ShouldBe("FREQ=DAILY;INTERVAL=2;COUNT=2");
+        Recurrence.OccursOn(dailyRule, start, new DateOnly(2026, 10, 28)).ShouldBeTrue();
+        Recurrence.OccursOn(dailyRule, start, new DateOnly(2026, 10, 30)).ShouldBeTrue();
+        Recurrence.OccursOn(dailyRule, start, new DateOnly(2026, 11, 1)).ShouldBeFalse();
+
+        // Mid-week start (Wednesday Oct 28) on MO,WE,FR with COUNT=4 -> Wed Oct 28, Fri Oct 30, Mon Nov 2, Wed Nov 4
+        var weeklyRule = Recurrence.ToRrule(
+            RepeatKind.Weekly,
+            [DayOfWeek.Monday, DayOfWeek.Wednesday, DayOfWeek.Friday],
+            1,
+            start,
+            count: 4);
+        Recurrence.OccursOn(weeklyRule, start, new DateOnly(2026, 10, 28)).ShouldBeTrue();
+        Recurrence.OccursOn(weeklyRule, start, new DateOnly(2026, 10, 30)).ShouldBeTrue();
+        Recurrence.OccursOn(weeklyRule, start, new DateOnly(2026, 11, 2)).ShouldBeTrue();
+        Recurrence.OccursOn(weeklyRule, start, new DateOnly(2026, 11, 4)).ShouldBeTrue();
+        Recurrence.OccursOn(weeklyRule, start, new DateOnly(2026, 11, 6)).ShouldBeFalse();
+    }
 }
+
+public class OccurrenceViewModelTests
+{
+    [Fact]
+    public void OccurrenceItemViewModel_status_and_custom_body_flags()
+    {
+        var item = new OccurrenceItemViewModel
+        {
+            ReminderId = "rem_1",
+            OccursAt = DateTimeOffset.UtcNow,
+            Body = "Take medication",
+            Status = "pending",
+        };
+
+        item.IsPending.ShouldBeTrue();
+        item.IsCompleted.ShouldBeFalse();
+        item.IsSkipped.ShouldBeFalse();
+        item.HasCustomText.ShouldBeFalse();
+
+        // Complete it
+        item.Status = "completed";
+        item.IsPending.ShouldBeFalse();
+        item.IsCompleted.ShouldBeTrue();
+        item.IsSkipped.ShouldBeFalse();
+
+        // Skip / stop it
+        item.Status = "skipped";
+        item.IsPending.ShouldBeFalse();
+        item.IsCompleted.ShouldBeFalse();
+        item.IsSkipped.ShouldBeTrue();
+
+        // Set custom text
+        item.CustomBody = "Take 2 pills instead of 1";
+        item.HasCustomText.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void OccurrenceItemViewModel_editing_lifecycle()
+    {
+        var item = new OccurrenceItemViewModel
+        {
+            ReminderId = "rem_2",
+            OccursAt = DateTimeOffset.UtcNow,
+            Body = "Weekly sync",
+            EditText = "Weekly sync",
+        };
+
+        item.IsEditing.ShouldBeFalse();
+        item.IsEditing = true;
+        item.EditText = "Sync with design team";
+        item.EditText.ShouldBe("Sync with design team");
+    }
+
+    [Fact]
+    public void EventDetailModalViewModel_handles_recurring_occurrences()
+    {
+        var modal = new EventDetailModalViewModel
+        {
+            Id = "rem_recur",
+            Title = "Standup",
+            IsRecurring = true,
+            Recurrence = "Every day at 9 am",
+        };
+
+        modal.IsRecurring.ShouldBeTrue();
+        modal.Occurrences.ShouldBeEmpty();
+
+        var occ1 = new OccurrenceItemViewModel
+        {
+            ReminderId = modal.Id,
+            OccursAt = DateTimeOffset.UtcNow,
+            Body = modal.Title,
+            DateLabel = "Thu 8 Oct · 09:00",
+        };
+        modal.Occurrences.Add(occ1);
+
+        modal.Occurrences.Count.ShouldBe(1);
+        modal.Occurrences[0].Body.ShouldBe("Standup");
+    }
+
+    [Fact]
+    public void TargetOccurrenceCount_returns_10_hourly_7_daily_3_otherwise()
+    {
+        Recurrence.TargetOccurrenceCount("FREQ=HOURLY").ShouldBe(10);
+        Recurrence.TargetOccurrenceCount("FREQ=HOURLY;INTERVAL=2").ShouldBe(10);
+        Recurrence.TargetOccurrenceCount("FREQ=DAILY").ShouldBe(7);
+        Recurrence.TargetOccurrenceCount("FREQ=DAILY;INTERVAL=3").ShouldBe(7);
+        Recurrence.TargetOccurrenceCount("FREQ=WEEKLY;BYDAY=MO").ShouldBe(3);
+        Recurrence.TargetOccurrenceCount("FREQ=MONTHLY").ShouldBe(3);
+        Recurrence.TargetOccurrenceCount("FREQ=YEARLY").ShouldBe(3);
+
+        RecurrenceExpander.TargetOccurrenceCount("FREQ=HOURLY").ShouldBe(10);
+        RecurrenceExpander.TargetOccurrenceCount("FREQ=DAILY").ShouldBe(7);
+        RecurrenceExpander.TargetOccurrenceCount("FREQ=YEARLY").ShouldBe(3);
+    }
+}
+
+

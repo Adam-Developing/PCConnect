@@ -27,23 +27,90 @@ function Resolve-AndroidSdk {
 }
 
 function Resolve-JavaHome {
-    if (-not [string]::IsNullOrWhiteSpace($env:JAVA_HOME) -and
-        (Test-Path (Join-Path $env:JAVA_HOME "bin\java.exe"))) {
-        return $env:JAVA_HOME
+    $candidates = @()
+
+    if (-not [string]::IsNullOrWhiteSpace($env:JAVA_HOME)) {
+        $candidates += $env:JAVA_HOME
     }
 
-    $candidates = @(
+    # Check ~/.jdks directories
+    $jdksDir = Join-Path $env:USERPROFILE ".jdks"
+    if (Test-Path $jdksDir) {
+        $candidates += (Get-ChildItem -Path $jdksDir -Directory | Select-Object -ExpandProperty FullName)
+    }
+
+    # Check common system directories
+    $candidates += @(
+        (Join-Path $env:ProgramFiles "Eclipse Adoptium\jdk-17*"),
+        (Join-Path $env:ProgramFiles "Java\jdk-17*"),
+        (Join-Path $env:ProgramFiles "Microsoft\jdk-17*"),
         (Join-Path $env:LOCALAPPDATA "Programs\Android Studio\jbr"),
         (Join-Path $env:ProgramFiles "Android\Android Studio\jbr")
     )
 
-    foreach ($candidate in $candidates) {
-        if (Test-Path (Join-Path $candidate "bin\java.exe")) {
-            return $candidate
+    # Check for compatible Java version (Gradle 8.14 and Kotlin 2.1 support Java 17..23, but fail on Java 25+)
+    foreach ($pattern in $candidates) {
+        $resolved = Resolve-Path $pattern -ErrorAction SilentlyContinue
+        foreach ($r in $resolved) {
+            $javaExe = Join-Path $r.Path "bin\java.exe"
+            if (Test-Path $javaExe) {
+                try {
+                    $psi = [System.Diagnostics.ProcessStartInfo]::new($javaExe, "-version")
+                    $psi.RedirectStandardError = $true
+                    $psi.UseShellExecute = $false
+                    $p = [System.Diagnostics.Process]::Start($psi)
+                    $verOut = $p.StandardError.ReadToEnd()
+                    $p.WaitForExit()
+
+                    if ($verOut -match 'version "(1\.)?(\d+)') {
+                        $major = [int]$Matches[2]
+                        if ($major -ge 17 -and $major -le 23) {
+                            return $r.Path
+                        }
+                    }
+                }
+                catch {
+                    # Ignore invalid or non-executable Java candidates
+                }
+            }
         }
     }
 
-    throw "Java 17 was not found. Install Android Studio, or set JAVA_HOME to its bundled jbr directory."
+    # If no compatible Java 17-23 is installed, auto-download Eclipse Temurin 17 into ~/.jdks/temurin-17
+    $targetTemurin = Join-Path $env:USERPROFILE ".jdks\temurin-17"
+    if (-not (Test-Path (Join-Path $targetTemurin "bin\java.exe"))) {
+        Write-Host "No compatible Java 17-21 installation found (Android Studio bundled JBR is Java 25+, which Gradle 8.14 does not support)." -ForegroundColor Yellow
+        Write-Host "Downloading Eclipse Temurin JDK 17 to '$targetTemurin'..." -ForegroundColor Cyan
+
+        $tempZip = Join-Path $env:TEMP "temurin17.zip"
+        try {
+            if (-not (Test-Path (Join-Path $env:USERPROFILE ".jdks"))) {
+                New-Item -ItemType Directory -Path (Join-Path $env:USERPROFILE ".jdks") -Force | Out-Null
+            }
+            if (-not (Test-Path $targetTemurin)) {
+                New-Item -ItemType Directory -Path $targetTemurin -Force | Out-Null
+            }
+
+            curl.exe -L "https://api.adoptium.net/v3/binary/latest/17/ga/windows/x64/jdk/hotspot/normal/eclipse" -o $tempZip
+            if ($LASTEXITCODE -ne 0) {
+                throw "Failed to download Eclipse Temurin JDK 17."
+            }
+
+            tar.exe -xf $tempZip -C $targetTemurin --strip-components 1
+            if ($LASTEXITCODE -ne 0) {
+                throw "Failed to extract Eclipse Temurin JDK 17."
+            }
+        }
+        finally {
+            Remove-Item $tempZip -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    if (Test-Path (Join-Path $targetTemurin "bin\java.exe")) {
+        return $targetTemurin
+    }
+
+    throw "Compatible Java 17 installation was not found or could not be installed. Set JAVA_HOME to a Java 17-21 JDK."
 }
 
 function Get-AdbDevices {
@@ -268,10 +335,21 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Set-Location $androidRoot
-Write-Host "Building and installing the Android debug app on $($targetDevice.DisplayName)..." -ForegroundColor Cyan
-& ".\gradlew.bat" installDebug
+Write-Host "Building the Android debug app..." -ForegroundColor Cyan
+& ".\gradlew.bat" assembleDebug
 if ($LASTEXITCODE -ne 0) {
-    throw "The Android build or installation failed."
+    throw "The Android build failed."
+}
+
+$apkPath = Join-Path $androidRoot "app\build\outputs\apk\debug\app-debug.apk"
+if (-not (Test-Path $apkPath)) {
+    throw "Build succeeded but APK was not found at '$apkPath'."
+}
+
+Write-Host "Installing the debug app on $($targetDevice.DisplayName)..." -ForegroundColor Cyan
+& $adbExe -s $selectedSerial install -r -d $apkPath
+if ($LASTEXITCODE -ne 0) {
+    throw "The APK installation on $($targetDevice.DisplayName) failed."
 }
 
 Write-Host "Launching PCConnect on $($targetDevice.DisplayName)..." -ForegroundColor Green

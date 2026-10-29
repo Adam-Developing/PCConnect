@@ -4,6 +4,7 @@ using Microsoft.Extensions.Options;
 using PCConnect.Agent.Execution;
 using PCConnect.Client;
 using PCConnect.Core.Contracts;
+using System.Runtime.InteropServices;
 
 namespace PCConnect.Agent;
 
@@ -40,6 +41,14 @@ public sealed class AgentWorker(
     ILogger<AgentWorker> logger) : BackgroundService
 {
     private readonly AgentOptions _options = options.Value;
+
+    private static string GetFriendlyOsVersion()
+    {
+        var build = Environment.OSVersion.Version.Build;
+        if (build >= 22000) return "Windows 11";
+        if (build >= 10240) return "Windows 10";
+        return RuntimeInformation.OSDescription;
+    }
 
     /// <summary>Completed when a signed-in companion provisions this PC.</summary>
     private readonly TaskCompletionSource _provisionedNow =
@@ -86,6 +95,8 @@ public sealed class AgentWorker(
             logger.LogWarning(ex, "Could not establish the realtime connection at startup; falling back to polling");
         }
 
+        _ = Task.Run(() => api.RunProactiveRefreshLoopAsync(stoppingToken), stoppingToken);
+
         var lastHeartbeat = DateTimeOffset.MinValue;
 
         while (!stoppingToken.IsCancellationRequested)
@@ -96,7 +107,7 @@ public sealed class AgentWorker(
             {
                 try
                 {
-                    await realtime.HeartbeatAsync(_deviceId!, Environment.OSVersion.VersionString, _options.Version, stoppingToken);
+                    await realtime.HeartbeatAsync(_deviceId!, GetFriendlyOsVersion(), _options.Version, stoppingToken);
                     lastHeartbeat = DateTimeOffset.UtcNow;
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
@@ -136,7 +147,7 @@ public sealed class AgentWorker(
 
         await tokens.WriteAsync(new StoredTokens(null, completed.DeviceId, completed.DeviceSecret), ct);
         await api.ExchangeDeviceSecretAsync(
-            completed.DeviceId, completed.DeviceSecret, Environment.OSVersion.VersionString, ct);
+            completed.DeviceId, completed.DeviceSecret, GetFriendlyOsVersion(), ct);
 
         _deviceId = completed.DeviceId;
         logger.LogInformation("This PC was added to the account as {DisplayName}", completed.DisplayName);
@@ -187,7 +198,7 @@ public sealed class AgentWorker(
         try
         {
             await api.ExchangeDeviceSecretAsync(stored.DeviceId!, stored.DeviceSecret!,
-                Environment.OSVersion.VersionString, ct);
+                GetFriendlyOsVersion(), ct);
         }
         catch (PcConnectApiException ex) when (ex.Code is "device.revoked" or "auth.invalid_credentials")
         {

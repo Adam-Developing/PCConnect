@@ -49,9 +49,19 @@ public partial class MainWindow : Window
             }
         };
 
-        // Escape closes the active overlay or modal
+        // Escape closes the active overlay or modal; Ctrl+Z triggers reminder undo when not typing
         PreviewKeyDown += (_, e) =>
         {
+            if (e.Key == Key.Z &&
+                Keyboard.Modifiers == ModifierKeys.Control &&
+                Keyboard.FocusedElement is not TextBoxBase and not System.Windows.Controls.PasswordBox &&
+                DataContext is ShellViewModel { IsSignedIn: true, Reminders.CanUndo: true } undoShell)
+            {
+                undoShell.Reminders.UndoCommand.Execute(null);
+                e.Handled = true;
+                return;
+            }
+
             if (e.Key == Key.Escape && EventDetailOverlay.Visibility == Visibility.Visible)
             {
                 CloseEventDetailModal();
@@ -74,6 +84,14 @@ public partial class MainWindow : Window
             {
                 accountShell.IsAccountMenuOpen = false;
                 e.Handled = true;
+            }
+        };
+
+        Activated += (_, _) =>
+        {
+            if (DataContext is ShellViewModel shell)
+            {
+                shell.WarmSession();
             }
         };
 

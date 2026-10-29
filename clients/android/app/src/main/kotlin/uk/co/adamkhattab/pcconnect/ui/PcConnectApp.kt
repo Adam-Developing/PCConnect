@@ -36,8 +36,11 @@ import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Snackbar
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -50,9 +53,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import uk.co.adamkhattab.pcconnect.data.CommandTypes
+import uk.co.adamkhattab.pcconnect.data.Reminder
 
 /** The three tabs the design puts in the bottom bar. */
 enum class Tab(val label: String, @DrawableRes val icon: Int) {
@@ -75,21 +79,28 @@ fun PcConnectApp(
     viewModel: AppViewModel,
     onShareDownloadLink: () -> Unit,
     /** Runs the system biometric prompt, then calls back with whether it passed. */
-    onBiometricGate: (String, (Boolean) -> Unit) -> Unit,
+    onBiometricPrompt: (title: String, subtitle: String, (Boolean) -> Unit) -> Unit,
     biometricAvailable: Boolean,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
-    // The activity, which is what Credential Manager needs to raise its sheet.
-    val context = LocalContext.current
 
     var tab by rememberSaveable { mutableStateOf(Tab.Pcs) }
     var openDeviceId by rememberSaveable { mutableStateOf<String?>(null) }
     var composingFor by remember { mutableStateOf<ReminderTarget?>(null) }
 
-    LaunchedEffect(state.message) {
-        state.message?.let {
-            snackbar.showSnackbar(it)
+    LaunchedEffect(state.messageId, state.message) {
+        val msg = state.message ?: return@LaunchedEffect
+        val hasUndo = state.canUndo
+        val result = snackbar.showSnackbar(
+            message = msg,
+            actionLabel = if (hasUndo) "Undo" else null,
+            withDismissAction = hasUndo,
+            duration = if (hasUndo) SnackbarDuration.Long else SnackbarDuration.Short,
+        )
+        if (result == SnackbarResult.ActionPerformed && hasUndo) {
+            viewModel.undoReminderChange()
+        } else {
             viewModel.dismissMessage()
         }
     }
@@ -120,7 +131,18 @@ fun PcConnectApp(
             Scaffold(
                 containerColor = PcColors.Bg,
                 contentWindowInsets = WindowInsets.statusBars,
-                snackbarHost = { SnackbarHost(snackbar) },
+                snackbarHost = {
+                    SnackbarHost(snackbar) { data ->
+                        Snackbar(
+                            snackbarData = data,
+                            shape = PcShapes.Control,
+                            containerColor = PcColors.Ink,
+                            contentColor = Color.White,
+                            actionColor = Color(0xFF60A5FA),
+                            dismissActionContentColor = PcColors.InkDisabled,
+                        )
+                    }
+                },
                 bottomBar = {
                     AnimatedVisibility(
                         visible = openDevice == null,
@@ -238,6 +260,7 @@ fun PcConnectApp(
                                 when (screen.tab) {
                                     Tab.Pcs -> DevicesScreen(
                                         state = state,
+                                        onRefresh = viewModel::refresh,
                                         onOpenDevice = { openDeviceId = it },
                                         onCommand = viewModel::requestCommand,
                                         onNewReminder = { composingFor = ReminderTarget(it) },
@@ -246,16 +269,19 @@ fun PcConnectApp(
 
                                     Tab.Reminders -> RemindersScreen(
                                         state = state,
+                                        viewModel = viewModel,
+                                        onRefresh = viewModel::refresh,
                                         onAdd = { composingFor = ReminderTarget(null) },
+                                        onEdit = { reminder -> composingFor = ReminderTarget(null, reminder) },
                                         onToggle = viewModel::toggleReminder,
                                         onDelete = viewModel::deleteReminder,
                                     )
 
                                     Tab.Settings -> SettingsScreen(
                                         state = state,
-                                        requireBiometric = viewModel.requireBiometric,
-                                        onRequireBiometric = { viewModel.requireBiometric = it },
-                                        onSetUpPasskey = { viewModel.registerPasskey(context) },
+                                        biometricAvailable = biometricAvailable,
+                                        onToggleBiometric = viewModel::toggleBiometric,
+                                        onToggleCommandProtection = { cmd, deviceId -> viewModel.toggleCommandProtection(cmd, deviceId) },
                                         baseUrl = viewModel.baseUrl,
                                         onBaseUrl = { viewModel.baseUrl = it },
                                         onChangePassword = viewModel::changePassword,
@@ -275,45 +301,89 @@ fun PcConnectApp(
             devices = state.devices,
             targetable = state.remindersTargetable,
             initialDeviceId = target.deviceId,
+            reminderToEdit = target.reminderToEdit,
             onDismiss = { composingFor = null },
-            onSave = { body, date, times, repeat, deviceIds ->
+            onSave = { id, body, date, times, repeat, deviceIds ->
                 composingFor = null
-                viewModel.addReminder(body, date, times, repeat, deviceIds)
+                if (id != null) {
+                    viewModel.updateReminder(
+                        id = id,
+                        body = body,
+                        date = date,
+                        time = times.firstOrNull() ?: AppViewModel.defaultReminderTime(),
+                        repeat = repeat,
+                        deviceIds = deviceIds,
+                    )
+                } else {
+                    viewModel.addReminder(body, date, times, repeat, deviceIds)
+                }
             },
         )
     }
 
-    state.pendingCommand?.let { pending ->
+    val isBiometricReady = state.biometricEnabled && biometricAvailable
+    var promptedForCommandKey by rememberSaveable { mutableStateOf<String?>(null) }
+    var showPasswordDialog by rememberSaveable { mutableStateOf(false) }
+
+    val pending = state.pendingCommand
+    LaunchedEffect(pending) {
+        if (pending != null) {
+            val key = "${pending.deviceId}:${pending.type}"
+            if (isBiometricReady) {
+                if (promptedForCommandKey != key) {
+                    promptedForCommandKey = key
+                    onBiometricPrompt(
+                        "Confirm ${CommandTypes.label(pending.type)}",
+                        "PCConnect is about to ${CommandTypes.label(pending.type).lowercase()} ${pending.deviceName}",
+                    ) { passed ->
+                        if (passed) {
+                            viewModel.confirmPendingCommandWithBiometric()
+                        } else {
+                            showPasswordDialog = true
+                        }
+                    }
+                }
+            } else {
+                showPasswordDialog = true
+            }
+        } else {
+            promptedForCommandKey = null
+            showPasswordDialog = false
+        }
+    }
+
+    if (pending != null && showPasswordDialog) {
         ConfirmCommandDialog(
             pending = pending,
-            biometricGate = viewModel.requireBiometric && biometricAvailable,
-            // A passkey replaces the password outright: the fingerprint is
-            // checked by the authenticator and the server verifies the
-            // signature, so there is nothing left to type (ADR-0011).
-            passkeyAvailable = state.passkeyRegistered,
+            biometricAvailable = isBiometricReady,
             error = state.stepUpError,
             busy = state.isLoading,
-            onConfirmWithPasskey = { viewModel.confirmPendingCommandWithPasskey(context) },
-            onDismiss = viewModel::cancelPendingCommand,
-            onConfirm = { password ->
-                // The biometric check is a local gate in front of the server's
-                // step-up, not a replacement for it: it stops someone holding
-                // an unlocked phone, and the server still requires the
-                // password (ADR-0011).
-                if (viewModel.requireBiometric && biometricAvailable) {
-                    onBiometricGate(pending.type) { passed ->
-                        if (passed) viewModel.confirmPendingCommand(password) else viewModel.cancelPendingCommand()
+            onConfirmWithBiometric = if (isBiometricReady) {
+                {
+                    onBiometricPrompt(
+                        "Confirm ${CommandTypes.label(pending.type)}",
+                        "PCConnect is about to ${CommandTypes.label(pending.type).lowercase()} ${pending.deviceName}",
+                    ) { passed ->
+                        if (passed) {
+                            viewModel.confirmPendingCommandWithBiometric()
+                        }
                     }
-                } else {
-                    viewModel.confirmPendingCommand(password)
                 }
+            } else null,
+            onConfirmWithPassword = { password ->
+                viewModel.confirmPendingCommand(password)
+            },
+            onDismiss = {
+                viewModel.cancelPendingCommand()
+                showPasswordDialog = false
+                promptedForCommandKey = null
             },
         )
     }
 }
 
-/** Which PC a new reminder was started from, or null for all of them. */
-private data class ReminderTarget(val deviceId: String?)
+/** Which PC a new reminder was started from, or an existing reminder being edited. */
+private data class ReminderTarget(val deviceId: String?, val reminderToEdit: Reminder? = null)
 
 @Composable
 private fun BottomNav(selected: Tab, onSelect: (Tab) -> Unit) {
@@ -327,8 +397,8 @@ private fun BottomNav(selected: Tab, onSelect: (Tab) -> Unit) {
         androidx.compose.foundation.layout.BoxWithConstraints(
             Modifier
                 .fillMaxWidth()
-                .height(72.dp)
                 .windowInsetsPadding(WindowInsets.navigationBars)
+                .height(72.dp)
                 .padding(horizontal = 8.dp),
         ) {
             val tabWidth = maxWidth / Tab.entries.size

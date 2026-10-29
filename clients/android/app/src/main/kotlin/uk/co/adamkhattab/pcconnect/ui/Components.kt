@@ -33,6 +33,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -200,6 +201,7 @@ fun OutcomeBadge(text: String, tone: Tone, modifier: Modifier = Modifier) {
         color = ink,
         style = PcType.Label,
         maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
     )
 }
 
@@ -216,18 +218,20 @@ fun PrimaryButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
+    loading: Boolean = false,
     height: Dp = 50.dp,
     container: Color = PcColors.Primary,
 ) {
+    val effectiveEnabled = enabled && !loading
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
     val scale by animateFloatAsState(
-        targetValue = if (isPressed && enabled) 0.97f else 1.0f,
+        targetValue = if (isPressed && effectiveEnabled) 0.97f else 1.0f,
         animationSpec = spring(dampingRatio = 0.6f, stiffness = 600f),
         label = "primaryBtnScale",
     )
     val bgColor by animateColorAsState(
-        targetValue = if (enabled) container else PcColors.InkDisabled,
+        targetValue = if (effectiveEnabled || loading) container else PcColors.InkDisabled,
         animationSpec = tween(150),
         label = "primaryBtnBg",
     )
@@ -242,15 +246,23 @@ fun PrimaryButton(
             .height(height)
             .clip(PcShapes.Control)
             .background(bgColor)
-            .clickable(enabled = enabled, interactionSource = interactionSource, indication = null, onClick = onClick),
+            .clickable(enabled = effectiveEnabled, interactionSource = interactionSource, indication = null, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        AnimatedContent(
-            targetState = text,
-            transitionSpec = { fadeIn(tween(140)) togetherWith fadeOut(tween(100)) },
-            label = "primaryBtnText",
-        ) { labelText ->
-            Text(labelText, color = Color.White, style = PcType.Button)
+        if (loading) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(20.dp),
+                color = Color.White,
+                strokeWidth = 2.dp,
+            )
+        } else {
+            AnimatedContent(
+                targetState = text,
+                transitionSpec = { fadeIn(tween(140)) togetherWith fadeOut(tween(100)) },
+                label = "primaryBtnText",
+            ) { labelText ->
+                Text(labelText, color = Color.White, style = PcType.Button)
+            }
         }
     }
 }

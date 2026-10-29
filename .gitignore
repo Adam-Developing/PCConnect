@@ -88,4 +88,5 @@ desktop.ini
 # ── Local operational scratch ────────────────────────────────────────────────
 tmp/
 .tmp/
+scratch/
 *.local

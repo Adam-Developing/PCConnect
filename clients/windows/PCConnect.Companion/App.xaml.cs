@@ -78,6 +78,9 @@ public partial class App : Application
         var shell = _host.Services.GetRequiredService<ShellViewModel>();
         await shell.InitialiseAsync();
 
+        var api = _host.Services.GetRequiredService<PcConnectClient>();
+        _ = Task.Run(() => api.RunProactiveRefreshLoopAsync(_sessionServerCts!.Token));
+
         _host.Services.GetRequiredService<ReminderPresenter>().Start();
         _host.Services.GetRequiredService<TrayIcon>().Show(ShowMainWindow, Shutdown);
 

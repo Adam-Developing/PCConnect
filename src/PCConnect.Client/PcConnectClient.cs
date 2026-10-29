@@ -77,6 +77,7 @@ public sealed class PcConnectClient(HttpClient http, PcConnectClientOptions opti
     private string? _accessToken;
     private DateTimeOffset _accessTokenExpiresAt = DateTimeOffset.MinValue;
     private readonly SemaphoreSlim _refreshLock = new(1, 1);
+    private (string Raw, Uri Parsed)? _cachedBaseUri;
 
     public PcConnectClientOptions Options => options;
 
@@ -118,7 +119,7 @@ public sealed class PcConnectClient(HttpClient http, PcConnectClientOptions opti
             authenticated: false, ct)
             ?? throw new InvalidOperationException("The server returned an empty login response.");
 
-        await AdoptAsync(pair, ct);
+        await AdoptAsync(pair);
         return pair;
     }
 
@@ -130,11 +131,7 @@ public sealed class PcConnectClient(HttpClient http, PcConnectClientOptions opti
             authenticated: false, ct)
             ?? throw new InvalidOperationException("The server returned an empty device token response.");
 
-        _accessToken = pair.AccessToken;
-        _accessTokenExpiresAt = DateTimeOffset.UtcNow.AddSeconds(pair.ExpiresInSeconds);
-
-        var existing = await tokens.ReadAsync(ct);
-        await tokens.WriteAsync(new StoredTokens(pair.RefreshToken, deviceId, deviceSecret ?? existing?.DeviceSecret), ct);
+        await AdoptAsync(pair, deviceId, deviceSecret);
         return pair;
     }
 
@@ -160,14 +157,22 @@ public sealed class PcConnectClient(HttpClient http, PcConnectClientOptions opti
         SignedOut?.Invoke();
     }
 
-    private async Task AdoptAsync(TokenPairResponse pair, CancellationToken ct)
+    private async Task AdoptAsync(TokenPairResponse pair, string? deviceId = null, string? deviceSecret = null)
     {
         _accessToken = pair.AccessToken;
         _accessTokenExpiresAt = DateTimeOffset.UtcNow.AddSeconds(pair.ExpiresInSeconds);
 
-        var existing = await tokens.ReadAsync(ct);
-        await tokens.WriteAsync(new StoredTokens(pair.RefreshToken, existing?.DeviceId, existing?.DeviceSecret), ct);
+        var existing = await tokens.ReadAsync(CancellationToken.None);
+        await tokens.WriteAsync(
+            new StoredTokens(
+                pair.RefreshToken,
+                deviceId ?? existing?.DeviceId,
+                deviceSecret ?? existing?.DeviceSecret),
+            CancellationToken.None);
     }
+
+    private bool HasFreshToken(int marginSeconds) =>
+        _accessToken is not null && _accessTokenExpiresAt > DateTimeOffset.UtcNow.AddSeconds(marginSeconds);
 
     /// <summary>
     /// Returns a valid access token, refreshing if it is missing or close to
@@ -175,63 +180,133 @@ public sealed class PcConnectClient(HttpClient http, PcConnectClientOptions opti
     /// </summary>
     public async Task<string?> GetAccessTokenAsync(CancellationToken ct = default)
     {
-        if (_accessToken is not null && _accessTokenExpiresAt > DateTimeOffset.UtcNow.AddSeconds(30))
+        if (HasFreshToken(30))
         {
+            if (!HasFreshToken(120))
+            {
+                _ = WarmAccessTokenAsync();
+            }
+
             return _accessToken;
         }
 
         await _refreshLock.WaitAsync(ct);
         try
         {
-            if (_accessToken is not null && _accessTokenExpiresAt > DateTimeOffset.UtcNow.AddSeconds(30))
-            {
-                return _accessToken;
-            }
-
-            var stored = await tokens.ReadAsync(ct);
-
-            if (stored?.RefreshToken is { } refresh)
-            {
-                try
-                {
-                    var pair = await SendAsync<TokenPairResponse>(HttpMethod.Post, "/v2/auth/refresh",
-                        new RefreshRequest(refresh), authenticated: false, ct);
-
-                    if (pair is not null)
-                    {
-                        await AdoptAsync(pair, ct);
-                        return _accessToken;
-                    }
-                }
-                catch (PcConnectApiException ex) when (ex.StatusCode == HttpStatusCode.Unauthorized)
-                {
-                    // The refresh chain is dead. An agent can recover on its own
-                    // from its device secret; a user session cannot.
-                    if (stored is { DeviceId: not null, DeviceSecret: not null })
-                    {
-                        var pair = await ExchangeDeviceSecretAsync(stored.DeviceId, stored.DeviceSecret, ct: ct);
-                        return pair.AccessToken;
-                    }
-
-                    await tokens.ClearAsync(ct);
-                    _accessToken = null;
-                    SignedOut?.Invoke();
-                    return null;
-                }
-            }
-
-            if (stored is { DeviceId: not null, DeviceSecret: not null })
-            {
-                var pair = await ExchangeDeviceSecretAsync(stored.DeviceId, stored.DeviceSecret, ct: ct);
-                return pair.AccessToken;
-            }
-
-            return null;
+            return HasFreshToken(30) ? _accessToken : await RefreshCoreAsync(ct);
         }
         finally
         {
             _refreshLock.Release();
         }
+    }
+
+    /// <summary>
+    /// Refreshes the access token in the background when it is missing or within
+    /// two minutes of expiry, so interactive actions do not wait on a token round-trip.
+    /// </summary>
+    public async Task WarmAccessTokenAsync(CancellationToken ct = default)
+    {
+        if (HasFreshToken(120) || !await _refreshLock.WaitAsync(0, ct).ConfigureAwait(false))
+        {
+            return;
+        }
+
+        try
+        {
+            if (!HasFreshToken(120))
+            {
+                await RefreshCoreAsync(ct).ConfigureAwait(false);
+            }
+        }
+        catch (Exception ex) when (ex is PcConnectApiException or HttpRequestException or TaskCanceledException or OperationCanceledException)
+        {
+            // Best-effort warmup; the next real API call will retry or surface the error.
+        }
+        finally
+        {
+            _refreshLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Keeps an active session's access token refreshed ahead of expiry while the
+    /// host is running, avoiding synchronous refresh latency after idle periods.
+    /// </summary>
+    public async Task RunProactiveRefreshLoopAsync(CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested)
+        {
+            try
+            {
+                if (_accessToken is null)
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(15), ct).ConfigureAwait(false);
+                    continue;
+                }
+
+                var remaining = (_accessTokenExpiresAt - TimeSpan.FromSeconds(90)) - DateTimeOffset.UtcNow;
+                if (remaining > TimeSpan.Zero)
+                {
+                    var sleep = remaining < TimeSpan.FromMinutes(2) ? remaining : TimeSpan.FromMinutes(2);
+                    await Task.Delay(sleep, ct).ConfigureAwait(false);
+                    continue;
+                }
+
+                var previousExpiry = _accessTokenExpiresAt;
+                await WarmAccessTokenAsync(ct).ConfigureAwait(false);
+
+                if (_accessTokenExpiresAt <= previousExpiry)
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(30), ct).ConfigureAwait(false);
+                }
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                break;
+            }
+        }
+    }
+
+    private async Task<string?> RefreshCoreAsync(CancellationToken ct)
+    {
+        var stored = await tokens.ReadAsync(ct);
+
+        if (stored?.RefreshToken is { } refresh)
+        {
+            try
+            {
+                var pair = await SendAsync<TokenPairResponse>(HttpMethod.Post, "/v2/auth/refresh",
+                    new RefreshRequest(refresh), authenticated: false, ct);
+
+                if (pair is not null)
+                {
+                    await AdoptAsync(pair);
+                    return _accessToken;
+                }
+            }
+            catch (PcConnectApiException ex) when (ex.StatusCode == HttpStatusCode.Unauthorized)
+            {
+                // The refresh chain is dead. An agent can recover on its own
+                // from its device secret below; a user session cannot.
+                if (stored is not { DeviceId: not null, DeviceSecret: not null })
+                {
+                    await tokens.ClearAsync(CancellationToken.None);
+                    _accessToken = null;
+                    _accessTokenExpiresAt = DateTimeOffset.MinValue;
+                    SignedOut?.Invoke();
+                    return null;
+                }
+            }
+        }
+
+        if (stored is { DeviceId: not null, DeviceSecret: not null })
+        {
+            var pair = await ExchangeDeviceSecretAsync(stored.DeviceId, stored.DeviceSecret, ct: ct);
+            return pair.AccessToken;
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -300,9 +375,36 @@ public sealed class PcConnectClient(HttpClient http, PcConnectClientOptions opti
     public async Task DeleteReminderAsync(string reminderId, CancellationToken ct = default) =>
         await SendAsync<object>(HttpMethod.Delete, $"/v2/reminders/{reminderId}", null, true, ct);
 
+    public Task<ReminderResponse?> RestoreReminderAsync(string reminderId, CancellationToken ct = default) =>
+        SendAsync<ReminderResponse>(HttpMethod.Post, $"/v2/reminders/{reminderId}/restore", null, true, ct);
+
     public Task<ReminderResponse?> CompleteReminderAsync(string reminderId, bool completed = true, CancellationToken ct = default) =>
         SendAsync<ReminderResponse>(HttpMethod.Post, $"/v2/reminders/{reminderId}/complete",
             new CompleteReminderRequest(completed), true, ct);
+
+    public Task<IReadOnlyList<ReminderOccurrenceResponse>?> GetReminderOccurrencesAsync(
+        string reminderId, DateTimeOffset? from = null, DateTimeOffset? to = null, int limit = 50, CancellationToken ct = default)
+    {
+        var query = new List<string> { $"limit={limit}" };
+        if (from.HasValue) query.Add($"from={Uri.EscapeDataString(from.Value.ToString("O"))}");
+        if (to.HasValue) query.Add($"to={Uri.EscapeDataString(to.Value.ToString("O"))}");
+        var qs = string.Join("&", query);
+        return SendAsync<IReadOnlyList<ReminderOccurrenceResponse>>(
+            HttpMethod.Get, $"/v2/reminders/{reminderId}/occurrences?{qs}", null, true, ct);
+    }
+
+    public Task<ReminderOccurrenceResponse?> UpdateReminderOccurrenceAsync(
+        string reminderId, UpdateReminderOccurrenceRequest request, CancellationToken ct = default) =>
+        SendAsync<ReminderOccurrenceResponse>(
+            HttpMethod.Post, $"/v2/reminders/{reminderId}/occurrences", request, true, ct);
+
+    public Task<ReminderOccurrenceResponse?> DeleteReminderOccurrenceAsync(
+        string reminderId, DateTimeOffset occursAt, CancellationToken ct = default)
+    {
+        var timeStr = Uri.EscapeDataString(occursAt.ToString("O"));
+        return SendAsync<ReminderOccurrenceResponse>(
+            HttpMethod.Delete, $"/v2/reminders/{reminderId}/occurrences?occursAt={timeStr}", null, true, ct);
+    }
 
     public Task<ProfileResponse?> GetProfileAsync(CancellationToken ct = default) =>
         SendAsync<ProfileResponse>(HttpMethod.Get, "/v2/account/profile", null, true, ct);
@@ -383,10 +485,23 @@ public sealed class PcConnectClient(HttpClient http, PcConnectClientOptions opti
         }
     }
 
+    private Uri ResolveUri(string path)
+    {
+        var raw = options.BaseAddress;
+        var cached = _cachedBaseUri;
+        if (cached is null || !string.Equals(cached.Value.Raw, raw, StringComparison.Ordinal))
+        {
+            cached = (raw, new Uri(raw));
+            _cachedBaseUri = cached;
+        }
+
+        return new Uri(cached.Value.Parsed, path);
+    }
+
     private async Task<HttpResponseMessage> SendOnceAsync(
         HttpMethod method, string path, object? body, bool authenticated, CancellationToken ct)
     {
-        using var request = new HttpRequestMessage(method, new Uri(new Uri(options.BaseAddress), path));
+        using var request = new HttpRequestMessage(method, ResolveUri(path));
 
         if (body is not null)
         {

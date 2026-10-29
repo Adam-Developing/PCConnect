@@ -1,4 +1,4 @@
-﻿using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging;
 using System.Globalization;
 using System.Security.Cryptography;
 using Dapper;
@@ -76,15 +76,12 @@ public sealed class ReminderService(
         try
         {
             return new Page<ReminderResponse>(
-                page.Select(r => ToResponse(r, dek, targets)).ToList(),
+                page.Select(r => ToResponse(r, dek, targets.GetValueOrDefault(r.Id))).ToList(),
                 hasMore ? Contexts.Commands.Cursor.Encode(page[^1].Id) : null);
         }
         finally
         {
-            if (dek is not null)
-            {
-                CryptographicOperations.ZeroMemory(dek);
-            }
+            ZeroKey(dek);
         }
     }
 
@@ -99,14 +96,11 @@ public sealed class ReminderService(
 
         try
         {
-            return ToResponse(row, dek, targets);
+            return ToResponse(row, dek, targets.GetValueOrDefault(row.Id));
         }
         finally
         {
-            if (dek is not null)
-            {
-                CryptographicOperations.ZeroMemory(dek);
-            }
+            ZeroKey(dek);
         }
     }
 
@@ -117,11 +111,13 @@ public sealed class ReminderService(
     {
         caller.Require(Scopes.ReminderWrite);
         ValidateBody(request.Body);
+        ValidateTimezoneIfProvided(request.Timezone);
+        var wantedDevices = ParseTargetDevices(request.DeviceIds);
+        var rrule = ValidateRrule(request.Rrule, request.DueAt);
 
         var response = await db.InTransactionAsync(async (connection, tx) =>
         {
             var timezone = await ResolveTimezoneAsync(connection, tx, caller.UserId, request.Timezone, ct);
-            var rrule = ValidateRrule(request.Rrule, request.DueAt);
 
             var dek = await LoadDataKeyAsync(connection, tx, caller.UserId, create: true, ct)!;
             try
@@ -129,12 +125,12 @@ public sealed class ReminderService(
                 var dueAt = request.DueAt.ToUniversalTime();
                 var localTime = ToLocalTime(dueAt, timezone);
 
-                var id = await connection.ExecuteScalarAsync<long>(new CommandDefinition("""
+                var row = await connection.QuerySingleAsync<ReminderRow>(new CommandDefinition($"""
                     INSERT INTO reminders
                         (user_id, body_ciphertext, body_dek_id, due_at_utc, due_local_time, timezone, rrule, recurrence_until)
                     VALUES
                         (@UserId, @Body, @DekId, @DueAt, @LocalTime, @Timezone, @Rrule, @Until)
-                    RETURNING id
+                    RETURNING {ReturningColumnsSql}
                     """,
                     new
                     {
@@ -148,24 +144,18 @@ public sealed class ReminderService(
                         Until = request.RecurrenceUntil?.ToUniversalTime(),
                     }, tx, cancellationToken: ct));
 
-                await ReplaceTargetsAsync(connection, tx, caller.UserId, id, request.DeviceIds, ct);
-
-                var row = await connection.QuerySingleAsync<ReminderRow>(new CommandDefinition(
-                    SelectSql + " WHERE r.id = @Id", new { Id = id }, tx, cancellationToken: ct));
+                var targetIds = await ReplaceTargetsAsync(connection, tx, caller.UserId, row.Id, wantedDevices, ct, isNew: true);
 
                 if (rrule is not null)
                 {
                     await MaterialiseOccurrencesAsync(connection, tx, row, ct);
                 }
 
-                return ToResponse(row, dek, await LoadTargetsAsync(connection, tx, [id], ct));
+                return ToResponse(row, dek, targetIds);
             }
             finally
             {
-                if (dek is not null)
-                {
-                    CryptographicOperations.ZeroMemory(dek);
-                }
+                ZeroKey(dek);
             }
         }, ct);
 
@@ -185,6 +175,9 @@ public sealed class ReminderService(
             ValidateBody(request.Body);
         }
 
+        ValidateTimezoneIfProvided(request.Timezone);
+        var wantedDevices = ParseTargetDevices(request.DeviceIds);
+
         var response = await db.InTransactionAsync(async (connection, tx) =>
         {
             var row = await LoadOwnedAsync(connection, tx, caller.UserId, reminderId, ct);
@@ -198,8 +191,11 @@ public sealed class ReminderService(
 
                 var dueAt = (request.DueAt ?? row.DueAtUtc).ToUniversalTime();
                 var rrule = request.Rrule is null ? row.Rrule : ValidateRrule(request.Rrule, dueAt);
+                var until = request.Rrule is null
+                    ? (request.RecurrenceUntil?.ToUniversalTime() ?? row.RecurrenceUntil)
+                    : (rrule is null ? null : request.RecurrenceUntil?.ToUniversalTime());
 
-                await connection.ExecuteAsync(new CommandDefinition("""
+                var updated = await connection.QuerySingleAsync<ReminderRow>(new CommandDefinition($"""
                     UPDATE reminders
                        SET body_ciphertext = COALESCE(@Body, body_ciphertext),
                            body_dek_id = CASE WHEN @Body IS NULL THEN body_dek_id ELSE @DekId END,
@@ -207,9 +203,10 @@ public sealed class ReminderService(
                            due_local_time = @LocalTime,
                            timezone = @Timezone,
                            rrule = @Rrule,
-                           recurrence_until = COALESCE(@Until, recurrence_until),
+                           recurrence_until = @Until,
                            updated_at = now()
                      WHERE id = @Id
+                    RETURNING {ReturningColumnsSql}
                     """,
                     new
                     {
@@ -219,14 +216,24 @@ public sealed class ReminderService(
                         LocalTime = ToLocalTime(dueAt, timezone),
                         Timezone = timezone,
                         Rrule = rrule,
-                        Until = request.RecurrenceUntil?.ToUniversalTime(),
+                        Until = until,
                         row.Id,
                     }, tx, cancellationToken: ct));
 
-                await ReplaceTargetsAsync(connection, tx, caller.UserId, row.Id, request.DeviceIds, ct);
-
-                var updated = await connection.QuerySingleAsync<ReminderRow>(new CommandDefinition(
-                    SelectSql + " WHERE r.id = @Id", new { row.Id }, tx, cancellationToken: ct));
+                IReadOnlyList<string>? targetIds;
+                if (wantedDevices is null && request.ClearDeviceIds == true)
+                {
+                    await connection.ExecuteAsync(new CommandDefinition(
+                        "DELETE FROM reminder_devices WHERE reminder_id = @ReminderId",
+                        new { ReminderId = row.Id }, tx, cancellationToken: ct));
+                    targetIds = null;
+                }
+                else
+                {
+                    var replacedTargets = await ReplaceTargetsAsync(connection, tx, caller.UserId, row.Id, wantedDevices, ct);
+                    targetIds = replacedTargets
+                        ?? (await LoadTargetsAsync(connection, tx, [updated.Id], ct)).GetValueOrDefault(updated.Id);
+                }
 
                 // The horizon is rebuilt rather than patched: an edited series
                 // whose old occurrences survive is how a reminder fires twice.
@@ -240,14 +247,11 @@ public sealed class ReminderService(
                     await MaterialiseOccurrencesAsync(connection, tx, updated, ct);
                 }
 
-                return ToResponse(updated, dek, await LoadTargetsAsync(connection, tx, [updated.Id], ct));
+                return ToResponse(updated, dek, targetIds);
             }
             finally
             {
-                if (dek is not null)
-                {
-                    CryptographicOperations.ZeroMemory(dek);
-                }
+                ZeroKey(dek);
             }
         }, ct);
 
@@ -265,6 +269,7 @@ public sealed class ReminderService(
         var response = await db.InTransactionAsync(async (connection, tx) =>
         {
             var row = await LoadOwnedAsync(connection, tx, caller.UserId, reminderId, ct);
+            ReminderRow updated;
 
             if (request.OccurrenceAt is { } occurrenceAt && row.Rrule is not null)
             {
@@ -282,32 +287,30 @@ public sealed class ReminderService(
                         Status = request.Completed ? "completed" : "pending",
                         CompletedAt = request.Completed ? clock.UtcNow : (DateTimeOffset?)null,
                     }, tx, cancellationToken: ct));
+                updated = row;
             }
             else
             {
-                await connection.ExecuteAsync(new CommandDefinition("""
+                updated = await connection.QuerySingleAsync<ReminderRow>(new CommandDefinition($"""
                     UPDATE reminders
                        SET is_completed = @Completed,
                            completed_at = CASE WHEN @Completed THEN now() ELSE NULL END,
                            updated_at = now()
                      WHERE id = @Id
-                    """, new { Completed = request.Completed, row.Id }, tx, cancellationToken: ct));
+                    RETURNING {ReturningColumnsSql}
+                    """,
+                    new { Completed = request.Completed, row.Id }, tx, cancellationToken: ct));
             }
-
-            var updated = await connection.QuerySingleAsync<ReminderRow>(new CommandDefinition(
-                SelectSql + " WHERE r.id = @Id", new { row.Id }, tx, cancellationToken: ct));
 
             var dek = await LoadDataKeyAsync(connection, tx, caller.UserId, create: false, ct);
             try
             {
-                return ToResponse(updated, dek, await LoadTargetsAsync(connection, tx, [updated.Id], ct));
+                var targets = await LoadTargetsAsync(connection, tx, [updated.Id], ct);
+                return ToResponse(updated, dek, targets.GetValueOrDefault(updated.Id));
             }
             finally
             {
-                if (dek is not null)
-                {
-                    CryptographicOperations.ZeroMemory(dek);
-                }
+                ZeroKey(dek);
             }
         }, ct);
 
@@ -335,6 +338,267 @@ public sealed class ReminderService(
         await realtime.ReminderChangedAsync(caller.UserPublicId,
             new ReminderChangedEvent("deleted", null, reminderId.ToString()), ct);
     }
+
+    public async Task<ReminderResponse> RestoreAsync(
+        CallerIdentity caller, Guid reminderId, CancellationToken ct = default)
+    {
+        caller.Require(Scopes.ReminderWrite);
+
+        var response = await db.InTransactionAsync(async (connection, tx) =>
+        {
+            var restored = await connection.QuerySingleOrDefaultAsync<ReminderRow>(new CommandDefinition($"""
+                UPDATE reminders
+                   SET deleted_at = NULL,
+                       updated_at = now()
+                 WHERE public_id = @PublicId AND user_id = @UserId
+                RETURNING {ReturningColumnsSql}
+                """,
+                new { PublicId = reminderId, UserId = caller.UserId }, tx, cancellationToken: ct))
+                ?? throw AppException.NotFound(ErrorCodes.ReminderNotFound, "No such reminder.");
+
+            if (restored.Rrule is not null)
+            {
+                await MaterialiseOccurrencesAsync(connection, tx, restored, ct);
+            }
+
+            var dek = await TryLoadDataKeyAsync(connection, caller.UserId, ct, tx);
+            try
+            {
+                var targets = await LoadTargetsAsync(connection, tx, [restored.Id], ct);
+                return ToResponse(restored, dek, targets.GetValueOrDefault(restored.Id));
+            }
+            finally
+            {
+                ZeroKey(dek);
+            }
+        }, ct);
+
+        await realtime.ReminderChangedAsync(caller.UserPublicId,
+            new ReminderChangedEvent("created", response, response.Id), ct);
+
+        return response;
+    }
+
+    public async Task<IReadOnlyList<ReminderOccurrenceResponse>> GetOccurrencesAsync(
+        CallerIdentity caller,
+        Guid reminderId,
+        DateTimeOffset? from = null,
+        DateTimeOffset? to = null,
+        int limit = 50,
+        CancellationToken ct = default)
+    {
+        caller.Require(Scopes.ReminderRead);
+
+        return await db.InTransactionAsync(async (connection, tx) =>
+        {
+            var row = await LoadOwnedAsync(connection, tx, caller.UserId, reminderId, ct);
+            if (row.Rrule is null)
+            {
+                return (IReadOnlyList<ReminderOccurrenceResponse>)[];
+            }
+
+            var targetCount = RecurrenceExpander.TargetOccurrenceCount(row.Rrule);
+            var effectiveLimit = Math.Min(limit, targetCount);
+            var defaultToUtc = DefaultOccurrenceHorizon(row.Rrule, clock.UtcNow);
+
+            var fromUtc = from?.ToUniversalTime() ?? (row.DueAtUtc > clock.UtcNow.AddDays(-14) ? row.DueAtUtc : clock.UtcNow.AddDays(-14));
+            var toUtc = to?.ToUniversalTime() ?? defaultToUtc;
+            if (row.RecurrenceUntil is { } until && until < toUtc)
+            {
+                toUtc = until;
+            }
+
+            var dek = await TryLoadDataKeyAsync(connection, caller.UserId, ct, tx);
+            try
+            {
+                var seriesBody = DecryptBodyOrPlaceholder(dek, row.BodyCiphertext, caller.UserId, row.PublicId);
+
+                var stored = (await connection.QueryAsync<StoredOccurrenceRow>(new CommandDefinition("""
+                    SELECT id AS Id, occurs_at_utc AS OccursAtUtc, status AS Status,
+                           completed_at AS CompletedAt, custom_body_ciphertext AS CustomBodyCiphertext
+                      FROM reminder_occurrences
+                     WHERE reminder_id = @ReminderId
+                       AND occurs_at_utc >= @From AND occurs_at_utc <= @To
+                     ORDER BY occurs_at_utc ASC
+                    """, new { ReminderId = row.Id, From = fromUtc, To = toUtc }, tx, cancellationToken: ct))).ToList();
+
+                var storedDict = stored.ToDictionary(s => s.OccursAtUtc);
+
+                var expandedInstants = recurrence.Expand(row.Rrule!, row.DueAtUtc, row.Timezone, fromUtc, toUtc, row.RecurrenceUntil);
+
+                var allInstants = new SortedSet<DateTimeOffset>(stored.Select(s => s.OccursAtUtc).Concat(expandedInstants));
+
+                var cutoff = clock.UtcNow.AddMinutes(-5);
+                var upcomingInstants = allInstants.Where(i => i >= cutoff).Take(effectiveLimit).ToList();
+                if (upcomingInstants.Count == 0)
+                {
+                    upcomingInstants = allInstants.TakeLast(effectiveLimit).ToList();
+                }
+
+                var pastStored = allInstants.Where(i => i < cutoff && storedDict.TryGetValue(i, out var s) && s.Status != "pending").TakeLast(3).ToList();
+                var selectedInstants = new SortedSet<DateTimeOffset>(pastStored.Concat(upcomingInstants));
+
+                var results = new List<ReminderOccurrenceResponse>();
+                foreach (var instant in selectedInstants)
+                {
+                    if (storedDict.TryGetValue(instant, out var storedRow))
+                    {
+                        string? customBody = null;
+                        if (storedRow.CustomBodyCiphertext is not null && dek is not null)
+                        {
+                            try
+                            {
+                                customBody = envelope.Decrypt(dek, storedRow.CustomBodyCiphertext, AssociatedData(caller.UserId));
+                            }
+                            catch (Exception ex)
+                            {
+                                logger.LogWarning(ex, "Could not decrypt custom occurrence body for reminder {ReminderId}", row.PublicId);
+                            }
+                        }
+
+                        results.Add(new ReminderOccurrenceResponse(
+                            storedRow.Id,
+                            row.PublicId.ToString(),
+                            storedRow.OccursAtUtc,
+                            storedRow.Status,
+                            storedRow.CompletedAt,
+                            customBody,
+                            customBody ?? seriesBody));
+                    }
+                    else
+                    {
+                        results.Add(new ReminderOccurrenceResponse(
+                            0,
+                            row.PublicId.ToString(),
+                            instant,
+                            "pending",
+                            null,
+                            null,
+                            seriesBody));
+                    }
+                }
+
+                return (IReadOnlyList<ReminderOccurrenceResponse>)results;
+            }
+            finally
+            {
+                ZeroKey(dek);
+            }
+        }, ct);
+    }
+
+    public async Task<ReminderOccurrenceResponse> UpdateOccurrenceAsync(
+        CallerIdentity caller,
+        Guid reminderId,
+        UpdateReminderOccurrenceRequest request,
+        CancellationToken ct = default)
+    {
+        caller.Require(Scopes.ReminderWrite);
+
+        var (response, reminderResponse) = await db.InTransactionAsync(async (connection, tx) =>
+        {
+            var row = await LoadOwnedAsync(connection, tx, caller.UserId, reminderId, ct);
+            if (row.Rrule is null)
+            {
+                throw AppException.Validation("Occurrences only apply to recurring reminders.",
+                    new ErrorDetail("rrule", "not_recurring"));
+            }
+
+            var occursAt = request.OccursAt.ToUniversalTime();
+            var validStatuses = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "pending", "completed", "skipped", "notified" };
+            if (request.Status is not null && !validStatuses.Contains(request.Status))
+            {
+                throw AppException.Validation("Invalid occurrence status.", new ErrorDetail("status", "invalid"));
+            }
+
+            var dek = await LoadDataKeyAsync(connection, tx, caller.UserId, create: true, ct)!;
+            try
+            {
+                byte[]? customBodyCiphertext = null;
+                if (!string.IsNullOrWhiteSpace(request.CustomBody))
+                {
+                    customBodyCiphertext = envelope.Encrypt(dek!, request.CustomBody, AssociatedData(caller.UserId));
+                }
+
+                DateTimeOffset? completedAt = request.Status?.ToLowerInvariant() switch
+                {
+                    "completed" => clock.UtcNow,
+                    "pending" => null,
+                    "skipped" => null,
+                    _ => null
+                };
+
+                var updated = await connection.QuerySingleAsync<StoredOccurrenceRow>(new CommandDefinition("""
+                    INSERT INTO reminder_occurrences (reminder_id, occurs_at_utc, status, completed_at, custom_body_ciphertext)
+                    VALUES (@ReminderId, @OccursAt, COALESCE(@Status, 'pending'), @CompletedAt, @CustomBodyCiphertext)
+                    ON CONFLICT (reminder_id, occurs_at_utc)
+                    DO UPDATE SET
+                        status = COALESCE(@Status, reminder_occurrences.status),
+                        completed_at = CASE
+                            WHEN @Status = 'completed' THEN COALESCE(@CompletedAt, now())
+                            WHEN @Status IS NOT NULL AND @Status != 'completed' THEN NULL
+                            ELSE reminder_occurrences.completed_at
+                        END,
+                        custom_body_ciphertext = CASE
+                            WHEN @ClearCustomBody = true THEN NULL
+                            WHEN @CustomBodyCiphertext IS NOT NULL THEN @CustomBodyCiphertext
+                            ELSE reminder_occurrences.custom_body_ciphertext
+                        END
+                    RETURNING id AS Id, occurs_at_utc AS OccursAtUtc, status AS Status,
+                              completed_at AS CompletedAt, custom_body_ciphertext AS CustomBodyCiphertext
+                    """,
+                    new
+                    {
+                        ReminderId = row.Id,
+                        OccursAt = occursAt,
+                        Status = request.Status?.ToLowerInvariant(),
+                        CompletedAt = completedAt,
+                        CustomBodyCiphertext = customBodyCiphertext,
+                        ClearCustomBody = request.ClearCustomBody ?? false,
+                    }, tx, cancellationToken: ct));
+
+                var seriesBody = DecryptBodyOrPlaceholder(dek, row.BodyCiphertext, caller.UserId, row.PublicId);
+                string? effectiveCustom = null;
+                if (updated.CustomBodyCiphertext is not null)
+                {
+                    effectiveCustom = envelope.Decrypt(dek!, updated.CustomBodyCiphertext, AssociatedData(caller.UserId));
+                }
+
+                var occurrenceResponse = new ReminderOccurrenceResponse(
+                    updated.Id,
+                    row.PublicId.ToString(),
+                    updated.OccursAtUtc,
+                    updated.Status,
+                    updated.CompletedAt,
+                    effectiveCustom,
+                    effectiveCustom ?? seriesBody);
+
+                var targets = await LoadTargetsAsync(connection, tx, [row.Id], ct);
+                return (occurrenceResponse, ToResponse(row, dek, targets.GetValueOrDefault(row.Id)));
+            }
+            finally
+            {
+                ZeroKey(dek);
+            }
+        }, ct);
+
+        await realtime.ReminderChangedAsync(caller.UserPublicId,
+            new ReminderChangedEvent("updated", reminderResponse, reminderResponse.Id), ct);
+
+        return response;
+    }
+
+    public async Task<ReminderOccurrenceResponse> SkipOccurrenceAsync(
+        CallerIdentity caller,
+        Guid reminderId,
+        DateTimeOffset occursAt,
+        CancellationToken ct = default)
+    {
+        return await UpdateOccurrenceAsync(caller, reminderId, new UpdateReminderOccurrenceRequest(
+            OccursAt: occursAt,
+            Status: "skipped"), ct);
+    }
+
 
     // ── legacy compatibility (dies with the shim) ────────────────────────────
 
@@ -469,11 +733,11 @@ public sealed class ReminderService(
                           LIMIT @BatchSize
                           FOR UPDATE OF o2 SKIP LOCKED
                      )
-                    RETURNING o.reminder_id, o.occurs_at_utc
+                    RETURNING o.reminder_id, o.occurs_at_utc, o.custom_body_ciphertext
                 )
                 SELECT r.id AS ReminderId, r.public_id AS PublicId,
                        u.public_id AS UserPublicId, u.id AS UserId,
-                       r.body_ciphertext AS BodyCiphertext, due.occurs_at_utc AS DueAtUtc
+                       COALESCE(due.custom_body_ciphertext, r.body_ciphertext) AS BodyCiphertext, due.occurs_at_utc AS DueAtUtc
                   FROM due
                   JOIN reminders r ON r.id = due.reminder_id
                   JOIN users u ON u.id = r.user_id
@@ -555,18 +819,24 @@ public sealed class ReminderService(
 
         var occurrences = recurrence.Expand(row.Rrule, row.DueAtUtc, row.Timezone,
             clock.UtcNow, clock.UtcNow.AddDays(RecurrenceExpander.HorizonDays), row.RecurrenceUntil);
-
-        var written = 0;
-        foreach (var occursAt in occurrences)
+        if (occurrences.Count == 0)
         {
-            written += await connection.ExecuteAsync(new CommandDefinition("""
-                INSERT INTO reminder_occurrences (reminder_id, occurs_at_utc)
-                VALUES (@Id, @OccursAt)
-                ON CONFLICT (reminder_id, occurs_at_utc) DO NOTHING
-                """, new { row.Id, OccursAt = occursAt }, tx, cancellationToken: ct));
+            return 0;
         }
 
-        return written;
+        await using var command = new NpgsqlCommand("""
+            INSERT INTO reminder_occurrences (reminder_id, occurs_at_utc)
+            SELECT $1, unnest($2)
+            ON CONFLICT (reminder_id, occurs_at_utc) DO NOTHING
+            """, connection, tx);
+        command.Parameters.Add(new NpgsqlParameter<long> { Value = row.Id });
+        command.Parameters.Add(new NpgsqlParameter<DateTimeOffset[]>
+        {
+            NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Array | NpgsqlTypes.NpgsqlDbType.TimestampTz,
+            Value = occurrences.Select(static o => o.ToUniversalTime()).ToArray(),
+        });
+
+        return await command.ExecuteNonQueryAsync(ct);
     }
 
     // ── envelope encryption ──────────────────────────────────────────────────
@@ -646,15 +916,16 @@ public sealed class ReminderService(
 
     // ── helpers ──────────────────────────────────────────────────────────────
 
-    internal const string SelectSql = """
-        SELECT r.id AS Id, r.public_id AS PublicId, r.user_id AS UserId,
-               r.body_ciphertext AS BodyCiphertext, r.body_dek_id AS BodyDekId,
-               r.due_at_utc AS DueAtUtc, r.due_local_time AS DueLocalTime, r.timezone AS Timezone,
-               r.rrule AS Rrule, r.recurrence_until AS RecurrenceUntil,
-               r.is_completed AS IsCompleted, r.completed_at AS CompletedAt,
-               r.created_at AS CreatedAt, r.updated_at AS UpdatedAt
-          FROM reminders r
+    internal const string ReturningColumnsSql = """
+        id AS Id, public_id AS PublicId, user_id AS UserId,
+        body_ciphertext AS BodyCiphertext, body_dek_id AS BodyDekId,
+        due_at_utc AS DueAtUtc, due_local_time AS DueLocalTime, timezone AS Timezone,
+        rrule AS Rrule, recurrence_until AS RecurrenceUntil,
+        is_completed AS IsCompleted, completed_at AS CompletedAt,
+        created_at AS CreatedAt, updated_at AS UpdatedAt
         """;
+
+    internal const string SelectSql = $"SELECT {ReturningColumnsSql} FROM reminders r";
 
     /// <summary>
     /// The devices each of these reminders shows on, keyed by reminder.
@@ -695,17 +966,11 @@ public sealed class ReminderService(
     /// which is the same shape of defect as trusting a caller-supplied PCName
     /// (S1-08).
     /// </summary>
-    private static async Task ReplaceTargetsAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction tx,
-        long userId,
-        long reminderId,
-        IReadOnlyList<string>? deviceIds,
-        CancellationToken ct)
+    private static Guid[]? ParseTargetDevices(IReadOnlyList<string>? deviceIds)
     {
         if (deviceIds is null)
         {
-            return;
+            return null;
         }
 
         if (deviceIds.Count == 0)
@@ -717,7 +982,7 @@ public sealed class ReminderService(
                 "Choose at least one PC, or send no list at all to show it on every PC.");
         }
 
-        var parsed = new List<Guid>(deviceIds.Count);
+        var parsed = new HashSet<Guid>(deviceIds.Count);
         foreach (var id in deviceIds)
         {
             if (!Guid.TryParse(id, out var guid))
@@ -728,7 +993,22 @@ public sealed class ReminderService(
             parsed.Add(guid);
         }
 
-        var wanted = parsed.Distinct().ToArray();
+        return [.. parsed];
+    }
+
+    private static async Task<IReadOnlyList<string>?> ReplaceTargetsAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction tx,
+        long userId,
+        long reminderId,
+        Guid[]? wanted,
+        CancellationToken ct,
+        bool isNew = false)
+    {
+        if (wanted is null)
+        {
+            return null;
+        }
 
         var owned = (await connection.QueryAsync<long>(new CommandDefinition("""
             SELECT id FROM devices
@@ -745,14 +1025,22 @@ public sealed class ReminderService(
                 "One of those PCs is not on this account.");
         }
 
-        await connection.ExecuteAsync(new CommandDefinition(
-            "DELETE FROM reminder_devices WHERE reminder_id = @ReminderId",
-            new { ReminderId = reminderId }, tx, cancellationToken: ct));
+        if (!isNew)
+        {
+            await connection.ExecuteAsync(new CommandDefinition(
+                "DELETE FROM reminder_devices WHERE reminder_id = @ReminderId",
+                new { ReminderId = reminderId }, tx, cancellationToken: ct));
+        }
 
         await connection.ExecuteAsync(new CommandDefinition("""
             INSERT INTO reminder_devices (reminder_id, device_id)
             SELECT @ReminderId, unnest(@DeviceIds)
             """, new { ReminderId = reminderId, DeviceIds = owned.ToArray() }, tx, cancellationToken: ct));
+
+        return wanted
+            .Select(static g => g.ToString())
+            .OrderBy(static s => s, StringComparer.Ordinal)
+            .ToArray();
     }
 
     private sealed record TargetRow
@@ -819,7 +1107,7 @@ public sealed class ReminderService(
     }
 
     private ReminderResponse ToResponse(
-        ReminderRow row, byte[]? dek, IReadOnlyDictionary<long, IReadOnlyList<string>>? targets = null)
+        ReminderRow row, byte[]? dek, IReadOnlyList<string>? targetIds = null)
     {
         var body = DecryptBodyOrPlaceholder(dek, row.BodyCiphertext, row.UserId, row.PublicId);
 
@@ -835,8 +1123,27 @@ public sealed class ReminderService(
             row.CompletedAt,
             row.CreatedAt,
             row.UpdatedAt,
-            targets?.GetValueOrDefault(row.Id));
+            targetIds);
     }
+
+    private static void ZeroKey(byte[]? dek)
+    {
+        if (dek is not null)
+        {
+            CryptographicOperations.ZeroMemory(dek);
+        }
+    }
+
+    private static DateTimeOffset DefaultOccurrenceHorizon(string rrule, DateTimeOffset now) =>
+        rrule switch
+        {
+            _ when rrule.Contains("FREQ=HOURLY", StringComparison.OrdinalIgnoreCase) => now.AddDays(2),
+            _ when rrule.Contains("FREQ=DAILY", StringComparison.OrdinalIgnoreCase) => now.AddDays(14),
+            _ when rrule.Contains("FREQ=WEEKLY", StringComparison.OrdinalIgnoreCase) => now.AddDays(60),
+            _ when rrule.Contains("FREQ=MONTHLY", StringComparison.OrdinalIgnoreCase) => now.AddMonths(12),
+            _ when rrule.Contains("FREQ=YEARLY", StringComparison.OrdinalIgnoreCase) => now.AddYears(6),
+            _ => now.AddYears(3),
+        };
 
     private static void ValidateBody(string? body)
     {
@@ -867,17 +1174,21 @@ public sealed class ReminderService(
         return rrule.Trim();
     }
 
+    private static void ValidateTimezoneIfProvided(string? requested)
+    {
+        if (!string.IsNullOrWhiteSpace(requested) && Normalise.IanaTimeZoneOrDefault(requested, " ") == " ")
+        {
+            throw AppException.Unprocessable(ErrorCodes.ReminderTimezoneInvalid,
+                $"'{requested}' is not a known IANA timezone.");
+        }
+    }
+
     private static async Task<string> ResolveTimezoneAsync(
         NpgsqlConnection connection, NpgsqlTransaction? tx, long userId, string? requested, CancellationToken ct)
     {
         if (!string.IsNullOrWhiteSpace(requested))
         {
-            if (Normalise.IanaTimeZoneOrDefault(requested, " ") == " ")
-            {
-                throw AppException.Unprocessable(ErrorCodes.ReminderTimezoneInvalid,
-                    $"'{requested}' is not a known IANA timezone.");
-            }
-
+            ValidateTimezoneIfProvided(requested);
             return requested;
         }
 
@@ -915,6 +1226,15 @@ public sealed class ReminderService(
         public DateTimeOffset? CompletedAt { get; init; }
         public DateTimeOffset CreatedAt { get; init; }
         public DateTimeOffset UpdatedAt { get; init; }
+    }
+
+    private sealed record StoredOccurrenceRow
+    {
+        public long Id { get; init; }
+        public DateTimeOffset OccursAtUtc { get; init; }
+        public string Status { get; init; } = "pending";
+        public DateTimeOffset? CompletedAt { get; init; }
+        public byte[]? CustomBodyCiphertext { get; init; }
     }
 
     private sealed record DueRow

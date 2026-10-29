@@ -181,9 +181,18 @@ internal static class Power
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool OpenProcessToken(IntPtr processHandle, uint desiredAccess, out IntPtr tokenHandle);
 
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool ExitWindowsEx(uint uFlags, uint dwReason);
+
+    private const uint EwxShutdown = 0x00000001;
+    private const uint EwxReboot = 0x00000002;
+    private const uint EwxForceIfHung = 0x00000010;
+    private const uint EwxPowerOff = 0x00000008;
+
     [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool LookupPrivilegeValueW(string? systemName, string name, out long luid);
+    private static extern bool LookupPrivilegeValueW(string? systemName, string name, out Luid luid);
 
     [DllImport("advapi32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -197,11 +206,18 @@ internal static class Power
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool CloseHandle(IntPtr handle);
 
-    [StructLayout(LayoutKind.Sequential)]
+    [StructLayout(LayoutKind.Sequential, Pack = 4)]
+    private struct Luid
+    {
+        public uint LowPart;
+        public int HighPart;
+    }
+
+    [StructLayout(LayoutKind.Sequential, Pack = 4)]
     private struct TokenPrivileges
     {
         public uint PrivilegeCount;
-        public long Luid;
+        public Luid Luid;
         public uint Attributes;
     }
 
@@ -211,26 +227,51 @@ internal static class Power
 
     private static ExecutionResult Halt(ILogger logger, bool reboot)
     {
-        if (!EnableShutdownPrivilege(logger))
+        if (EnableShutdownPrivilege(logger))
         {
-            return ExecutionResult.Fail("privilege", "The agent does not hold the shutdown privilege.");
-        }
+            // A short grace period, not zero: the user asked from their phone and
+            // may be sitting at the machine. Forcing apps closed is deliberate —
+            // a shutdown that hangs on an unsaved document is a shutdown that did
+            // not happen, and the phone would report success.
+            var ok = InitiateSystemShutdownExW(null, "PCConnect: shutting down at your request.", 10,
+                forceAppsClosed: true, rebootAfterShutdown: reboot, ShutdownReason);
 
-        // A short grace period, not zero: the user asked from their phone and
-        // may be sitting at the machine. Forcing apps closed is deliberate —
-        // a shutdown that hangs on an unsaved document is a shutdown that did
-        // not happen, and the phone would report success.
-        var ok = InitiateSystemShutdownExW(null, "PCConnect: shutting down at your request.", 10,
-            forceAppsClosed: true, rebootAfterShutdown: reboot, ShutdownReason);
+            if (ok)
+            {
+                return ExecutionResult.Ok(reboot ? "restarting" : "shutting down");
+            }
 
-        if (!ok)
-        {
             var error = Marshal.GetLastWin32Error();
-            logger.LogError("InitiateSystemShutdownEx failed with Win32 error {Error}", error);
-            return ExecutionResult.Fail("win32_" + error, "Windows refused the shutdown request.");
+            logger.LogWarning("InitiateSystemShutdownEx failed with Win32 error {Error}, attempting fallback", error);
         }
 
-        return ExecutionResult.Ok(reboot ? "restarting" : "shutting down");
+        // Fallback 1: ExitWindowsEx
+        uint flags = (reboot ? EwxReboot : (EwxPowerOff | EwxShutdown)) | EwxForceIfHung;
+        if (ExitWindowsEx(flags, ShutdownReason))
+        {
+            return ExecutionResult.Ok(reboot ? "restarting" : "shutting down");
+        }
+
+        // Fallback 2: Windows shutdown utility (handles unprivileged user sessions cleanly)
+        try
+        {
+            var psi = new System.Diagnostics.ProcessStartInfo("shutdown.exe", reboot ? "/r /t 10 /f" : "/s /t 10 /f")
+            {
+                CreateNoWindow = true,
+                UseShellExecute = false,
+            };
+            using var proc = System.Diagnostics.Process.Start(psi);
+            if (proc != null)
+            {
+                return ExecutionResult.Ok(reboot ? "restarting" : "shutting down");
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Fallback shutdown process failed");
+        }
+
+        return ExecutionResult.Fail("win32_shutdown_failed", "Windows refused the shutdown request.");
     }
 
     public static ExecutionResult Suspend(bool hibernate, ILogger logger)

@@ -24,15 +24,15 @@
 
       <!-- Schedule Icon -->
       <Path Data="{StaticResource Icon.Schedule}" Fill="{StaticResource InkSoft}"
-            Width="15" Height="15" Stretch="Uniform" Margin="8,0,3,0" VerticalAlignment="Center" />
+            Width="14" Height="14" Stretch="Uniform" Margin="7,0,2,0" VerticalAlignment="Center" />
 
       <!-- Interactive Time Segments -->
-      <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="2,-2,0,0">
+      <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="1,-2,0,0">
         <!-- Hour Field -->
         <TextBox x:Name="HourInput" Text="12" FontFamily="{StaticResource MonoFont}" FontSize="13"
                  Background="Transparent" BorderThickness="0" Padding="0" Height="22"
                  VerticalAlignment="Center" VerticalContentAlignment="Center" HorizontalContentAlignment="Center"
-                 Width="24" MaxLength="2" Cursor="IBeam"
+                 Width="22" MaxLength="2" Cursor="IBeam"
                  PreviewTextInput="OnHourPreviewTextInput"
                  PreviewKeyDown="OnHourPreviewKeyDown"
                  GotKeyboardFocus="OnHourGotFocus"
@@ -41,13 +41,13 @@
                  ToolTip="Hours (use Up/Down arrow keys or scroll)" />
 
         <TextBlock Text=":" FontFamily="{StaticResource MonoFont}" FontSize="13"
-                   Foreground="{StaticResource InkSoft}" VerticalAlignment="Center" Margin="1,0,1,0" />
+                   Foreground="{StaticResource InkSoft}" VerticalAlignment="Center" Margin="0" />
 
         <!-- Minute Field -->
         <TextBox x:Name="MinuteInput" Text="00" FontFamily="{StaticResource MonoFont}" FontSize="13"
                  Background="Transparent" BorderThickness="0" Padding="0" Height="22"
                  VerticalAlignment="Center" VerticalContentAlignment="Center" HorizontalContentAlignment="Center"
-                 Width="24" MaxLength="2" Cursor="IBeam"
+                 Width="22" MaxLength="2" Cursor="IBeam"
                  PreviewTextInput="OnMinutePreviewTextInput"
                  PreviewKeyDown="OnMinutePreviewKeyDown"
                  GotKeyboardFocus="OnMinuteGotFocus"
@@ -59,7 +59,7 @@
         <Button x:Name="AmPmButton" Content="AM" Click="OnAmPmClick"
                 FontFamily="{StaticResource MonoFont}" FontSize="13" FontWeight="SemiBold"
                 Foreground="{StaticResource Primary}" Background="Transparent"
-                BorderThickness="0" Padding="4,0" Margin="4,0,0,0" Height="22" Cursor="Hand"
+                BorderThickness="0" Padding="3,0" Margin="3,0,0,0" Height="22" Cursor="Hand"
                 VerticalAlignment="Center" VerticalContentAlignment="Center"
                 PreviewKeyDown="OnAmPmPreviewKeyDown"
                 GotKeyboardFocus="OnAmPmGotFocus"
@@ -67,7 +67,7 @@
       </StackPanel>
 
       <!-- Up / Down Spin Buttons -->
-      <Grid Grid.Column="2" Margin="0,0,6,0" Width="18" VerticalAlignment="Center">
+      <Grid Grid.Column="2" Margin="0,0,4,0" Width="16" VerticalAlignment="Center">
         <Grid.RowDefinitions>
           <RowDefinition Height="12" />
           <RowDefinition Height="12" />

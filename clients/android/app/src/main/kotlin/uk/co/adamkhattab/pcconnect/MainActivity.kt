@@ -25,7 +25,7 @@ class MainActivity : FragmentActivity() {
 
         ViewModelProvider(
             this,
-            viewModelFactory { initializer { AppViewModel(application.api, application.tokenStore, application.passkeys) } },
+            viewModelFactory { initializer { AppViewModel(application.api, application.tokenStore) } },
         )[AppViewModel::class.java]
     }
 
@@ -38,7 +38,7 @@ class MainActivity : FragmentActivity() {
                 PcConnectApp(
                     viewModel = viewModel,
                     onShareDownloadLink = ::shareDownloadLink,
-                    onBiometricGate = ::promptBiometric,
+                    onBiometricPrompt = ::promptBiometric,
                     biometricAvailable = canAuthenticate(),
                 )
             }
@@ -64,14 +64,13 @@ class MainActivity : FragmentActivity() {
 
     private fun canAuthenticate(): Boolean =
         BiometricManager.from(this).canAuthenticate(
-            BiometricManager.Authenticators.BIOMETRIC_WEAK or BiometricManager.Authenticators.DEVICE_CREDENTIAL,
+            BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.BIOMETRIC_WEAK,
         ) == BiometricManager.BIOMETRIC_SUCCESS
 
     /**
-     * The local gate in front of the server's step-up. It stops someone holding
-     * an unlocked phone; the server still requires the password (ADR-0011).
+     * Standard Android fingerprint / biometric prompt.
      */
-    private fun promptBiometric(commandType: String, onResult: (Boolean) -> Unit) {
+    private fun promptBiometric(title: String, subtitle: String, onResult: (Boolean) -> Unit) {
         val prompt = BiometricPrompt(
             this,
             ContextCompat.getMainExecutor(this),
@@ -84,10 +83,11 @@ class MainActivity : FragmentActivity() {
 
         prompt.authenticate(
             BiometricPrompt.PromptInfo.Builder()
-                .setTitle("Confirm it is you")
-                .setSubtitle("PCConnect is about to ${CommandTypes.label(commandType).lowercase()} your PC")
+                .setTitle(title)
+                .setSubtitle(subtitle)
+                .setNegativeButtonText("Use password")
                 .setAllowedAuthenticators(
-                    BiometricManager.Authenticators.BIOMETRIC_WEAK or BiometricManager.Authenticators.DEVICE_CREDENTIAL,
+                    BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.BIOMETRIC_WEAK,
                 )
                 .build(),
         )

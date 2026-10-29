@@ -10,7 +10,7 @@ public sealed class CalendarSelectionTests : IDisposable
 {
     private readonly HttpClient _http = new();
     private readonly RemindersViewModel _calendar;
-    private readonly DateOnly _month = DateOnly.FromDateTime(DateTime.Today);
+    private readonly DateOnly _month = new DateOnly(DateTime.Today.Year, DateTime.Today.Month, 1).AddMonths(1);
 
     public CalendarSelectionTests()
     {
@@ -19,6 +19,7 @@ public sealed class CalendarSelectionTests : IDisposable
             new DevicesViewModel(api, NullLogger<DevicesViewModel>.Instance),
             NullLogger<RemindersViewModel>.Instance);
         _calendar.RebuildCalendar();
+        _calendar.NextMonthCommand.Execute(null);
     }
 
     [Fact]
@@ -145,7 +146,7 @@ public sealed class CalendarSelectionTests : IDisposable
     [Fact]
     public void Show_all_includes_events_across_multiple_months_and_not_just_the_current_month()
     {
-        var prevMonth = _month.AddMonths(-1);
+        var prevMonth = DateOnly.FromDateTime(DateTime.Today).AddMonths(-1);
         var nextMonth = _month.AddMonths(2);
         AddEvent("previous", prevMonth);
         AddEvent("current", _month.AddDays(5));
@@ -161,12 +162,12 @@ public sealed class CalendarSelectionTests : IDisposable
         // "previous" is in the past, so hidden by default in All events
         _calendar.Rows.Select(r => r.Id).ShouldBe(["current", "future"]);
         _calendar.HasCompletedReminders.ShouldBeTrue();
-        _calendar.CompletedRemindersButtonText.ShouldBe("Show completed reminders");
+        _calendar.CompletedRemindersButtonText.ShouldBe("Show completed");
 
         // When toggled, past/completed reminders are included
         _calendar.ToggleShowCompletedRemindersCommand.Execute(null);
         _calendar.Rows.Select(r => r.Id).ShouldBe(["previous", "current", "future"]);
-        _calendar.CompletedRemindersButtonText.ShouldBe("Hide completed reminders");
+        _calendar.CompletedRemindersButtonText.ShouldBe("Hide completed");
     }
 
     [Fact]
@@ -256,11 +257,13 @@ public sealed class CalendarSelectionTests : IDisposable
     [Fact]
     public void Go_to_today_resets_month_and_updates_is_current_month()
     {
+        _calendar.GoToTodayCommand.Execute(null);
         _calendar.IsCurrentMonth.ShouldBeTrue();
 
-        Click(_month.AddDays(5));
+        var midCurrentMonth = new DateOnly(DateTime.Today.Year, DateTime.Today.Month, 15);
+        Click(midCurrentMonth);
         _calendar.HasSelection.ShouldBeTrue();
-        SelectedDays().ShouldBe([_month.AddDays(5)]);
+        SelectedDays().ShouldBe([midCurrentMonth]);
 
         _calendar.NextMonthCommand.Execute(null);
         _calendar.IsCurrentMonth.ShouldBeFalse();
@@ -284,12 +287,12 @@ public sealed class CalendarSelectionTests : IDisposable
         _calendar.Rows.Any(r => r.Id == "active-ev").ShouldBeTrue();
         _calendar.Rows.Any(r => r.Id == "completed-ev").ShouldBeFalse();
         _calendar.HasCompletedReminders.ShouldBeTrue();
-        _calendar.CompletedRemindersButtonText.ShouldBe("Show completed reminders");
+        _calendar.CompletedRemindersButtonText.ShouldBe("Show completed");
 
         // Toggle show completed reminders
         _calendar.ToggleShowCompletedRemindersCommand.Execute(null);
         _calendar.Rows.Any(r => r.Id == "completed-ev").ShouldBeTrue();
-        _calendar.CompletedRemindersButtonText.ShouldBe("Hide completed reminders");
+        _calendar.CompletedRemindersButtonText.ShouldBe("Hide completed");
     }
 
     [Fact]
@@ -373,6 +376,64 @@ public sealed class CalendarSelectionTests : IDisposable
         _calendar.IsDaysView.ShouldBeTrue();
         _calendar.MonthTitle.ShouldContain("August");
         _calendar.MonthTitle.ShouldContain(targetYear.ToString());
+    }
+
+    [Fact]
+    public void Reminders_are_split_into_non_recurring_and_recurring_collections()
+    {
+        var day = _month.AddDays(5);
+        AddEvent("one-time-1", day);
+        AddEvent("recurring-weekly", day, rule: "FREQ=WEEKLY");
+
+        _calendar.ClearSelectionCommand.Execute(null);
+
+        // One-time reminder is in NonRecurringRows
+        _calendar.NonRecurringRows.Single().Id.ShouldBe("one-time-1");
+
+        // Recurring reminder is in RecurringRows
+        _calendar.RecurringRows.Single().Id.ShouldBe("recurring-weekly");
+
+        // Rows contains both
+        _calendar.Rows.Select(r => r.Id).ShouldBe(["one-time-1", "recurring-weekly"]);
+
+        // Both sections are shown
+        _calendar.ShowRecurringSection.ShouldBeTrue();
+        _calendar.ShowNonRecurringHeader.ShouldBeTrue();
+        _calendar.HasRecurringReminders.ShouldBeTrue();
+        _calendar.HasNonRecurringReminders.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Hide_recurring_option_toggles_and_hides_recurring_reminders()
+    {
+        var day = _month.AddDays(5);
+        AddEvent("one-time-1", day);
+        AddEvent("recurring-weekly", day, rule: "FREQ=WEEKLY");
+
+        _calendar.ClearSelectionCommand.Execute(null);
+
+        _calendar.HideRecurring.ShouldBeFalse();
+        _calendar.HideRecurringButtonText.ShouldBe("Hide recurring");
+        _calendar.ShowRecurringSection.ShouldBeTrue();
+
+        // Toggle hide recurring
+        _calendar.ToggleHideRecurringCommand.Execute(null);
+
+        _calendar.HideRecurring.ShouldBeTrue();
+        _calendar.HideRecurringButtonText.ShouldBe("Show recurring");
+        _calendar.ShowRecurringSection.ShouldBeFalse();
+        _calendar.ShowNonRecurringHeader.ShouldBeFalse();
+
+        // Rows only contains non-recurring
+        _calendar.Rows.Select(r => r.Id).ShouldBe(["one-time-1"]);
+
+        // Toggle back
+        _calendar.ToggleHideRecurringCommand.Execute(null);
+
+        _calendar.HideRecurring.ShouldBeFalse();
+        _calendar.HideRecurringButtonText.ShouldBe("Hide recurring");
+        _calendar.ShowRecurringSection.ShouldBeTrue();
+        _calendar.Rows.Select(r => r.Id).ShouldBe(["one-time-1", "recurring-weekly"]);
     }
 
     private void Click(DateOnly day, bool extend = false, bool toggle = false)

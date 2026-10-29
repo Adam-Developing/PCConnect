@@ -21,6 +21,14 @@ public sealed class RecurrenceExpander(ILogger<RecurrenceExpander> logger)
 
     private const int MaxOccurrencesPerExpansion = 1000;
 
+    public static int TargetOccurrenceCount(string? rrule)
+    {
+        if (string.IsNullOrWhiteSpace(rrule)) return 1;
+        if (rrule.Contains("FREQ=HOURLY", StringComparison.OrdinalIgnoreCase)) return 10;
+        if (rrule.Contains("FREQ=DAILY", StringComparison.OrdinalIgnoreCase)) return 7;
+        return 3;
+    }
+
     public IReadOnlyList<DateTimeOffset> Expand(
         string rrule,
         DateTimeOffset seriesStart,

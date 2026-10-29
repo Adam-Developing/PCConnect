@@ -192,14 +192,19 @@ if ($DependenciesOnly) {
     return
 }
 
+# Stop any previously running PCConnect processes to avoid file locking during build
+Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name -eq 'dotnet.exe' -and $_.CommandLine -match 'PCConnect\.(Worker|Api)' } |
+    ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+
 Write-Host "Building backend projects..." -ForegroundColor Cyan
 Invoke-Checked "dotnet" @("build", "src\PCConnect.Api\PCConnect.Api.csproj", "--nologo") "The API build failed."
 Invoke-Checked "dotnet" @("build", "src\PCConnect.Worker\PCConnect.Worker.csproj", "--nologo") "The worker build failed."
 
 $env:ASPNETCORE_ENVIRONMENT = "Development"
 $env:DOTNET_ENVIRONMENT = "Development"
-$env:PCCONNECT_DATABASE__CONNECTIONSTRING = "Host=localhost;Port=$PostgresPort;Database=pcconnect;Username=postgres;Password=postgres"
-$env:PCCONNECT_CACHE__CONNECTIONSTRING = "localhost:56379"
+$env:PCCONNECT_DATABASE__CONNECTIONSTRING = "Host=127.0.0.1;Port=$PostgresPort;Database=pcconnect;Username=postgres;Password=postgres"
+$env:PCCONNECT_CACHE__CONNECTIONSTRING = "127.0.0.1:56379"
 
 $worker = $null
 try {

@@ -230,7 +230,7 @@ public class LegacyReminderCipherTests
     [Fact]
     public void Returns_false_for_the_wrong_key()
     {
-        var stored = EncryptLikeV1("0123456789abcdef0123456789abcdef", "secret");
+        var stored = EncryptLikeV1("0123456789abcdef0123456789abcdef", "secret legacy reminder plaintext");
         LegacyReminderCipher.TryDecrypt("fedcba9876543210fedcba9876543210", stored, out _).ShouldBeFalse();
     }
 }

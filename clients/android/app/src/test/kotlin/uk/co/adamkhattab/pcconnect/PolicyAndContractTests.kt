@@ -10,9 +10,13 @@ import uk.co.adamkhattab.pcconnect.data.Discovery
 import uk.co.adamkhattab.pcconnect.data.FallbackPollingPolicy
 import uk.co.adamkhattab.pcconnect.data.PcConnectApi
 import uk.co.adamkhattab.pcconnect.data.Reminder
+import uk.co.adamkhattab.pcconnect.data.ReminderOccurrenceResponse
+import uk.co.adamkhattab.pcconnect.data.UpdateReminderOccurrenceRequest
 import uk.co.adamkhattab.pcconnect.ui.RepeatKind
 import uk.co.adamkhattab.pcconnect.ui.RepeatSpec
+import uk.co.adamkhattab.pcconnect.ui.describeRecurrence
 import uk.co.adamkhattab.pcconnect.ui.describeRrule
+import uk.co.adamkhattab.pcconnect.ui.formatNaturalTime
 import uk.co.adamkhattab.pcconnect.ui.rruleFor
 import uk.co.adamkhattab.pcconnect.ui.scheduleSummary
 import java.time.LocalDate
@@ -230,5 +234,157 @@ class ContractTest {
         assertEquals("Buy milk", reminder.body)
         assertEquals("Europe/London", reminder.timezone)
         assertFalse(reminder.isCompleted)
+    }
+}
+
+class RecurrenceDescriptionTest {
+
+    @Test
+    fun `formats natural time in 12-hour and 24-hour clocks`() {
+        assertEquals("2 pm", formatNaturalTime(LocalTime.of(14, 0), is24Hour = false))
+        assertEquals("14:00", formatNaturalTime(LocalTime.of(14, 0), is24Hour = true))
+        assertEquals("2:30 pm", formatNaturalTime(LocalTime.of(14, 30), is24Hour = false))
+        assertEquals("14:30", formatNaturalTime(LocalTime.of(14, 30), is24Hour = true))
+        assertEquals("12 am", formatNaturalTime(LocalTime.of(0, 0), is24Hour = false))
+        assertEquals("00:00", formatNaturalTime(LocalTime.of(0, 0), is24Hour = true))
+        assertEquals("12:10 am", formatNaturalTime(LocalTime.of(0, 10), is24Hour = false))
+        assertEquals("00:10", formatNaturalTime(LocalTime.of(0, 10), is24Hour = true))
+    }
+
+    @Test
+    fun `describes weekly, yearly, monthly, daily, and hourly recurrences naturally`() {
+        val thursday = LocalDate.of(2026, 10, 8)
+        val time2pm = LocalTime.of(14, 0)
+        val time3pm = LocalTime.of(15, 0)
+
+        // Weekly
+        assertEquals(
+            "Every Thursday at 2 pm",
+            describeRecurrence("FREQ=WEEKLY;BYDAY=TH", thursday, time2pm, is24Hour = false)
+        )
+        assertEquals(
+            "Every Thursday at 14:00",
+            describeRecurrence("FREQ=WEEKLY;BYDAY=TH", thursday, time2pm, is24Hour = true)
+        )
+        assertEquals(
+            "Every 2 weeks on Thursday at 2 pm",
+            describeRecurrence("FREQ=WEEKLY;INTERVAL=2;BYDAY=TH", thursday, time2pm, is24Hour = false)
+        )
+        assertEquals(
+            "Every weekday at 9 am",
+            describeRecurrence("FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR", thursday, LocalTime.of(9, 0), is24Hour = false)
+        )
+
+        // Yearly
+        assertEquals(
+            "Every 8 October at 3 pm",
+            describeRecurrence("FREQ=YEARLY", thursday, time3pm, is24Hour = false)
+        )
+        assertEquals(
+            "Every 8 October at 15:00",
+            describeRecurrence("FREQ=YEARLY", thursday, time3pm, is24Hour = true)
+        )
+
+        // Monthly
+        assertEquals(
+            "Every month on the 8th at 3 pm",
+            describeRecurrence("FREQ=MONTHLY", thursday, time3pm, is24Hour = false)
+        )
+        assertEquals(
+            "Every month on the 8th at 15:00",
+            describeRecurrence("FREQ=MONTHLY", thursday, time3pm, is24Hour = true)
+        )
+
+        // Daily
+        assertEquals(
+            "Every day at 8 am",
+            describeRecurrence("FREQ=DAILY", thursday, LocalTime.of(8, 0), is24Hour = false)
+        )
+        assertEquals(
+            "Every 3 days at 8:30 am",
+            describeRecurrence("FREQ=DAILY;INTERVAL=3", thursday, LocalTime.of(8, 30), is24Hour = false)
+        )
+
+        // Hourly
+        assertEquals(
+            "Every hour",
+            describeRecurrence("FREQ=HOURLY", thursday, time2pm, is24Hour = false)
+        )
+        assertEquals(
+            "Every 2 hours",
+            describeRecurrence("FREQ=HOURLY;INTERVAL=2", thursday, time2pm, is24Hour = false)
+        )
+    }
+
+    @Test
+    fun `describes recurrence from dueAt string`() {
+        assertEquals(
+            "Every Thursday at 2 pm",
+            describeRecurrence(
+                rrule = "FREQ=WEEKLY;BYDAY=TH",
+                dueAt = "2026-10-08T14:00:00Z",
+                is24Hour = false,
+                zone = java.time.ZoneOffset.UTC
+            )
+        )
+    }
+
+    @Test
+    fun `deserializes reminder occurrence response`() {
+        val json = """
+            {
+                "id": 42,
+                "reminderId": "rem_123",
+                "occursAt": "2026-10-08T14:00:00Z",
+                "status": "completed",
+                "completedAt": "2026-10-08T14:05:00Z",
+                "customBody": "Specific meeting topic",
+                "effectiveBody": "Specific meeting topic"
+            }
+        """.trimIndent()
+        val parsed = Json { ignoreUnknownKeys = true }.decodeFromString<ReminderOccurrenceResponse>(json)
+        assertEquals(42L, parsed.id)
+        assertEquals("rem_123", parsed.reminderId)
+        assertEquals("completed", parsed.status)
+        assertEquals("Specific meeting topic", parsed.customBody)
+        assertEquals("Specific meeting topic", parsed.effectiveBody)
+    }
+
+    @Test
+    fun `serializes update reminder occurrence request`() {
+        val req = UpdateReminderOccurrenceRequest(
+            occursAt = "2026-10-08T14:00:00Z",
+            status = "skipped",
+            customBody = "Updated text"
+        )
+        val json = Json.encodeToString(UpdateReminderOccurrenceRequest.serializer(), req)
+        assertTrue(json.contains("\"occursAt\":\"2026-10-08T14:00:00Z\""))
+        assertTrue(json.contains("\"status\":\"skipped\""))
+        assertTrue(json.contains("\"customBody\":\"Updated text\""))
+    }
+
+    @Test
+    fun `serializes update reminder request omitting null clearDeviceIds and including true`() {
+        val wireJson = Json { explicitNulls = false }
+
+        val regular = uk.co.adamkhattab.pcconnect.data.UpdateReminderRequest(
+            body = "Updated body",
+            dueAt = "2026-10-08T14:00:00Z",
+            timezone = "Europe/London",
+            rrule = "",
+        )
+        val regularPayload = wireJson.encodeToString(
+            uk.co.adamkhattab.pcconnect.data.UpdateReminderRequest.serializer(),
+            regular,
+        )
+        assertFalse(regularPayload.contains("clearDeviceIds"))
+        assertTrue(regularPayload.contains("\"rrule\":\"\""))
+
+        val clearing = regular.copy(clearDeviceIds = true)
+        val clearingPayload = wireJson.encodeToString(
+            uk.co.adamkhattab.pcconnect.data.UpdateReminderRequest.serializer(),
+            clearing,
+        )
+        assertTrue(clearingPayload.contains("\"clearDeviceIds\":true"))
     }
 }

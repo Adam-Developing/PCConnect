@@ -177,6 +177,7 @@ fun SignInScreen(
                 }
             },
             enabled = canSubmit,
+            loading = state.isLoading,
         )
 
         Box(

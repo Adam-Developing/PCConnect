@@ -1,4 +1,4 @@
-﻿using System.Net;
+using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Dapper;
@@ -234,6 +234,50 @@ public class ReminderTests(ApiFixture fixture)
 
         response.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity);
         (await ApiFixture.ErrorCodeAsync(response)).ShouldBe(ErrorCodes.ReminderBodyTooLong);
+    }
+
+    [Fact]
+    public async Task A_deleted_reminder_can_be_restored_with_its_targets_and_occurrences_intact()
+    {
+        var user = await fixture.RegisterUserAsync();
+        var device = await fixture.PairDeviceAsync(user, "Restore-PC");
+        var start = DateTimeOffset.UtcNow.AddDays(1);
+
+        var created = await (await user.Client.PostAsJsonAsync("/v2/reminders",
+            new CreateReminderRequest("Weekly backup", start, "Europe/London", "FREQ=WEEKLY", null, [device.DeviceId])))
+            .Content.ReadFromJsonAsync<ReminderResponse>();
+
+        (await user.Client.DeleteAsync($"/v2/reminders/{created!.Id}")).StatusCode.ShouldBe(HttpStatusCode.NoContent);
+        (await user.Client.GetAsync($"/v2/reminders/{created.Id}")).StatusCode.ShouldBe(HttpStatusCode.NotFound);
+
+        var restoreRes = await user.Client.PostAsync($"/v2/reminders/{created.Id}/restore", null);
+        restoreRes.StatusCode.ShouldBe(HttpStatusCode.OK);
+        var restored = await restoreRes.Content.ReadFromJsonAsync<ReminderResponse>();
+
+        restored!.Id.ShouldBe(created.Id);
+        restored.Body.ShouldBe("Weekly backup");
+        restored.Rrule.ShouldBe("FREQ=WEEKLY");
+        restored.DeviceIds.ShouldBe([device.DeviceId]);
+
+        var readBack = await user.Client.GetFromJsonAsync<ReminderResponse>($"/v2/reminders/{created.Id}");
+        readBack!.Id.ShouldBe(created.Id);
+    }
+
+    [Fact]
+    public async Task Updating_a_reminder_with_clearDeviceIds_reverts_targeting_to_all_devices()
+    {
+        var user = await fixture.RegisterUserAsync();
+        var device = await fixture.PairDeviceAsync(user, "Scoped-PC");
+
+        var created = await (await user.Client.PostAsJsonAsync("/v2/reminders",
+            new CreateReminderRequest("Targeted note", DateTimeOffset.UtcNow.AddDays(1), "Europe/London", null, null, [device.DeviceId])))
+            .Content.ReadFromJsonAsync<ReminderResponse>();
+        created!.DeviceIds.ShouldBe([device.DeviceId]);
+
+        var cleared = await (await user.Client.PatchAsJsonAsync($"/v2/reminders/{created.Id}",
+            new UpdateReminderRequest(ClearDeviceIds: true)))
+            .Content.ReadFromJsonAsync<ReminderResponse>();
+        cleared!.DeviceIds.ShouldBeNull();
     }
 }
 

@@ -52,11 +52,52 @@ public static class ReminderEndpoints
             .WithName("deleteReminder")
             .WithSummary("Soft delete; recoverable until the retention job runs.");
 
+        group.MapPost("/{reminderId:guid}/restore", async (
+            Guid reminderId, ReminderService reminders, HttpContext http, CancellationToken ct) =>
+            Results.Ok(await reminders.RestoreAsync(await http.CallerAsync(ct), reminderId, ct)))
+            .WithName("restoreReminder")
+            .WithSummary("Restores a soft-deleted reminder.");
+
         group.MapPost("/{reminderId:guid}/complete", async (
             Guid reminderId, CompleteReminderRequest request, ReminderService reminders, HttpContext http, CancellationToken ct) =>
             Results.Ok(await reminders.CompleteAsync(await http.CallerAsync(ct), reminderId, request, ct)))
             .WithName("completeReminder")
             .WithSummary("`occurrenceAt` completes one occurrence of a series rather than the whole series.");
+
+        group.MapGet("/{reminderId:guid}/occurrences", async (
+            Guid reminderId,
+            [FromQuery] DateTimeOffset? from,
+            [FromQuery] DateTimeOffset? to,
+            [FromQuery] int? limit,
+            ReminderService reminders,
+            HttpContext http,
+            CancellationToken ct) =>
+            Results.Ok(await reminders.GetOccurrencesAsync(
+                await http.CallerAsync(ct), reminderId, from, to, limit ?? 50, ct)))
+            .WithName("getReminderOccurrences")
+            .WithSummary("List individual occurrences for a recurring reminder.");
+
+        group.MapPost("/{reminderId:guid}/occurrences", async (
+            Guid reminderId,
+            UpdateReminderOccurrenceRequest request,
+            ReminderService reminders,
+            HttpContext http,
+            CancellationToken ct) =>
+            Results.Ok(await reminders.UpdateOccurrenceAsync(
+                await http.CallerAsync(ct), reminderId, request, ct)))
+            .WithName("updateReminderOccurrence")
+            .WithSummary("Update status or text for a specific occurrence.");
+
+        group.MapDelete("/{reminderId:guid}/occurrences", async (
+            Guid reminderId,
+            [FromQuery] DateTimeOffset occursAt,
+            ReminderService reminders,
+            HttpContext http,
+            CancellationToken ct) =>
+            Results.Ok(await reminders.SkipOccurrenceAsync(
+                await http.CallerAsync(ct), reminderId, occursAt, ct)))
+            .WithName("deleteReminderOccurrence")
+            .WithSummary("Stops a specific occurrence from happening (marks it as skipped).");
 
         return app;
     }

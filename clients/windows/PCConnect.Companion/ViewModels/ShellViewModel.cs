@@ -27,6 +27,7 @@ public partial class ShellViewModel(
     ReminderSnoozeService? snoozeService = null) : ObservableObject
 {
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowFloatingReminderToast))]
     private bool _isSignedIn;
 
     [ObservableProperty]
@@ -46,6 +47,7 @@ public partial class ShellViewModel(
 
     /// <summary>Which of the four sidebar pages is showing.</summary>
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowFloatingReminderToast))]
     private CompanionPage _page = CompanionPage.ThisPc;
 
     /// <summary>The PC this app is running on, once it has been recognised.</summary>
@@ -70,7 +72,13 @@ public partial class ShellViewModel(
     private EventDetailModalViewModel? _activeEventDetail;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowFloatingReminderToast))]
     private bool _isEventDetailOpen;
+
+    public bool ShowFloatingReminderToast =>
+        IsSignedIn &&
+        !string.IsNullOrEmpty(reminders.StatusMessage) &&
+        (Page != CompanionPage.Reminders || IsEventDetailOpen);
 
     public event Action? EventDetailOpenRequested;
     public event Action? EventDetailCloseRequested;
@@ -95,6 +103,35 @@ public partial class ShellViewModel(
     private DispatcherTimer? _clockTimer;
     private string _lastFormattedToday = string.Empty;
     private DateOnly _lastDate = DateOnly.FromDateTime(DateTime.Today);
+    private bool _isRemindersHooked;
+    private bool _isSettingsHooked;
+    private bool _isRealtimeSubscribed;
+
+    public void WarmSession()
+    {
+        if (IsSignedIn)
+        {
+            _ = api.WarmAccessTokenAsync();
+        }
+    }
+
+    private void EnsureRemindersHooked()
+    {
+        if (_isRemindersHooked)
+        {
+            return;
+        }
+
+        _isRemindersHooked = true;
+        reminders.ItemsChanged += () => UiDispatcher.Run(RebuildWeek);
+        reminders.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(RemindersViewModel.StatusMessage))
+            {
+                UiDispatcher.Run(() => OnPropertyChanged(nameof(ShowFloatingReminderToast)));
+            }
+        };
+    }
 
     public void StartClock()
     {
@@ -136,32 +173,31 @@ public partial class ShellViewModel(
     /// </summary>
     public async Task InitialiseAsync()
     {
+        EnsureRemindersHooked();
         settings.Load();
         appSettings.Load();
         StartClock();
 
-        settings.TimeFormatChanged += () =>
+        if (!_isSettingsHooked)
         {
-            var dispatcher = Application.Current?.Dispatcher;
-            void Update()
+            _isSettingsHooked = true;
+            settings.TimeFormatChanged += () => UiDispatcher.Run(() =>
             {
                 OnPropertyChanged(nameof(Today));
                 RefreshLastCommand();
                 RebuildWeek();
-            }
-            if (dispatcher is null || dispatcher.CheckAccess()) Update();
-            else dispatcher.InvokeAsync(Update);
-        };
+            });
 
-        api.SignedOut += () => Application.Current.Dispatcher.InvokeAsync(async () =>
-        {
-            IsSignedIn = false;
-            IsAccountMenuOpen = false;
-            StatusMessage = "Your session has ended. Sign in again.";
+            api.SignedOut += () => _ = UiDispatcher.RunAsync(async () =>
+            {
+                IsSignedIn = false;
+                IsAccountMenuOpen = false;
+                StatusMessage = "Your session has ended. Sign in again.";
 
-            try { await realtime.DisposeAsync(); }
-            catch { /* best-effort */ }
-        });
+                try { await realtime.DisposeAsync(); }
+                catch { /* best-effort */ }
+            });
+        }
 
         try
         {
@@ -260,6 +296,7 @@ public partial class ShellViewModel(
 
     private async Task OnSignedInAsync()
     {
+        EnsureRemindersHooked();
         IsSignedIn = true;
 
         await account.LoadAsync();
@@ -270,24 +307,43 @@ public partial class ShellViewModel(
         RebuildWeek();
         reminders.RefreshTargets();
 
-        // Subscribed before connecting, so the first transition is not missed.
-        realtime.ConnectionStateChanged += connected =>
-            Application.Current.Dispatcher.InvokeAsync(() => IsRealtimeConnected = connected);
-
         // This host holds a user credential, not a device one, so recovering
         // means re-reading what the window shows — never claiming commands,
         // which is a device's job and would be refused.
-        realtime.RecoverState = async _ =>
+        realtime.RecoverState = _ => UiDispatcher.RunAsync(async () =>
         {
             await devices.LoadAsync();
             await reminders.LoadAsync();
-            await Application.Current.Dispatcher.InvokeAsync(async () =>
-            {
-                await ResolveThisPcAsync();
-                RebuildWeek();
-                reminders.RefreshTargets();
-            }).Task;
-        };
+            await ResolveThisPcAsync();
+            RebuildWeek();
+            reminders.RefreshTargets();
+        });
+
+        if (!_isRealtimeSubscribed)
+        {
+            _isRealtimeSubscribed = true;
+
+            // Subscribed before connecting, so the first transition is not missed.
+            realtime.ConnectionStateChanged += connected =>
+                UiDispatcher.Run(() => IsRealtimeConnected = connected);
+
+            realtime.DevicePresenceChanged += presence =>
+                UiDispatcher.RunAsync(() =>
+                {
+                    devices.ApplyPresence(presence);
+                    reminders.ApplyPresence(presence);
+                });
+
+            realtime.CommandStatusChanged += status =>
+                UiDispatcher.RunAsync(() =>
+                {
+                    devices.ApplyCommandStatus(status);
+                    RefreshLastCommand();
+                });
+
+            realtime.ReminderChanged += change =>
+                UiDispatcher.RunAsync(() => reminders.ApplyReminderChangedAsync(change));
+        }
 
         try
         {
@@ -299,27 +355,6 @@ public partial class ShellViewModel(
             // Not fatal: everything the window shows also works over HTTP.
             logger.LogWarning(ex, "Realtime connection failed; the companion will still work over HTTP");
         }
-
-        realtime.DevicePresenceChanged += presence =>
-            Application.Current.Dispatcher.InvokeAsync(() =>
-            {
-                devices.ApplyPresence(presence);
-                reminders.ApplyPresence(presence);
-            }).Task;
-
-        realtime.CommandStatusChanged += status =>
-            Application.Current.Dispatcher.InvokeAsync(() =>
-            {
-                devices.ApplyCommandStatus(status);
-                RefreshLastCommand();
-            }).Task;
-
-        realtime.ReminderChanged += _ =>
-            Application.Current.Dispatcher.InvokeAsync(async () =>
-            {
-                await reminders.LoadAsync();
-                RebuildWeek();
-            }).Task;
 
         RefreshLastCommand();
     }
@@ -446,41 +481,74 @@ public partial class ShellViewModel(
         var monday = today.AddDays(-daysFromMonday);
         var total = 0;
 
+        var deviceLookup = reminders.BuildDeviceLookup();
+        var projected = new List<(
+            ReminderResponse Reminder,
+            DateTimeOffset Local,
+            DateOnly StartDate,
+            string FormattedTime,
+            string RecurrenceText,
+            string TargetText,
+            bool IsSnoozed,
+            string? SnoozeLabel,
+            bool IsDismissed)>(reminders.Items.Count);
+
+        foreach (var r in reminders.Items)
+        {
+            var local = r.DueAt.ToLocalTime();
+            ReminderSnoozeInfo? sInfo = null;
+            var isSnoozed = snoozeService is not null && snoozeService.IsSnoozed(r.Id, out sInfo);
+            var isDismissed = snoozeService is not null && snoozeService.IsDismissed(r.Id);
+
+            projected.Add((
+                Reminder: r,
+                Local: local,
+                StartDate: DateOnly.FromDateTime(local.Date),
+                FormattedTime: TimeFormatting.FormatTime(local, settings.Use24HourClock),
+                RecurrenceText: !string.IsNullOrEmpty(r.Rrule)
+                    ? Recurrence.Describe(r.Rrule, local, settings.Use24HourClock)
+                    : string.Empty,
+                TargetText: reminders.DescribeTargets(r.DeviceIds, deviceLookup),
+                IsSnoozed: isSnoozed,
+                SnoozeLabel: isSnoozed && sInfo is not null ? $"Snoozed for {sInfo.FormattedDuration}" : null,
+                IsDismissed: isDismissed));
+        }
+
+        projected.Sort((a, b) => a.Local.TimeOfDay.CompareTo(b.Local.TimeOfDay));
+
         for (var offset = 0; offset < 7; offset++)
         {
             var day = monday.AddDays(offset);
             var isToday = day == today;
+            var shortDay = day.ToString("ddd", CultureInfo.CurrentCulture);
+            var fullDate = day.ToString("dddd d MMMM yyyy", CultureInfo.CurrentCulture);
+            var items = new List<WeekItem>();
 
-            var items = reminders.Items
-                .Where(r => Recurrence.OccursOn(r.Rrule, DateOnly.FromDateTime(r.DueAt.ToLocalTime().Date), day))
-                .OrderBy(r => r.DueAt.ToLocalTime().TimeOfDay)
-                .Select(r =>
+            foreach (var entry in projected)
+            {
+                if (!Recurrence.OccursOn(entry.Reminder.Rrule, entry.StartDate, day))
                 {
-                    var local = r.DueAt.ToLocalTime();
-                    ReminderSnoozeInfo? sInfo = null;
-                    var isSnoozed = snoozeService is not null && snoozeService.IsSnoozed(r.Id, out sInfo);
-                    var isDismissed = snoozeService is not null && snoozeService.IsDismissed(r.Id);
-                    var snoozeLabel = isSnoozed && sInfo is not null ? $"Snoozed for {sInfo.FormattedDuration}" : null;
+                    continue;
+                }
 
-                    return new WeekItem(
-                        Time: TimeFormatting.FormatTime(local, settings.Use24HourClock),
-                        Body: r.Body,
-                        Id: r.Id,
-                        DayLabel: day.ToString("ddd", CultureInfo.CurrentCulture),
-                        FullDate: day.ToString("dddd d MMMM yyyy", CultureInfo.CurrentCulture),
-                        RecurrenceText: Recurrence.Describe(r.Rrule),
-                        TargetText: reminders.DescribeTargets(r.DeviceIds),
-                        IsCompleted: r.IsCompleted,
-                        IsSnoozed: isSnoozed,
-                        SnoozeLabel: snoozeLabel,
-                        IsDismissed: isDismissed);
-                })
-                .ToList();
+                items.Add(new WeekItem(
+                    Time: entry.FormattedTime,
+                    Body: entry.Reminder.Body,
+                    Id: entry.Reminder.Id,
+                    DayLabel: shortDay,
+                    FullDate: fullDate,
+                    RecurrenceText: entry.RecurrenceText,
+                    TargetText: entry.TargetText,
+                    IsCompleted: entry.Reminder.IsCompleted,
+                    IsSnoozed: entry.IsSnoozed,
+                    SnoozeLabel: entry.SnoozeLabel,
+                    IsDismissed: entry.IsDismissed));
+            }
 
             total += items.Count;
 
             Week.Add(new DayColumn(
-                Label: isToday ? "Today" : day.ToString("ddd", CultureInfo.CurrentCulture),
+                Label: isToday ? "Today" : shortDay,
                 Number: day.ToString("d MMM", CultureInfo.CurrentCulture),
                 IsToday: isToday,
                 Items: items));
@@ -502,127 +570,389 @@ public partial class ShellViewModel(
     [RelayCommand]
     public void ShowEventDetail(object? item)
     {
-        if (item is WeekItem wi)
+        switch (item)
         {
-            var isCompleted = wi.IsCompleted;
-            var isSnoozed = wi.IsSnoozed;
-            var isDismissed = wi.IsDismissed;
+            case WeekItem wi:
+            {
+                var isRecurring = !string.IsNullOrWhiteSpace(wi.RecurrenceText);
+                var reminder = isRecurring ? reminders.Items.FirstOrDefault(r => r.Id == wi.Id) : null;
+                var recurrence = isRecurring ? (wi.RecurrenceText ?? "Does not repeat") : "Does not repeat";
 
-            string statusText;
-            string statusTone;
-            if (isCompleted)
-            {
-                statusText = "Completed";
-                statusTone = "Online";
+                OpenEventDetail(
+                    id: wi.Id,
+                    title: wi.Body,
+                    timeAndDate: isRecurring ? (wi.RecurrenceText ?? string.Empty) : $"{wi.FullDate} · {wi.Time}",
+                    recurrence: recurrence,
+                    targets: string.IsNullOrWhiteSpace(wi.TargetText) ? "All PCs" : wi.TargetText,
+                    isCompleted: wi.IsCompleted,
+                    isSnoozed: wi.IsSnoozed,
+                    snoozeLabel: wi.SnoozeLabel,
+                    isDismissed: wi.IsDismissed,
+                    isRecurring: isRecurring,
+                    reminder: reminder);
+                break;
             }
-            else if (isSnoozed)
+            case ReminderRow rr:
             {
-                statusText = wi.SnoozeLabel ?? "Snoozed";
-                statusTone = "Warn";
-            }
-            else if (isDismissed)
-            {
-                statusText = "Won't rerun";
-                statusTone = "Danger";
-            }
-            else
-            {
-                statusText = "Scheduled";
-                statusTone = "Offline";
-            }
+                var reminder = reminders.Items.FirstOrDefault(r => r.Id == rr.Id);
+                var isRecurring = !string.IsNullOrEmpty(reminder?.Rrule) || rr.IsRecurring;
+                var recurrenceDesc = isRecurring && reminder is not null
+                    ? Recurrence.Describe(reminder.Rrule, reminder.DueAt.ToLocalTime(), settings.Use24HourClock)
+                    : (reminder is not null ? Recurrence.Describe(reminder.Rrule) : "Does not repeat");
+                var fullDate = reminder is not null
+                    ? reminder.DueAt.ToLocalTime().ToString("dddd d MMMM yyyy", CultureInfo.CurrentCulture)
+                    : rr.DayLabel;
 
-            ActiveEventDetail = new EventDetailModalViewModel
-            {
-                Id = wi.Id,
-                Title = wi.Body,
-                TimeAndDate = $"{wi.FullDate} · {wi.Time}",
-                Recurrence = string.IsNullOrWhiteSpace(wi.RecurrenceText) ? "Does not repeat" : wi.RecurrenceText,
-                Targets = string.IsNullOrWhiteSpace(wi.TargetText) ? "All PCs" : wi.TargetText,
-                StatusText = statusText,
-                StatusTone = statusTone,
-                IsCompleted = isCompleted,
-                IsSnoozed = isSnoozed,
-                IsDismissed = isDismissed,
-            };
-
-            IsEventDetailOpen = true;
-            EventDetailOpenRequested?.Invoke();
+                OpenEventDetail(
+                    id: rr.Id,
+                    title: rr.Body,
+                    timeAndDate: isRecurring ? recurrenceDesc : $"{fullDate} · {rr.Time}",
+                    recurrence: recurrenceDesc,
+                    targets: reminder is not null ? reminders.DescribeTargets(reminder.DeviceIds) : "All PCs",
+                    isCompleted: rr.IsCompleted,
+                    isSnoozed: rr.IsSnoozed,
+                    snoozeLabel: rr.SnoozeLabel,
+                    isDismissed: rr.IsDismissed,
+                    isRecurring: isRecurring,
+                    reminder: reminder);
+                break;
+            }
         }
-        else if (item is ReminderRow rr)
+    }
+
+    private void OpenEventDetail(
+        string id,
+        string title,
+        string timeAndDate,
+        string recurrence,
+        string targets,
+        bool isCompleted,
+        bool isSnoozed,
+        string? snoozeLabel,
+        bool isDismissed,
+        bool isRecurring,
+        ReminderResponse? reminder)
+    {
+        var (statusText, statusTone) = DescribeEventStatus(isCompleted, isSnoozed, snoozeLabel, isDismissed);
+        ActiveEventDetail = new EventDetailModalViewModel
         {
-            var reminder = reminders.Items.FirstOrDefault(r => r.Id == rr.Id);
-            string statusText;
-            string statusTone;
-            if (rr.IsCompleted)
+            Id = id,
+            Title = title,
+            TimeAndDate = timeAndDate,
+            Recurrence = recurrence,
+            Targets = targets,
+            StatusText = statusText,
+            StatusTone = statusTone,
+            IsCompleted = isCompleted,
+            IsSnoozed = isSnoozed,
+            IsDismissed = isDismissed,
+            IsRecurring = isRecurring,
+        };
+
+        if (isRecurring)
+        {
+            _ = LoadOccurrencesForActiveDetailAsync(ActiveEventDetail, id, reminder?.Rrule, reminder?.DueAt, title, reminder?.RecurrenceUntil);
+        }
+
+        IsEventDetailOpen = true;
+        EventDetailOpenRequested?.Invoke();
+    }
+
+    private static (string Text, string Tone) DescribeEventStatus(
+        bool isCompleted,
+        bool isSnoozed,
+        string? snoozeLabel,
+        bool isDismissed) =>
+        isCompleted ? ("Completed", "Online")
+        : isSnoozed ? (snoozeLabel ?? "Snoozed", "Warn")
+        : isDismissed ? ("Won't rerun", "Danger")
+        : ("Scheduled", "Offline");
+
+    private async Task LoadOccurrencesForActiveDetailAsync(
+        EventDetailModalViewModel detail,
+        string reminderId,
+        string? rrule,
+        DateTimeOffset? dueAt,
+        string body,
+        DateTimeOffset? recurrenceUntil)
+    {
+        OccurrenceItemViewModel CreateOccurrenceItem(
+            DateTimeOffset occursAt,
+            string effectiveBody,
+            string? customBody,
+            string status)
+        {
+            var localTime = occursAt.ToLocalTime();
+            var timeStr = TimeFormatting.FormatTime(localTime.DateTime, settings.Use24HourClock);
+            return new OccurrenceItemViewModel
             {
-                statusText = "Completed";
-                statusTone = "Online";
+                ReminderId = reminderId,
+                OccursAt = occursAt,
+                SeriesBody = body,
+                Body = effectiveBody,
+                CustomBody = customBody,
+                Status = status,
+                DateLabel = $"{localTime.ToString("ddd d MMM", CultureInfo.CurrentCulture)} · {timeStr}",
+                EditText = effectiveBody,
+            };
+        }
+
+        detail.IsLoadingOccurrences = true;
+        detail.Occurrences.Clear();
+
+        try
+        {
+            var serverOccurrences = await api.GetReminderOccurrencesAsync(reminderId);
+            if (serverOccurrences is not null && serverOccurrences.Count > 0)
+            {
+                foreach (var occ in serverOccurrences)
+                {
+                    detail.Occurrences.Add(CreateOccurrenceItem(occ.OccursAt, occ.EffectiveBody, occ.CustomBody, occ.Status));
+                }
+                detail.IsLoadingOccurrences = false;
+                return;
             }
-            else if (rr.IsSnoozed)
+        }
+        catch (Exception ex)
+        {
+            logger.LogDebug(ex, "Could not fetch occurrences from API for {ReminderId}, generating locally", reminderId);
+        }
+
+        // Local fallback expansion if offline or no server response
+        if (!string.IsNullOrEmpty(rrule) && dueAt.HasValue)
+        {
+            var localDue = dueAt.Value.ToLocalTime();
+            var startDate = DateOnly.FromDateTime(localDue.Date);
+            var today = DateOnly.FromDateTime(DateTime.Today);
+            var targetCount = Recurrence.TargetOccurrenceCount(rrule);
+
+            var maxYears = rrule.Contains("FREQ=YEARLY", StringComparison.OrdinalIgnoreCase) ? 6 : 2;
+            var maxDays = rrule.Contains("FREQ=HOURLY", StringComparison.OrdinalIgnoreCase) ? 3 : (maxYears * 365);
+            var fromDate = startDate > today ? startDate : today;
+            var horizon = today.AddDays(maxDays);
+            var untilDate = recurrenceUntil.HasValue ? DateOnly.FromDateTime(recurrenceUntil.Value.ToLocalTime().Date) : horizon;
+            var toDate = untilDate < horizon ? untilDate : horizon;
+
+            var timeOfDay = TimeOnly.FromTimeSpan(localDue.TimeOfDay);
+            var isHourly = rrule.Contains("FREQ=HOURLY", StringComparison.OrdinalIgnoreCase);
+
+            if (isHourly)
             {
-                statusText = rr.SnoozeLabel ?? "Snoozed";
-                statusTone = "Warn";
-            }
-            else if (rr.IsDismissed)
-            {
-                statusText = "Won't rerun";
-                statusTone = "Danger";
+                var curDt = DateTime.Now;
+                if (curDt < localDue.DateTime) curDt = localDue.DateTime;
+                var count = 0;
+                while (count < targetCount && count < 50)
+                {
+                    var dto = new DateTimeOffset(DateTime.SpecifyKind(curDt, DateTimeKind.Local));
+                    detail.Occurrences.Add(CreateOccurrenceItem(dto, body, null, "pending"));
+                    count++;
+                    curDt = curDt.AddHours(1);
+                }
             }
             else
             {
-                statusText = "Scheduled";
-                statusTone = "Offline";
+                var cur = fromDate;
+                var count = 0;
+                while (cur <= toDate && count < targetCount)
+                {
+                    if (Recurrence.OccursOn(rrule, startDate, cur))
+                    {
+                        var dto = new DateTimeOffset(DateTime.SpecifyKind(cur.ToDateTime(timeOfDay), DateTimeKind.Local));
+                        detail.Occurrences.Add(CreateOccurrenceItem(dto, body, null, "pending"));
+                        count++;
+                    }
+                    cur = cur.AddDays(1);
+                }
             }
+        }
 
-            var fullDate = reminder is not null
-                ? reminder.DueAt.ToLocalTime().ToString("dddd d MMMM yyyy", CultureInfo.CurrentCulture)
-                : rr.DayLabel;
+        detail.IsLoadingOccurrences = false;
+    }
 
-            ActiveEventDetail = new EventDetailModalViewModel
+    [RelayCommand]
+    public async Task ToggleOccurrenceCompleteAsync(OccurrenceItemViewModel? item)
+    {
+        if (item is null) return;
+        var nextStatus = item.IsCompleted ? "pending" : "completed";
+        item.Status = nextStatus;
+
+        try
+        {
+            await api.UpdateReminderOccurrenceAsync(item.ReminderId,
+                new UpdateReminderOccurrenceRequest(item.OccursAt, Status: nextStatus));
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to toggle occurrence complete for {ReminderId}", item.ReminderId);
+        }
+    }
+
+    [RelayCommand]
+    public void StartEditOccurrence(OccurrenceItemViewModel? item)
+    {
+        if (item is null) return;
+        item.EditText = item.Body;
+        item.IsEditing = true;
+    }
+
+    [RelayCommand]
+    public async Task SaveEditOccurrenceAsync(OccurrenceItemViewModel? item)
+    {
+        if (item is null) return;
+        var newText = item.EditText.Trim();
+        if (string.IsNullOrEmpty(newText)) return;
+
+        var previousBody = item.Body;
+        var previousCustomBody = item.CustomBody;
+        if (string.Equals(newText, previousBody, StringComparison.Ordinal))
+        {
+            item.IsEditing = false;
+            return;
+        }
+
+        EnsureRemindersHooked();
+        item.Body = newText;
+        item.CustomBody = newText;
+        item.IsEditing = false;
+
+        try
+        {
+            await api.UpdateReminderOccurrenceAsync(item.ReminderId,
+                new UpdateReminderOccurrenceRequest(item.OccursAt, CustomBody: newText));
+            reminders.ShowStatus("Occurrence updated.", false, async () =>
             {
-                Id = rr.Id,
-                Title = rr.Body,
-                TimeAndDate = $"{fullDate} · {rr.Time}",
-                Recurrence = reminder is not null ? Recurrence.Describe(reminder.Rrule) : "Does not repeat",
-                Targets = reminder is not null ? reminders.DescribeTargets(reminder.DeviceIds) : "All PCs",
-                StatusText = statusText,
-                StatusTone = statusTone,
-                IsCompleted = rr.IsCompleted,
-                IsSnoozed = rr.IsSnoozed,
-                IsDismissed = rr.IsDismissed,
-            };
+                var reverted = await api.UpdateReminderOccurrenceAsync(
+                    item.ReminderId,
+                    new UpdateReminderOccurrenceRequest(
+                        item.OccursAt,
+                        CustomBody: previousCustomBody,
+                        ClearCustomBody: previousCustomBody is null));
+                item.CustomBody = reverted?.CustomBody ?? previousCustomBody;
+                item.Body = reverted?.EffectiveBody ?? previousBody;
+                item.EditText = item.Body;
+                reminders.ShowStatus("Changes undone.", false);
+            });
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to save occurrence text for {ReminderId}", item.ReminderId);
+        }
+    }
 
-            IsEventDetailOpen = true;
-            EventDetailOpenRequested?.Invoke();
+    [RelayCommand]
+    public async Task ResetOccurrenceTextAsync(OccurrenceItemViewModel? item)
+    {
+        if (item is null || !item.HasCustomText) return;
+        var previousCustomBody = item.CustomBody;
+        var previousBody = item.Body;
+
+        EnsureRemindersHooked();
+        item.CustomBody = null;
+        if (!string.IsNullOrEmpty(item.SeriesBody))
+        {
+            item.Body = item.SeriesBody;
+            item.EditText = item.SeriesBody;
+        }
+        item.IsEditing = false;
+
+        try
+        {
+            var reset = await api.UpdateReminderOccurrenceAsync(item.ReminderId,
+                new UpdateReminderOccurrenceRequest(item.OccursAt, ClearCustomBody: true));
+            if (reset is not null)
+            {
+                item.Body = reset.EffectiveBody;
+                item.EditText = reset.EffectiveBody;
+            }
+            reminders.ShowStatus("Occurrence reset to series text.", false, async () =>
+            {
+                var reverted = await api.UpdateReminderOccurrenceAsync(
+                    item.ReminderId,
+                    new UpdateReminderOccurrenceRequest(item.OccursAt, CustomBody: previousCustomBody));
+                item.CustomBody = reverted?.CustomBody ?? previousCustomBody;
+                item.Body = reverted?.EffectiveBody ?? previousBody;
+                item.EditText = item.Body;
+                reminders.ShowStatus("Changes undone.", false);
+            });
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to reset occurrence text for {ReminderId}", item.ReminderId);
+        }
+    }
+
+    [RelayCommand]
+    public void CancelEditOccurrence(OccurrenceItemViewModel? item)
+    {
+        if (item is null) return;
+        item.IsEditing = false;
+    }
+
+    [RelayCommand]
+    public async Task StopOccurrenceAsync(OccurrenceItemViewModel? item)
+    {
+        if (item is null) return;
+        var previousStatus = item.Status;
+        EnsureRemindersHooked();
+        item.Status = "skipped";
+
+        try
+        {
+            await api.DeleteReminderOccurrenceAsync(item.ReminderId, item.OccursAt);
+            reminders.ShowStatus("Occurrence stopped.", false, async () =>
+            {
+                var restoreStatus = string.Equals(previousStatus, "skipped", StringComparison.OrdinalIgnoreCase)
+                    ? "pending"
+                    : previousStatus;
+                var restored = await api.UpdateReminderOccurrenceAsync(
+                    item.ReminderId,
+                    new UpdateReminderOccurrenceRequest(item.OccursAt, Status: restoreStatus));
+                item.Status = restored?.Status ?? restoreStatus;
+                reminders.ShowStatus("Occurrence restored.", false);
+            });
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to stop occurrence for {ReminderId}", item.ReminderId);
+        }
+    }
+
+    [RelayCommand]
+    public async Task RestoreOccurrenceAsync(OccurrenceItemViewModel? item)
+    {
+        if (item is null) return;
+        item.Status = "pending";
+
+        try
+        {
+            await api.UpdateReminderOccurrenceAsync(item.ReminderId,
+                new UpdateReminderOccurrenceRequest(item.OccursAt, Status: "pending"));
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to restore occurrence for {ReminderId}", item.ReminderId);
         }
     }
 
     [RelayCommand]
     public void CloseEventDetail()
     {
-        EventDetailCloseRequested?.Invoke();
+        if (EventDetailCloseRequested is not null)
+        {
+            EventDetailCloseRequested.Invoke();
+        }
+        else
+        {
+            IsEventDetailOpen = false;
+        }
     }
 
     [RelayCommand]
     public async Task ToggleActiveEventCompleteAsync()
     {
         if (ActiveEventDetail is null || string.IsNullOrEmpty(ActiveEventDetail.Id)) return;
-        var row = reminders.Rows.FirstOrDefault(r => r.Id == ActiveEventDetail.Id);
-        if (row is not null)
-        {
-            await reminders.CompleteCommand.ExecuteAsync(row);
-        }
-        else
-        {
-            var reminder = reminders.Items.FirstOrDefault(r => r.Id == ActiveEventDetail.Id);
-            if (reminder is not null)
-            {
-                await api.CompleteReminderAsync(reminder.Id, !reminder.IsCompleted);
-                await reminders.LoadAsync();
-            }
-        }
-
-        RebuildWeek();
+        EnsureRemindersHooked();
+        await reminders.CompleteCommand.ExecuteAsync(ActiveEventDetail.Id);
         CloseEventDetail();
     }
 
@@ -642,18 +972,8 @@ public partial class ShellViewModel(
     public async Task DeleteActiveEventAsync()
     {
         if (ActiveEventDetail is null || string.IsNullOrEmpty(ActiveEventDetail.Id)) return;
-        var row = reminders.Rows.FirstOrDefault(r => r.Id == ActiveEventDetail.Id);
-        if (row is not null)
-        {
-            await reminders.DeleteCommand.ExecuteAsync(row);
-        }
-        else
-        {
-            await api.DeleteReminderAsync(ActiveEventDetail.Id);
-            await reminders.LoadAsync();
-        }
-
-        RebuildWeek();
+        EnsureRemindersHooked();
+        await reminders.DeleteCommand.ExecuteAsync(ActiveEventDetail.Id);
         CloseEventDetail();
     }
 
@@ -1021,7 +1341,7 @@ public partial class DeviceItem(DeviceResponse device) : ObservableObject
     public string LastSeenDescription => IsOnline
         ? "Online"
         : LastSeenAt is { } seen
-            ? $"Seen {ShellViewModel.DescribeMoment(seen)}"
+            ? $"Last seen {ShellViewModel.DescribeMoment(seen)}"
             : "Never seen";
 
     /// <summary>"Online · Windows 11" — the line under a PC's name.</summary>

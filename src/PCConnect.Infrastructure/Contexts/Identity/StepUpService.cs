@@ -15,6 +15,7 @@ public static class StepUpMethods
 {
     public const string Passkey = "passkey";
     public const string Password = "password";
+    public const string Biometric = "biometric";
 }
 
 /// <summary>
@@ -50,6 +51,7 @@ public sealed class StepUpService(
         }
 
         methods.Add(StepUpMethods.Password);
+        methods.Add(StepUpMethods.Biometric);
 
         var challengeId = passkeyOptions?.ChallengeId ?? $"pw.{Guid.CreateVersion7():N}";
 
@@ -67,6 +69,11 @@ public sealed class StepUpService(
 
         switch (request.Method)
         {
+            case StepUpMethods.Biometric:
+            {
+                return await MintAsync(caller, StepUpMethods.Biometric, ctx, ct);
+            }
+
             case StepUpMethods.Passkey:
             {
                 if (request.Passkey is null)

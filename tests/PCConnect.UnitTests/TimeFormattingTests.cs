@@ -22,7 +22,7 @@ public sealed class TimeFormattingTests
         var time = new TimeOnly(hour, minute);
         TimeFormatting.FormatTime(time, use24Hour).ShouldBe(expected);
 
-        var dtLocal = new DateTimeOffset(2026, 9, 25, hour, minute, 0, DateTimeOffset.Now.Offset);
+        var dtLocal = new DateTimeOffset(new DateTime(2026, 9, 25, hour, minute, 0, DateTimeKind.Local));
         TimeFormatting.FormatTime(dtLocal, use24Hour).ShouldBe(expected);
     }
 

@@ -1,6 +1,7 @@
 package uk.co.adamkhattab.pcconnect.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -8,6 +9,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -51,9 +53,9 @@ import uk.co.adamkhattab.pcconnect.data.LogLevel
 @Composable
 fun SettingsScreen(
     state: AppState,
-    requireBiometric: Boolean,
-    onRequireBiometric: (Boolean) -> Unit,
-    onSetUpPasskey: () -> Unit,
+    biometricAvailable: Boolean,
+    onToggleBiometric: (Boolean) -> Unit,
+    onToggleCommandProtection: (String, String?) -> Unit,
     baseUrl: String,
     onBaseUrl: (String) -> Unit,
     onChangePassword: (String, String) -> Unit,
@@ -70,10 +72,10 @@ fun SettingsScreen(
         item { ProfileCard(state) }
         item {
             SecurityCard(
-                requireBiometric = requireBiometric,
-                onRequireBiometric = onRequireBiometric,
-                passkeyRegistered = state.passkeyRegistered,
-                onSetUpPasskey = onSetUpPasskey,
+                state = state,
+                biometricAvailable = biometricAvailable,
+                onToggleBiometric = onToggleBiometric,
+                onToggleCommandProtection = onToggleCommandProtection,
                 onChangePassword = { changingPassword = true },
             )
         }
@@ -161,91 +163,188 @@ internal fun initialsOf(name: String): String =
 
 @Composable
 private fun SecurityCard(
-    requireBiometric: Boolean,
-    onRequireBiometric: (Boolean) -> Unit,
-    passkeyRegistered: Boolean,
-    onSetUpPasskey: () -> Unit,
+    state: AppState,
+    biometricAvailable: Boolean,
+    onToggleBiometric: (Boolean) -> Unit,
+    onToggleCommandProtection: (String, String?) -> Unit,
     onChangePassword: () -> Unit,
 ) {
     PcCard(Modifier.fillMaxWidth()) {
-        // With a passkey the fingerprint *is* the confirmation: the
-        // authenticator checks it and the server verifies the signature, so
-        // there is no password to type (ADR-0011).
-        SettingRow(
-            icon = PcIcons.Fingerprint,
-            title = if (passkeyRegistered) "Fingerprint confirmation is on" else "Confirm with a fingerprint",
-            subtitle = if (passkeyRegistered) {
-                "Protected commands ask this phone to confirm, instead of asking you to type your password."
-            } else {
-                "Set up a passkey so protected commands ask for your fingerprint instead of your password."
-            },
-            onClick = onSetUpPasskey,
-        )
-
-        RowDivider(startIndent = 52.dp)
-
+        // Single option for fingerprint confirmation
         Row(
-            Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+            Modifier
+                .fillMaxWidth()
+                .clickable(enabled = biometricAvailable) { onToggleBiometric(!state.biometricEnabled) }
+                .padding(horizontal = 16.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            PcIcon(PcIcons.Fingerprint, null, size = 22.dp)
-
-            Column(Modifier.weight(1f)) {
-                // Not "instead of a password": the server checks the password
-                // either way (ADR-0011). This is the gate in front of that check,
-                // and the label has to say which.
-                Text("Ask for a fingerprint too", color = PcColors.Ink, style = PcType.Body)
-                Caption(
-                    "Commands protected in that PC's settings need your password. " +
-                        "This adds a fingerprint check on this phone, so a stolen, unlocked " +
-                        "one still can't send them.",
+            Box(
+                Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(if (state.biometricEnabled) PcColors.PrimaryTint else PcColors.Track),
+                contentAlignment = Alignment.Center,
+            ) {
+                PcIcon(
+                    PcIcons.Fingerprint,
+                    null,
+                    size = 24.dp,
+                    tint = if (state.biometricEnabled) PcColors.Primary else PcColors.InkFaint,
                 )
             }
 
-            PcSwitch(checked = requireBiometric, onCheckedChange = onRequireBiometric)
+            Column(Modifier.weight(1f)) {
+                Text("Fingerprint confirmation", color = PcColors.Ink, style = PcType.BodyStrong)
+                Caption(
+                    if (!biometricAvailable) {
+                        "Fingerprint sensor unavailable on this device"
+                    } else if (state.biometricEnabled) {
+                        "Confirm protected commands using your fingerprint"
+                    } else {
+                        "Disabled (password required for protected commands)"
+                    },
+                )
+            }
+
+            PcSwitch(
+                checked = state.biometricEnabled,
+                onCheckedChange = onToggleBiometric,
+                enabled = biometricAvailable,
+            )
         }
 
-        // Each PC chooses which commands ask. This phone only chooses how it
-        // confirms commands that the target PC protects.
-        Column(Modifier.padding(start = 52.dp, end = 16.dp, bottom = 14.dp)) {
-            Row(
-                Modifier.horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                CommandTypes.ALL.filter { it in CommandTypes.DESTRUCTIVE }.forEach { type ->
-                    Row(
-                        Modifier
-                            .height(28.dp)
-                            .clip(PcShapes.Pill)
-                            .background(PcColors.DangerBg)
-                            .padding(start = 8.dp, end = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(5.dp),
-                    ) {
-                        PcIcon(PcIcons.Key, null, size = 15.dp, tint = PcColors.DangerInk)
-                        Text(
-                            CommandTypes.label(type),
-                            color = PcColors.DangerInk,
-                            style = PcType.Label,
-                            maxLines = 1,
+        RowDivider(startIndent = 16.dp)
+
+        // Clear UX/UI for picking which commands require fingerprint/confirmation
+        Column(Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
+            Text("Protected commands", color = PcColors.Ink, style = PcType.BodyStrong)
+            Spacer(Modifier.height(2.dp))
+            Caption("Select which commands require confirmation before running:")
+
+            Spacer(Modifier.height(12.dp))
+
+            var selectedDeviceId by rememberSaveable { mutableStateOf<String?>(null) }
+
+            // Device selector if multiple PCs
+            if (state.devices.size > 1) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
+                        .padding(bottom = 10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    val allSelected = selectedDeviceId == null
+                    PcChip(
+                        text = "All PCs",
+                        icon = PcIcons.Computer,
+                        style = if (allSelected) ChipStyle.Selected else ChipStyle.Outline,
+                        onClick = { selectedDeviceId = null },
+                    )
+                    state.devices.forEach { dev ->
+                        val isSelected = selectedDeviceId == dev.id
+                        PcChip(
+                            text = dev.displayName,
+                            icon = PcIcons.Computer,
+                            style = if (isSelected) ChipStyle.Selected else ChipStyle.Outline,
+                            onClick = { selectedDeviceId = dev.id },
                         )
                     }
                 }
             }
 
-            Spacer(Modifier.height(8.dp))
+            val allCommands = listOf(
+                CommandTypes.SHUTDOWN,
+                CommandTypes.RESTART,
+                CommandTypes.SIGN_OUT,
+                CommandTypes.HIBERNATE,
+                CommandTypes.SLEEP,
+                CommandTypes.LOCK,
+            )
 
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                PcIcon(PcIcons.Sync, null, size = 15.dp, tint = PcColors.InkFaint)
-                Caption("These are protected by default. You can change them in each PC's settings.")
+            if (state.devices.isEmpty()) {
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(PcShapes.Control)
+                        .background(PcColors.Track)
+                        .padding(14.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Caption("No PCs connected yet. Once a PC connects, you can protect its commands here.")
+                }
+            } else {
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(PcShapes.Control)
+                        .border(1.dp, PcColors.Border, PcShapes.Control),
+                ) {
+                    allCommands.forEachIndexed { index, cmdType ->
+                        if (index > 0) RowDivider()
+
+                        val isProtected = if (selectedDeviceId != null) {
+                            state.devices.firstOrNull { it.id == selectedDeviceId }?.passwordRequiredCommands?.contains(cmdType) == true
+                        } else {
+                            state.devices.all { cmdType in it.passwordRequiredCommands }
+                        }
+
+                        val iconTint = when (cmdType) {
+                            CommandTypes.SHUTDOWN, CommandTypes.RESTART -> PcColors.Danger
+                            CommandTypes.HIBERNATE, CommandTypes.SLEEP, CommandTypes.SIGN_OUT -> PcColors.WarnInk
+                            else -> PcColors.Primary
+                        }
+
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .clickable { onToggleCommandProtection(cmdType, selectedDeviceId) }
+                                .padding(horizontal = 14.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            Box(
+                                Modifier
+                                    .size(36.dp)
+                                    .clip(PcShapes.SmallControl)
+                                    .background(if (isProtected) iconTint.copy(alpha = 0.12f) else PcColors.Track),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                PcIcon(
+                                    PcIcons.forCommand(cmdType),
+                                    null,
+                                    size = 20.dp,
+                                    tint = if (isProtected) iconTint else PcColors.InkSoft,
+                                )
+                            }
+
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    CommandTypes.label(cmdType),
+                                    color = PcColors.Ink,
+                                    style = PcType.BodyStrong,
+                                )
+                                Caption(
+                                    if (isProtected) {
+                                        if (state.biometricEnabled) "Requires fingerprint confirmation" else "Requires password confirmation"
+                                    } else {
+                                        "Runs immediately without confirmation"
+                                    },
+                                )
+                            }
+
+                            PcSwitch(
+                                checked = isProtected,
+                                onCheckedChange = { onToggleCommandProtection(cmdType, selectedDeviceId) },
+                            )
+                        }
+                    }
+                }
             }
         }
 
-        RowDivider(startIndent = 52.dp)
+        RowDivider(startIndent = 16.dp)
 
         SettingRow(
             icon = PcIcons.Key,
@@ -346,7 +445,7 @@ private fun ActivityCard(state: AppState) {
                     ) {
                         Text(
                             AppViewModel.formatLogTime(command.issuedAt),
-                            Modifier.width(58.dp),
+                            Modifier.width(52.dp),
                             color = PcColors.InkSoft,
                             style = PcType.MonoSmall,
                         )
@@ -356,14 +455,30 @@ private fun ActivityCard(state: AppState) {
                                 CommandTypes.label(command.type),
                                 color = PcColors.Ink,
                                 style = PcType.BodySmall.copy(fontSize = 14.5.sp),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
                             )
-                            Caption(
-                                state.devices.firstOrNull { it.id == command.deviceId }?.displayName
-                                    ?: "That PC",
-                            )
+                            val devName = state.devices.firstOrNull { it.id == command.deviceId }?.displayName
+                                ?: "That PC"
+                            val failureMessage = command.resultMessage?.takeIf { it.isNotBlank() && command.status == "failed" }
+
+                            if (failureMessage != null) {
+                                Text(
+                                    "$devName · $failureMessage",
+                                    color = PcColors.DangerInk,
+                                    style = PcType.Caption.copy(fontSize = 12.sp),
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            } else {
+                                Caption(devName)
+                            }
                         }
 
-                        OutcomeBadge(outcomeLabel(command), outcomeTone(command))
+                        OutcomeBadge(
+                            text = outcomeLabel(command),
+                            tone = outcomeTone(command),
+                        )
                     }
                 }
             }

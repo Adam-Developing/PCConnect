@@ -1,5 +1,6 @@
 package uk.co.adamkhattab.pcconnect.ui
 
+import android.text.format.DateFormat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -23,6 +24,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.style.TextOverflow
@@ -129,7 +131,11 @@ private fun DetailTopBar(device: Device, onBack: () -> Unit, onEdit: () -> Unit)
                 Dot(if (device.isOnline) PcColors.OnlineDot else PcColors.OfflineDot)
                 Text(
                     buildString {
-                        append(if (device.isOnline) "Online" else "Offline")
+                        if (device.isOnline) {
+                            append("Online")
+                        } else {
+                            append(device.lastSeenAt?.let { "Last seen ${AppViewModel.formatLogTime(it)}" } ?: "Offline")
+                        }
                         if (device.osVersion.isNotBlank()) append(" · ").append(device.osVersion)
                     },
                     color = if (device.isOnline) PcColors.OnlineInk else PcColors.InkSoft,
@@ -152,13 +158,13 @@ private fun ControlsSection(device: Device, onCommand: (String) -> Unit) {
         // LazyColumn needs a fixed height, and six tiles do not need lazy
         // layout at all.
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            CommandTypes.ALL.chunked(2).forEach { pair ->
+            CommandTypes.ALL.filter { device.allowedCommands.isEmpty() || it in device.allowedCommands }.chunked(2).forEach { pair ->
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     pair.forEach { type ->
                         CommandTile(
                             type = type,
-                            enabled = device.isOnline &&
-                                (device.allowedCommands.isEmpty() || type in device.allowedCommands),
+                            isProtected = type in device.passwordRequiredCommands,
+                            enabled = device.isOnline,
                             onClick = { onCommand(type) },
                             modifier = Modifier.weight(1f),
                         )
@@ -176,7 +182,7 @@ private fun ControlsSection(device: Device, onCommand: (String) -> Unit) {
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             PcIcon(PcIcons.Key, null, size = 15.dp, tint = PcColors.InkFaint)
-            Caption("Asks for your password before it's sent")
+            Caption("Asks for confirmation before sending")
         }
     }
 }
@@ -184,6 +190,7 @@ private fun ControlsSection(device: Device, onCommand: (String) -> Unit) {
 @Composable
 private fun CommandTile(
     type: String,
+    isProtected: Boolean,
     enabled: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
@@ -199,9 +206,8 @@ private fun CommandTile(
                     size = 24.dp,
                     tint = if (destructive) PcColors.Danger else PcColors.Ink,
                 )
-                // The key says the command will stop and ask, before it is
-                // pressed rather than after.
-                if (destructive) PcIcon(PcIcons.Key, null, size = 16.dp, tint = PcColors.InkFaint)
+                // The key indicates this command requires confirmation
+                if (isProtected) PcIcon(PcIcons.Key, null, size = 16.dp, tint = PcColors.InkFaint)
             }
 
             Text(
@@ -261,6 +267,17 @@ private fun RemindersSection(reminders: List<Reminder>, targetable: Boolean, onA
 
 @Composable
 private fun ReminderLine(reminder: Reminder) {
+    val is24Hour = DateFormat.is24HourFormat(LocalContext.current)
+    val isRecurring = !reminder.rrule.isNullOrBlank()
+    val subtext = if (isRecurring) {
+        describeRecurrence(reminder.rrule, reminder.dueAt, is24Hour)
+    } else {
+        listOfNotNull(
+            AppViewModel.formatDay(reminder.dueAt),
+            describeRrule(reminder.rrule),
+        ).joinToString(" · ")
+    }
+
     Row(
         Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -275,12 +292,9 @@ private fun ReminderLine(reminder: Reminder) {
 
         Column(Modifier.weight(1f)) {
             Text(reminder.body, color = PcColors.Ink, style = PcType.Body, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Caption(
-                listOfNotNull(
-                    AppViewModel.formatDay(reminder.dueAt),
-                    describeRrule(reminder.rrule),
-                ).joinToString(" · "),
-            )
+            if (!subtext.isNullOrBlank()) {
+                Caption(subtext)
+            }
         }
     }
 }
@@ -305,12 +319,25 @@ private fun RecentSection(commands: List<Command>) {
                         color = PcColors.InkSoft,
                         style = PcType.MonoTime.copy(fontSize = 13.sp),
                     )
-                    Text(
-                        CommandTypes.label(command.type),
-                        Modifier.weight(1f),
-                        color = PcColors.Ink,
-                        style = PcType.BodySmall.copy(fontSize = 14.5.sp),
-                    )
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            CommandTypes.label(command.type),
+                            color = PcColors.Ink,
+                            style = PcType.BodySmall.copy(fontSize = 14.5.sp),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        val error = command.resultMessage?.takeIf { it.isNotBlank() && command.status == "failed" }
+                        if (error != null) {
+                            Text(
+                                error,
+                                color = PcColors.DangerInk,
+                                style = PcType.Caption.copy(fontSize = 12.sp),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
                     OutcomeBadge(outcomeLabel(command), outcomeTone(command))
                 }
             }
@@ -321,8 +348,8 @@ private fun RecentSection(commands: List<Command>) {
 /** What actually happened, not that a row was written (05 §6). */
 internal fun outcomeLabel(command: Command): String = when (command.status) {
     "succeeded" -> "Done"
-    "expired" -> "Expired · offline"
-    "failed" -> command.resultMessage?.takeIf { it.isNotBlank() } ?: "Failed"
+    "expired" -> "Expired"
+    "failed" -> "Failed"
     "pending" -> "Sending"
     "delivered" -> "Delivered"
     else -> command.status.replaceFirstChar { it.uppercase() }

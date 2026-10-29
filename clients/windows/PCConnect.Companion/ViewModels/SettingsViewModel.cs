@@ -53,6 +53,14 @@ public sealed partial class SettingsViewModel(
     }
 
     [ObservableProperty]
+    private bool _hideRecurring;
+
+    partial void OnHideRecurringChanged(bool value)
+    {
+        settings.HideRecurring = value;
+    }
+
+    [ObservableProperty]
     private bool _isActivityOpen;
 
     [ObservableProperty]
@@ -97,6 +105,7 @@ public sealed partial class SettingsViewModel(
         _savedPcName = settings.PcName;
         StartWithWindows = startup.IsEnabled;
         Use24HourClock = settings.Use24HourClock;
+        HideRecurring = settings.HideRecurring;
 
         RebuildSwatches();
         RebuildCommands(settings.AllowedCommands, settings.PasswordRequiredCommands);

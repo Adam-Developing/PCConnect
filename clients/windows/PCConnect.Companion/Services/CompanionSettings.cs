@@ -30,6 +30,7 @@ public sealed class CompanionSettings
 
     public event Action? Loaded;
     public event Action? TimeFormatChanged;
+    public event Action? RecurringFilterChanged;
 
     public CompanionSettings(ILogger<CompanionSettings> logger, string? customPath = null)
     {
@@ -114,6 +115,19 @@ public sealed class CompanionSettings
         }
     }
 
+    public bool HideRecurring
+    {
+        get => _state.HideRecurring;
+        set
+        {
+            if (_state.HideRecurring != value)
+            {
+                Update(_state with { HideRecurring = value });
+                RecurringFilterChanged?.Invoke();
+            }
+        }
+    }
+
     public IReadOnlyList<string> DismissedReminders => _state.DismissedReminders ?? Array.Empty<string>();
 
     public void SaveDismissedReminders(IEnumerable<string> value) =>
@@ -141,6 +155,7 @@ public sealed class CompanionSettings
                         .Distinct(StringComparer.OrdinalIgnoreCase)
                         .ToArray(),
                     Use24HourClock = loaded.Use24HourClock,
+                    HideRecurring = loaded.HideRecurring,
                 };
             }
         }
@@ -198,5 +213,7 @@ public sealed class CompanionSettings
         public string[]? DismissedReminders { get; init; } = Array.Empty<string>();
 
         public bool Use24HourClock { get; init; } = true;
+
+        public bool HideRecurring { get; init; } = false;
     }
 }

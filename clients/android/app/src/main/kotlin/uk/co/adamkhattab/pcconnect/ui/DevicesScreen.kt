@@ -38,21 +38,37 @@ import uk.co.adamkhattab.pcconnect.data.Device
  * a power state lives one level down, on the PC's own screen, behind a
  * confirmation — so "shut down" is never adjacent to "lock".
  */
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DevicesScreen(
     state: AppState,
+    onRefresh: () -> Unit,
     onOpenDevice: (String) -> Unit,
     onCommand: (String, String) -> Unit,
     onNewReminder: (String?) -> Unit,
     onShareDownloadLink: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    AnimatedContent(
-        targetState = state.devices.isEmpty(),
-        transitionSpec = { fadeIn(tween(200)) togetherWith fadeOut(tween(180)) },
-        label = "DevicesEmptyState",
+    PullToRefreshBox(
+        isRefreshing = state.isLoading,
+        onRefresh = onRefresh,
         modifier = modifier.fillMaxSize(),
-    ) { isEmpty ->
+    ) {
+        if (state.isLoading && state.devices.isEmpty()) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(color = PcColors.Primary)
+            }
+        } else {
+            AnimatedContent(
+                targetState = state.devices.isEmpty(),
+                transitionSpec = { fadeIn(tween(200)) togetherWith fadeOut(tween(180)) },
+                label = "DevicesEmptyState",
+                modifier = Modifier.fillMaxSize(),
+            ) { isEmpty ->
         if (isEmpty) {
             NoDevicesYet(
                 username = state.profile?.username ?: state.profile?.displayName ?: "your account",
@@ -70,15 +86,6 @@ fun DevicesScreen(
                 ),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                item {
-                    QuietButton(
-                        text = if (state.remindersTargetable) "Reminder for all PCs" else "New reminder",
-                        onClick = { onNewReminder(null) },
-                        icon = PcIcons.AddAlert,
-                        iconTint = PcColors.Primary,
-                    )
-                }
-
                 items(state.devices, key = { it.id }) { device ->
                     DeviceCard(
                         device = device,
@@ -96,6 +103,8 @@ fun DevicesScreen(
                 }
             }
         }
+    }
+    }
     }
 }
 
@@ -135,19 +144,17 @@ private fun DeviceCard(
             Spacer(Modifier.height(14.dp))
 
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                // Only the two recoverable commands. An offline PC shows them
-                // greyed rather than hiding them, so the row does not reflow
-                // every time a machine goes to sleep.
                 listOf(CommandTypes.LOCK, CommandTypes.SLEEP).forEach { type ->
                     val allowed = device.allowedCommands.isEmpty() || type in device.allowedCommands
-                    val enabled = device.isOnline && allowed
-
-                    PcChip(
-                        text = CommandTypes.label(type),
-                        icon = PcIcons.forCommand(type),
-                        style = if (enabled) ChipStyle.Outline else ChipStyle.Disabled,
-                        onClick = { onCommand(type) },
-                    )
+                    if (allowed) {
+                        val enabled = device.isOnline
+                        PcChip(
+                            text = CommandTypes.label(type),
+                            icon = PcIcons.forCommand(type),
+                            style = if (enabled) ChipStyle.Outline else ChipStyle.Disabled,
+                            onClick = { onCommand(type) },
+                        )
+                    }
                 }
 
                 PcChip(
@@ -166,7 +173,7 @@ private fun describeDevice(device: Device, showReminderCount: Boolean): String =
         if (device.isOnline) {
             "Online"
         } else {
-            device.lastSeenAt?.let { "Seen ${AppViewModel.formatLogTime(it)}" } ?: "Never seen"
+            device.lastSeenAt?.let { "Last seen ${AppViewModel.formatLogTime(it)}" } ?: "Never seen"
         },
     )
     if (device.osVersion.isNotBlank()) add(device.osVersion)

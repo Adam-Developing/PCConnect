@@ -3,6 +3,7 @@ package uk.co.adamkhattab.pcconnect.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -45,6 +46,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import uk.co.adamkhattab.pcconnect.data.Device
+import uk.co.adamkhattab.pcconnect.data.Reminder
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
@@ -54,10 +56,7 @@ import java.time.ZoneOffset
 private val WeekdayInitials = listOf("M", "T", "W", "T", "F", "S", "S")
 
 /**
- * The new-reminder sheet.
- *
- * The repeat editor speaks in days and times and shows the schedule back as a
- * sentence, because a rule you cannot read back is a rule you cannot check.
+ * The reminder sheet for adding or editing a reminder.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -65,17 +64,37 @@ fun ReminderEditorSheet(
     devices: List<Device>,
     targetable: Boolean,
     initialDeviceId: String?,
+    reminderToEdit: Reminder? = null,
     onDismiss: () -> Unit,
-    onSave: (String, LocalDate, List<LocalTime>, RepeatSpec, List<String>?) -> Unit,
+    onSave: (String?, String, LocalDate, List<LocalTime>, RepeatSpec, List<String>?) -> Unit,
 ) {
+    val isEditing = reminderToEdit != null
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
-    var body by remember { mutableStateOf("") }
-    var date by remember { mutableStateOf(LocalDate.now()) }
-    var times by remember { mutableStateOf(listOf(AppViewModel.defaultReminderTime())) }
-    var repeat by remember { mutableStateOf(RepeatSpec()) }
-    var allPcs by remember { mutableStateOf(initialDeviceId == null) }
-    var chosen by remember { mutableStateOf(setOfNotNull(initialDeviceId)) }
+    val initialDate = remember(reminderToEdit) {
+        reminderToEdit?.let {
+            AppViewModel.zoned(it.dueAt)?.toLocalDate()
+        } ?: LocalDate.now()
+    }
+    val initialTime = remember(reminderToEdit) {
+        reminderToEdit?.let {
+            AppViewModel.zoned(it.dueAt)?.toLocalTime() ?: AppViewModel.defaultReminderTime()
+        } ?: AppViewModel.defaultReminderTime()
+    }
+    val initialRepeat = remember(reminderToEdit) {
+        reminderToEdit?.let {
+            fromRrule(it.rrule, it.recurrenceUntil)
+        } ?: RepeatSpec()
+    }
+
+    var body by remember(reminderToEdit) { mutableStateOf(reminderToEdit?.body.orEmpty()) }
+    var date by remember(reminderToEdit) { mutableStateOf(initialDate) }
+    var times by remember(reminderToEdit) { mutableStateOf(listOf(initialTime)) }
+    var repeat by remember(reminderToEdit) { mutableStateOf(initialRepeat) }
+    var allPcs by remember(reminderToEdit) { mutableStateOf(reminderToEdit?.deviceIds == null && initialDeviceId == null) }
+    var chosen by remember(reminderToEdit) {
+        mutableStateOf(reminderToEdit?.deviceIds?.toSet() ?: setOfNotNull(initialDeviceId))
+    }
 
     var picking by remember { mutableStateOf<Picker?>(null) }
 
@@ -103,7 +122,11 @@ fun ReminderEditorSheet(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text("New reminder", color = PcColors.Ink, style = PcType.Heading)
+                    Text(
+                        if (isEditing) "Edit reminder" else "New reminder",
+                        color = PcColors.Ink,
+                        style = PcType.Heading,
+                    )
                     IconAction(PcIcons.Close, "Close", onDismiss)
                 }
             }
@@ -133,7 +156,7 @@ fun ReminderEditorSheet(
                         modifier = Modifier.weight(1f),
                     )
                     PickerField(
-                        value = times.min().format(HourMinute),
+                        value = times.minOrNull()?.format(HourMinute) ?: "09:00",
                         icon = PcIcons.Schedule,
                         onClick = { picking = Picker.PrimaryTime },
                         label = "Time",
@@ -180,9 +203,10 @@ fun ReminderEditorSheet(
 
             Column(Modifier.padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 20.dp)) {
                 PrimaryButton(
-                    text = "Save reminder",
+                    text = if (isEditing) "Save changes" else "Save reminder",
                     onClick = {
                         onSave(
+                            reminderToEdit?.id,
                             body,
                             date,
                             times.sorted(),
@@ -214,15 +238,14 @@ fun ReminderEditorSheet(
         Picker.PrimaryTime, Picker.ExtraTime -> {
             val extra = picking == Picker.ExtraTime
             TimePickerSheet(
-                initial = if (extra) LocalTime.of(9, 0) else times.min(),
+                initial = if (extra) LocalTime.of(9, 0) else (times.minOrNull() ?: LocalTime.of(9, 0)),
                 onDismiss = { picking = null },
                 onPick = { picked ->
                     times = if (extra) {
                         (times + picked).distinct().sorted()
                     } else {
-                        // The field edits the earliest time; the rest of the set
-                        // is left alone.
-                        (times - times.min() + picked).distinct().sorted()
+                        val currentMin = times.minOrNull() ?: picked
+                        (times - currentMin + picked).distinct().sorted()
                     }
                     picking = null
                 },
@@ -248,7 +271,10 @@ private fun RepeatEditor(
         FieldLabel("Repeat")
         Spacer(Modifier.height(8.dp))
 
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(
+            Modifier.horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
             RepeatKind.entries.forEach { kind ->
                 PcChip(
                     text = kind.label,
@@ -258,7 +284,7 @@ private fun RepeatEditor(
             }
         }
 
-        if (repeat.kind != RepeatKind.Custom) return@Column
+        if (repeat.kind == RepeatKind.Once) return@Column
 
         Spacer(Modifier.height(12.dp))
 
@@ -270,46 +296,57 @@ private fun RepeatEditor(
                 .padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            Column {
-                FieldLabel("On these days")
-                Spacer(Modifier.height(8.dp))
+            if (repeat.kind == RepeatKind.Weekly || repeat.kind == RepeatKind.Custom) {
+                Column {
+                    FieldLabel("On these days")
+                    Spacer(Modifier.height(8.dp))
 
-                Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                ) {
-                    WeekdayInitials.forEachIndexed { index, initial ->
-                        val on = repeat.days.getOrElse(index) { false }
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        WeekdayInitials.forEachIndexed { index, initial ->
+                            val on = repeat.days.getOrElse(index) { false }
 
-                        Box(
-                            Modifier
-                                .size(40.dp)
-                                .clip(CircleShape)
-                                .then(
-                                    if (on) {
-                                        Modifier.background(PcColors.Primary)
-                                    } else {
-                                        Modifier.border(1.dp, PcColors.Border, CircleShape)
-                                    },
+                            Box(
+                                Modifier
+                                    .size(40.dp)
+                                    .clip(CircleShape)
+                                    .then(
+                                        if (on) {
+                                            Modifier.background(PcColors.Primary)
+                                        } else {
+                                            Modifier.border(1.dp, PcColors.Border, CircleShape)
+                                        },
+                                    )
+                                    .clickable { onRepeatChange(repeat.toggleDay(index)) },
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(
+                                    initial,
+                                    color = if (on) Color.White else PcColors.InkSoft,
+                                    style = PcType.Chip.copy(
+                                        fontWeight = if (on) FontWeight.SemiBold else FontWeight.Medium,
+                                    ),
                                 )
-                                .clickable { onRepeatChange(repeat.toggleDay(index)) },
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Text(
-                                initial,
-                                color = if (on) Color.White else PcColors.InkSoft,
-                                style = PcType.Chip.copy(
-                                    fontWeight = if (on) FontWeight.SemiBold else FontWeight.Medium,
-                                ),
-                            )
+                            }
                         }
                     }
                 }
             }
 
+            val unitLabel = when (repeat.kind) {
+                RepeatKind.Hourly -> if (repeat.intervalWeeks == 1) "hour" else "hours"
+                RepeatKind.Daily -> if (repeat.intervalWeeks == 1) "day" else "days"
+                RepeatKind.Monthly -> if (repeat.intervalWeeks == 1) "month" else "months"
+                RepeatKind.Yearly -> if (repeat.intervalWeeks == 1) "year" else "years"
+                else -> if (repeat.intervalWeeks == 1) "week" else "weeks"
+            }
+
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 IntervalField(
                     interval = repeat.intervalWeeks,
+                    unit = unitLabel,
                     onChange = { onRepeatChange(repeat.copy(intervalWeeks = it)) },
                     modifier = Modifier.weight(1f),
                 )
@@ -350,7 +387,10 @@ private fun RepeatEditor(
                 FieldLabel("At these times")
                 Spacer(Modifier.height(8.dp))
 
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    Modifier.horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
                     times.sorted().forEach { time ->
                         Row(
                             Modifier
@@ -396,7 +436,7 @@ private fun RepeatEditor(
 }
 
 @Composable
-private fun IntervalField(interval: Int, onChange: (Int) -> Unit, modifier: Modifier = Modifier) {
+private fun IntervalField(interval: Int, unit: String, onChange: (Int) -> Unit, modifier: Modifier = Modifier) {
     var open by remember { mutableStateOf(false) }
 
     Column(modifier) {
@@ -416,7 +456,7 @@ private fun IntervalField(interval: Int, onChange: (Int) -> Unit, modifier: Modi
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
                 Text(
-                    if (interval == 1) "1 week" else "$interval weeks",
+                    "$interval $unit",
                     color = PcColors.Ink,
                     style = PcType.BodySmall.copy(fontSize = 14.5.sp),
                 )
@@ -424,17 +464,17 @@ private fun IntervalField(interval: Int, onChange: (Int) -> Unit, modifier: Modi
             }
 
             DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-                (1..4).forEach { weeks ->
+                listOf(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 14, 21, 30).forEach { n ->
                     DropdownMenuItem(
                         text = {
                             Text(
-                                if (weeks == 1) "1 week" else "$weeks weeks",
+                                "$n $unit",
                                 color = PcColors.Ink,
                                 style = PcType.BodySmall,
                             )
                         },
                         onClick = {
-                            onChange(weeks)
+                            onChange(n)
                             open = false
                         },
                     )
@@ -497,6 +537,41 @@ private fun ScopePicker(
     }
 }
 
+@Composable
+private fun PickerField(
+    value: String,
+    icon: Int,
+    onClick: () -> Unit,
+    label: String,
+    modifier: Modifier = Modifier,
+    mono: Boolean = false,
+) {
+    Column(modifier) {
+        FieldLabel(label)
+        Spacer(Modifier.height(6.dp))
+
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .height(44.dp)
+                .clip(PcShapes.SmallControl)
+                .border(1.dp, PcColors.Border, PcShapes.SmallControl)
+                .clickable(onClick = onClick)
+                .padding(horizontal = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            PcIcon(icon, null, size = 18.dp, tint = PcColors.InkFaint)
+            Text(
+                value,
+                color = PcColors.Ink,
+                style = if (mono) PcType.MonoTime else PcType.BodySmall.copy(fontSize = 14.5.sp),
+                maxLines = 1,
+            )
+        }
+    }
+}
+
 // ── the platform pickers ─────────────────────────────────────────────────────
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -512,9 +587,6 @@ private fun DatePickerSheet(initial: LocalDate, onDismiss: () -> Unit, onPick: (
         confirmButton = {
             TextButton(
                 onClick = {
-                    // The picker works in UTC midnights, so the date is read
-                    // back the same way rather than through the local zone,
-                    // which would shift it a day west of Greenwich.
                     state.selectedDateMillis?.let {
                         onPick(Instant.ofEpochMilli(it).atZone(ZoneId.of("UTC")).toLocalDate())
                     }

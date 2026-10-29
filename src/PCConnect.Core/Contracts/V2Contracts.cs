@@ -279,12 +279,29 @@ public sealed record UpdateReminderRequest(
     string? Rrule = null,
     DateTimeOffset? RecurrenceUntil = null,
     /// <summary>
-    /// Replaces the whole target set. Null leaves it alone; an empty list is
-    /// rejected, because "no PCs at all" is a reminder nobody would ever see.
+    /// Replaces the whole target set. Null leaves it alone unless
+    /// <see cref="ClearDeviceIds"/> is true; an empty list is rejected,
+    /// because "no PCs at all" is a reminder nobody would ever see.
     /// </summary>
-    IReadOnlyList<string>? DeviceIds = null);
+    IReadOnlyList<string>? DeviceIds = null,
+    bool? ClearDeviceIds = null);
 
 public sealed record CompleteReminderRequest(bool Completed = true, DateTimeOffset? OccurrenceAt = null);
+
+public sealed record ReminderOccurrenceResponse(
+    long Id,
+    string ReminderId,
+    DateTimeOffset OccursAt,
+    string Status, // "pending", "notified", "completed", "skipped"
+    DateTimeOffset? CompletedAt,
+    string? CustomBody,
+    string EffectiveBody);
+
+public sealed record UpdateReminderOccurrenceRequest(
+    DateTimeOffset OccursAt,
+    string? Status = null, // "pending", "completed", "skipped"
+    string? CustomBody = null,
+    bool? ClearCustomBody = false);
 
 // ── account ──────────────────────────────────────────────────────────────────
 

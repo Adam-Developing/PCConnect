@@ -61,8 +61,8 @@ public static class DependencyInjection
         // test host or a late provider has contributed anything.
         services.AddSingleton(sp =>
         {
-            var connectionString = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<DatabaseOptions>>()
-                .Value.ConnectionString;
+            var options = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<DatabaseOptions>>().Value;
+            var connectionString = options.ConnectionString;
 
             if (string.IsNullOrWhiteSpace(connectionString))
             {
@@ -70,7 +70,14 @@ public static class DependencyInjection
                     "Database:ConnectionString is not configured. Set PCCONNECT_DATABASE__CONNECTIONSTRING.");
             }
 
-            var builder = new NpgsqlDataSourceBuilder(connectionString);
+            var csb = new NpgsqlConnectionStringBuilder(connectionString);
+            if (!connectionString.Contains("Maximum Pool Size", StringComparison.OrdinalIgnoreCase) &&
+                !connectionString.Contains("MaxPoolSize", StringComparison.OrdinalIgnoreCase))
+            {
+                csb.MaxPoolSize = options.MaxPoolSize;
+            }
+
+            var builder = new NpgsqlDataSourceBuilder(csb.ConnectionString);
             builder.EnableDynamicJson();
             return builder.Build();
         });

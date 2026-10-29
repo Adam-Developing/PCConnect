@@ -188,6 +188,8 @@ public sealed class EnvelopeEncryptor : IEnvelopeEncryptor
 /// </summary>
 public static class LegacyReminderCipher
 {
+    private static readonly UTF8Encoding StrictUtf8 = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
+
     /// <summary>
     /// v1 stored <c>base64(iv) + ':' + base64(ciphertext)</c>, encrypted with
     /// AES-256-CBC keyed by the raw bytes of <c>users.api_key</c>. Returns false
@@ -241,12 +243,12 @@ public static class LegacyReminderCipher
 
                     using var decryptor = aes.CreateDecryptor();
                     var clear = decryptor.TransformFinalBlock(cipherBytes, 0, cipherBytes.Length);
-                    plaintext = Encoding.UTF8.GetString(clear);
+                    plaintext = StrictUtf8.GetString(clear);
                     return true;
                 }
-                catch (CryptographicException)
+                catch (Exception ex) when (ex is CryptographicException or DecoderFallbackException)
                 {
-                    // Wrong shape for this candidate; try the next.
+                    // Wrong shape or bad padding/encoding for this candidate; try the next.
                 }
             }
 
