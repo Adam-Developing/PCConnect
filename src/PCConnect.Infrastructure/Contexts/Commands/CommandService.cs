@@ -101,6 +101,14 @@ public sealed class CommandService(
             stepUpMethod = await stepUp.RedeemAsync(caller, request.StepUpToken, ct);
             stepUpVerifiedAt = clock.UtcNow;
         }
+        else if (!string.IsNullOrWhiteSpace(request.StepUpToken) && caller.ClientKind != ClientKinds.Legacy)
+        {
+            // If the caller's own client settings (e.g. mobile protected commands)
+            // requested confirmation on top of an unprotected desktop command,
+            // validate and consume the step-up token as well.
+            stepUpMethod = await stepUp.RedeemAsync(caller, request.StepUpToken, ct);
+            stepUpVerifiedAt = clock.UtcNow;
+        }
         else if (passwordRequired)
         {
             stepUpMethod = "legacy_shim";

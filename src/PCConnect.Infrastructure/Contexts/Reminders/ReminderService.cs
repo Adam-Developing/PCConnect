@@ -422,11 +422,14 @@ public sealed class ReminderService(
                      ORDER BY occurs_at_utc ASC
                     """, new { ReminderId = row.Id, From = fromUtc, To = toUtc }, tx, cancellationToken: ct))).ToList();
 
-                var storedDict = stored.ToDictionary(s => s.OccursAtUtc);
+                var storedDict = stored.ToDictionary(s => s.OccursAtUtc.ToUniversalTime());
 
-                var expandedInstants = recurrence.Expand(row.Rrule!, row.DueAtUtc, row.Timezone, fromUtc, toUtc, row.RecurrenceUntil);
+                var expandedInstants = recurrence
+                    .Expand(row.Rrule!, row.DueAtUtc, row.Timezone, fromUtc, toUtc, row.RecurrenceUntil)
+                    .Select(static i => i.ToUniversalTime());
 
-                var allInstants = new SortedSet<DateTimeOffset>(stored.Select(s => s.OccursAtUtc).Concat(expandedInstants));
+                var allInstants = new SortedSet<DateTimeOffset>(
+                    stored.Select(static s => s.OccursAtUtc.ToUniversalTime()).Concat(expandedInstants));
 
                 var cutoff = clock.UtcNow.AddMinutes(-5);
                 var upcomingInstants = allInstants.Where(i => i >= cutoff).Take(effectiveLimit).ToList();
@@ -438,7 +441,7 @@ public sealed class ReminderService(
                 var pastStored = allInstants.Where(i => i < cutoff && storedDict.TryGetValue(i, out var s) && s.Status != "pending").TakeLast(3).ToList();
                 var selectedInstants = new SortedSet<DateTimeOffset>(pastStored.Concat(upcomingInstants));
 
-                var results = new List<ReminderOccurrenceResponse>();
+                var results = new List<ReminderOccurrenceResponse>(selectedInstants.Count);
                 foreach (var instant in selectedInstants)
                 {
                     if (storedDict.TryGetValue(instant, out var storedRow))
@@ -459,7 +462,7 @@ public sealed class ReminderService(
                         results.Add(new ReminderOccurrenceResponse(
                             storedRow.Id,
                             row.PublicId.ToString(),
-                            storedRow.OccursAtUtc,
+                            storedRow.OccursAtUtc.ToUniversalTime(),
                             storedRow.Status,
                             storedRow.CompletedAt,
                             customBody,
@@ -470,7 +473,7 @@ public sealed class ReminderService(
                         results.Add(new ReminderOccurrenceResponse(
                             0,
                             row.PublicId.ToString(),
-                            instant,
+                            instant.ToUniversalTime(),
                             "pending",
                             null,
                             null,
@@ -478,7 +481,9 @@ public sealed class ReminderService(
                     }
                 }
 
-                return (IReadOnlyList<ReminderOccurrenceResponse>)results;
+                return (IReadOnlyList<ReminderOccurrenceResponse>)results
+                    .OrderBy(static o => o.OccursAt.ToUniversalTime())
+                    .ToList();
             }
             finally
             {

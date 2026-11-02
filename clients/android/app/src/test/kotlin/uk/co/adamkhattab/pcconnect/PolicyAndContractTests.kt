@@ -5,22 +5,28 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import uk.co.adamkhattab.pcconnect.data.CommandPolicy
 import uk.co.adamkhattab.pcconnect.data.CommandTypes
+import uk.co.adamkhattab.pcconnect.data.Device
 import uk.co.adamkhattab.pcconnect.data.Discovery
 import uk.co.adamkhattab.pcconnect.data.FallbackPollingPolicy
 import uk.co.adamkhattab.pcconnect.data.PcConnectApi
 import uk.co.adamkhattab.pcconnect.data.Reminder
 import uk.co.adamkhattab.pcconnect.data.ReminderOccurrenceResponse
 import uk.co.adamkhattab.pcconnect.data.UpdateReminderOccurrenceRequest
+import uk.co.adamkhattab.pcconnect.ui.AppViewModel
 import uk.co.adamkhattab.pcconnect.ui.RepeatKind
 import uk.co.adamkhattab.pcconnect.ui.RepeatSpec
 import uk.co.adamkhattab.pcconnect.ui.describeRecurrence
 import uk.co.adamkhattab.pcconnect.ui.describeRrule
 import uk.co.adamkhattab.pcconnect.ui.formatNaturalTime
+import uk.co.adamkhattab.pcconnect.ui.isActiveReminder
 import uk.co.adamkhattab.pcconnect.ui.rruleFor
 import uk.co.adamkhattab.pcconnect.ui.scheduleSummary
+import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
+import java.time.ZoneId
 
 class FallbackPollingPolicyTest {
 
@@ -386,5 +392,125 @@ class RecurrenceDescriptionTest {
             clearing,
         )
         assertTrue(clearingPayload.contains("\"clearDeviceIds\":true"))
+    }
+
+    @Test
+    fun `active recurring reminders remain visible on device screen even when series is marked completed`() {
+        val now = Instant.parse("2026-11-01T15:30:00Z")
+        val recurringCompletedToday = Reminder(
+            id = "rem-rec-1",
+            body = "rhhggd",
+            dueAt = "2026-10-28T04:00:00Z",
+            dueLocalTime = "04:00",
+            timezone = "Europe/London",
+            rrule = "FREQ=HOURLY;INTERVAL=21",
+            recurrenceUntil = "2027-02-10T23:59:59Z",
+            isCompleted = true,
+            completedAt = "2026-11-01T04:05:00Z",
+            createdAt = "2026-10-28T03:00:00Z",
+            updatedAt = "2026-11-01T04:05:00Z",
+        )
+        assertTrue(recurringCompletedToday.isActiveReminder(now))
+
+        val recurringEnded = recurringCompletedToday.copy(recurrenceUntil = "2026-10-31T23:59:59Z")
+        assertFalse(recurringEnded.isActiveReminder(now))
+
+        val oneTimeCompleted = recurringCompletedToday.copy(rrule = null, recurrenceUntil = null, isCompleted = true)
+        assertFalse(oneTimeCompleted.isActiveReminder(now))
+
+        val oneTimeOpen = oneTimeCompleted.copy(isCompleted = false)
+        assertTrue(oneTimeOpen.isActiveReminder(now))
+    }
+
+    @Test
+    fun `occurrences are sorted oldest to newest and hourly interval is respected`() {
+        val unsorted = listOf(
+            ReminderOccurrenceResponse(reminderId = "r1", occursAt = "2026-11-03T07:00:00Z", effectiveBody = "rhhggd"),
+            ReminderOccurrenceResponse(reminderId = "r1", occursAt = "2026-10-30T19:00:00Z", effectiveBody = "rhhggd"),
+            ReminderOccurrenceResponse(reminderId = "r1", occursAt = "2026-11-01T13:00:00Z", effectiveBody = "rhhggd"),
+            ReminderOccurrenceResponse(reminderId = "r1", occursAt = "2026-10-31T16:00:00Z", effectiveBody = "rhhggd"),
+            ReminderOccurrenceResponse(reminderId = "r1", occursAt = "2026-11-02T10:00:00Z", effectiveBody = "rhhggd"),
+        )
+
+        val sorted = AppViewModel.sortOccurrencesOldestToNewest(unsorted)
+        assertEquals(
+            listOf(
+                "2026-10-30T19:00:00Z",
+                "2026-10-31T16:00:00Z",
+                "2026-11-01T13:00:00Z",
+                "2026-11-02T10:00:00Z",
+                "2026-11-03T07:00:00Z",
+            ),
+            sorted.map { it.occursAt },
+        )
+
+        val reminder = Reminder(
+            id = "rem-hourly",
+            body = "rhhggd",
+            dueAt = "2026-10-28T04:00:00Z",
+            dueLocalTime = "04:00",
+            timezone = "UTC",
+            rrule = "FREQ=HOURLY;INTERVAL=21",
+            recurrenceUntil = "2027-02-10T23:59:59Z",
+            isCompleted = false,
+            createdAt = "2026-10-28T03:00:00Z",
+            updatedAt = "2026-10-28T03:00:00Z",
+        )
+        val generated = AppViewModel.generateLocalOccurrencesFor(
+            reminder = reminder,
+            now = Instant.parse("2026-11-01T18:00:00Z"),
+            zone = ZoneId.of("UTC"),
+        )
+        assertEquals(10, generated.size)
+        assertEquals("2026-11-02T10:00:00Z", generated[0].occursAt)
+        assertEquals("2026-11-03T07:00:00Z", generated[1].occursAt)
+        assertTrue(
+            generated.zipWithNext().all { (older, newer) ->
+                Instant.parse(older.occursAt).isBefore(Instant.parse(newer.occursAt))
+            },
+        )
+    }
+
+    @Test
+    fun `desktop command preferences apply per PC and take priority over mobile settings`() {
+        val adamPc = Device(
+            id = "pc-adam",
+            displayName = "ADAM-PC",
+            platform = "windows",
+            osVersion = "Windows 11",
+            agentVersion = "2.0.0",
+            status = "active",
+            isOnline = true,
+            pairedAt = "2026-10-01T00:00:00Z",
+            allowedCommands = listOf("lock", "sleep", "restart", "shutdown"),
+            passwordRequiredCommands = listOf("restart", "shutdown"),
+        )
+        val laptopPc = adamPc.copy(
+            id = "pc-laptop",
+            displayName = "LAPTOP",
+            allowedCommands = emptyList(),
+            passwordRequiredCommands = listOf("shutdown"),
+        )
+
+        // Mobile turned off restart and turned on hibernate + lock:
+        val mobileProtected = setOf("hibernate", "lock")
+
+        // 1. Available commands strictly follow each desktop's own allowedCommands
+        assertEquals(listOf("lock", "sleep", "restart", "shutdown"), CommandPolicy.availableCommands(adamPc))
+        assertEquals(CommandTypes.ALL, CommandPolicy.availableCommands(laptopPc))
+        assertFalse(CommandPolicy.isCommandAllowed(adamPc, "hibernate"))
+        assertTrue(CommandPolicy.isCommandAllowed(laptopPc, "hibernate"))
+
+        // 2. Desktop-disabled command cannot be protected or sent even if mobile protects it
+        assertFalse(CommandPolicy.isCommandProtected(adamPc, "hibernate", mobileProtected))
+
+        // 3. Desktop-protected command stays protected on ADAM-PC even when mobile turned restart OFF
+        assertTrue(CommandPolicy.isCommandProtected(adamPc, "restart", mobileProtected))
+        // And ADAM-PC's restart requirement does NOT leak onto LAPTOP
+        assertFalse(CommandPolicy.isCommandProtected(laptopPc, "restart", mobileProtected))
+
+        // 4. Mobile can still add phone-side confirmation for an allowed, desktop-unprotected command
+        assertTrue(CommandPolicy.isCommandProtected(adamPc, "lock", mobileProtected))
+        assertFalse(CommandPolicy.isCommandProtected(adamPc, "sleep", mobileProtected))
     }
 }

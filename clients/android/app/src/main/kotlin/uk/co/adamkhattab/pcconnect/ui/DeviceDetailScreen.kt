@@ -2,6 +2,7 @@ package uk.co.adamkhattab.pcconnect.ui
 
 import android.text.format.DateFormat
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,8 +16,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -31,6 +34,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import uk.co.adamkhattab.pcconnect.data.Command
+import uk.co.adamkhattab.pcconnect.data.CommandPolicy
 import uk.co.adamkhattab.pcconnect.data.CommandTypes
 import uk.co.adamkhattab.pcconnect.data.Device
 import uk.co.adamkhattab.pcconnect.data.Reminder
@@ -41,22 +45,30 @@ import uk.co.adamkhattab.pcconnect.data.Reminder
  * The destructive four live here rather than in the list, and each one carries
  * the key that says it will ask for a password before it is sent.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DeviceDetailScreen(
     device: Device,
     state: AppState,
+    viewModel: AppViewModel? = null,
+    onRefresh: () -> Unit,
     onBack: () -> Unit,
     onCommand: (String) -> Unit,
     onNewReminder: () -> Unit,
+    onEditReminder: (Reminder) -> Unit = {},
+    onToggleReminder: (Reminder) -> Unit = {},
+    onDeleteReminder: (Reminder) -> Unit = {},
     onRename: (String) -> Unit,
     onRemove: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var editing by remember { mutableStateOf(false) }
+    var inspectingId by remember { mutableStateOf<String?>(null) }
+    val inspecting = inspectingId?.let { id -> state.reminders.firstOrNull { it.id == id } }
 
     val reminders = remember(state.reminders, device.id) {
         state.reminders
-            .filter { it.showsOn(device.id) && !it.isCompleted }
+            .filter { it.showsOn(device.id) && it.isActiveReminder() }
             .sortedBy { it.dueAt }
             .take(6)
     }
@@ -67,25 +79,61 @@ fun DeviceDetailScreen(
     Column(modifier.fillMaxSize()) {
         DetailTopBar(device, onBack = onBack, onEdit = { editing = true })
 
-        LazyColumn(
-            Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(18.dp),
+        PullToRefreshBox(
+            isRefreshing = state.isLoading,
+            onRefresh = onRefresh,
+            modifier = Modifier.weight(1f).fillMaxWidth(),
         ) {
-            item { ControlsSection(device, onCommand) }
+            LazyColumn(
+                Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 32.dp),
+                verticalArrangement = Arrangement.spacedBy(18.dp),
+            ) {
+                item {
+                    ControlsSection(
+                        device = device,
+                        mobileProtectedCommands = state.mobileProtectedCommands,
+                        onCommand = onCommand,
+                    )
+                }
 
-            item {
-                RemindersSection(
-                    reminders = reminders,
-                    targetable = state.remindersTargetable,
-                    onAdd = onNewReminder,
-                )
-            }
+                item {
+                    RemindersSection(
+                        reminders = reminders,
+                        targetable = state.remindersTargetable,
+                        onAdd = onNewReminder,
+                        onInspect = { inspectingId = it.id },
+                    )
+                }
 
-            if (recent.isNotEmpty()) {
-                item { RecentSection(recent) }
+                if (recent.isNotEmpty()) {
+                    item { RecentSection(recent) }
+                }
             }
         }
+    }
+
+    inspecting?.let { reminder ->
+        ReminderDetailDialog(
+            reminder = reminder,
+            devices = state.devices,
+            remindersTargetable = state.remindersTargetable,
+            viewModel = viewModel,
+            onDismiss = { inspectingId = null },
+            onToggleComplete = if (reminder.rrule.isNullOrBlank()) {
+                { onToggleReminder(reminder) }
+            } else {
+                null
+            },
+            onEdit = {
+                inspectingId = null
+                onEditReminder(reminder)
+            },
+            onDelete = {
+                inspectingId = null
+                onDeleteReminder(reminder)
+            },
+        )
     }
 
     if (editing) {
@@ -150,26 +198,44 @@ private fun DetailTopBar(device: Device, onBack: () -> Unit, onEdit: () -> Unit)
 }
 
 @Composable
-private fun ControlsSection(device: Device, onCommand: (String) -> Unit) {
+private fun ControlsSection(
+    device: Device,
+    mobileProtectedCommands: Set<String>,
+    onCommand: (String) -> Unit,
+) {
+    val availableCommands = CommandPolicy.availableCommands(device)
+
     Column {
         SectionLabel("Controls", Modifier.padding(start = 2.dp, bottom = 10.dp))
 
-        // A two-column grid built from rows: LazyVerticalGrid inside a
-        // LazyColumn needs a fixed height, and six tiles do not need lazy
-        // layout at all.
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            CommandTypes.ALL.filter { device.allowedCommands.isEmpty() || it in device.allowedCommands }.chunked(2).forEach { pair ->
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    pair.forEach { type ->
-                        CommandTile(
-                            type = type,
-                            isProtected = type in device.passwordRequiredCommands,
-                            enabled = device.isOnline,
-                            onClick = { onCommand(type) },
-                            modifier = Modifier.weight(1f),
-                        )
+        if (availableCommands.isEmpty()) {
+            PcCard(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp)) {
+                    Caption("No remote commands are enabled in ${device.displayName}'s desktop preferences.")
+                }
+            }
+        } else {
+            // A two-column grid built from rows: LazyVerticalGrid inside a
+            // LazyColumn needs a fixed height, and six tiles do not need lazy
+            // layout at all.
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                availableCommands.chunked(2).forEach { pair ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        pair.forEach { type ->
+                            CommandTile(
+                                type = type,
+                                isProtected = CommandPolicy.isCommandProtected(
+                                    device = device,
+                                    type = type,
+                                    mobileProtectedCommands = mobileProtectedCommands,
+                                ),
+                                enabled = device.isOnline,
+                                onClick = { onCommand(type) },
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
+                        if (pair.size == 1) Spacer(Modifier.weight(1f))
                     }
-                    if (pair.size == 1) Spacer(Modifier.weight(1f))
                 }
             }
         }
@@ -182,7 +248,7 @@ private fun ControlsSection(device: Device, onCommand: (String) -> Unit) {
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             PcIcon(PcIcons.Key, null, size = 15.dp, tint = PcColors.InkFaint)
-            Caption("Asks for confirmation before sending")
+            Caption("Asks for confirmation before sending (${device.displayName}'s desktop preferences take priority)")
         }
     }
 }
@@ -220,7 +286,12 @@ private fun CommandTile(
 }
 
 @Composable
-private fun RemindersSection(reminders: List<Reminder>, targetable: Boolean, onAdd: () -> Unit) {
+private fun RemindersSection(
+    reminders: List<Reminder>,
+    targetable: Boolean,
+    onAdd: () -> Unit,
+    onInspect: (Reminder) -> Unit,
+) {
     Column {
         Row(
             Modifier.fillMaxWidth().padding(start = 2.dp, end = 2.dp, bottom = 10.dp),
@@ -253,7 +324,7 @@ private fun RemindersSection(reminders: List<Reminder>, targetable: Boolean, onA
             } else {
                 reminders.forEachIndexed { index, reminder ->
                     if (index > 0) RowDivider(startIndent = 68.dp)
-                    ReminderLine(reminder)
+                    ReminderLine(reminder, onClick = { onInspect(reminder) })
                 }
             }
         }
@@ -266,7 +337,7 @@ private fun RemindersSection(reminders: List<Reminder>, targetable: Boolean, onA
 }
 
 @Composable
-private fun ReminderLine(reminder: Reminder) {
+private fun ReminderLine(reminder: Reminder, onClick: () -> Unit) {
     val is24Hour = DateFormat.is24HourFormat(LocalContext.current)
     val isRecurring = !reminder.rrule.isNullOrBlank()
     val subtext = if (isRecurring) {
@@ -279,7 +350,10 @@ private fun ReminderLine(reminder: Reminder) {
     }
 
     Row(
-        Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+        Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
@@ -296,6 +370,8 @@ private fun ReminderLine(reminder: Reminder) {
                 Caption(subtext)
             }
         }
+
+        PcIcon(PcIcons.ChevronRight, "View reminder details", size = 18.dp, tint = PcColors.InkFaint)
     }
 }
 

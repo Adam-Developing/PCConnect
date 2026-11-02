@@ -321,6 +321,33 @@ object CommandTypes {
     }
 }
 
+/**
+ * Resolves effective command availability and confirmation rules for a target PC.
+ *
+ * Each desktop owns its own `allowedCommands` and `passwordRequiredCommands`
+ * preferences, and those desktop preferences apply only to that desktop while
+ * taking priority over mobile settings whenever a device shows available
+ * commands or sends a command.
+ */
+object CommandPolicy {
+    fun isCommandAllowed(device: Device, type: String): Boolean =
+        device.allowedCommands.isEmpty() || type in device.allowedCommands
+
+    fun availableCommands(device: Device, catalog: List<String> = CommandTypes.ALL): List<String> =
+        catalog.filter { isCommandAllowed(device, it) }
+
+    fun isCommandProtectedByDesktop(device: Device, type: String): Boolean =
+        isCommandAllowed(device, type) && type in device.passwordRequiredCommands
+
+    fun isCommandProtected(
+        device: Device,
+        type: String,
+        mobileProtectedCommands: Set<String> = emptySet(),
+    ): Boolean =
+        isCommandAllowed(device, type) &&
+            (type in device.passwordRequiredCommands || type in mobileProtectedCommands)
+}
+
 /** Capabilities the server advertises in its discovery document (04 §2). */
 object Capabilities {
     /** Reminders can name the devices they show on. */

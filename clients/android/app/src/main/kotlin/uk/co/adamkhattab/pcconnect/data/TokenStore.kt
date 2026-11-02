@@ -44,6 +44,21 @@ class TokenStore(context: Context) {
         get() = preferences.getBoolean(KEY_BIOMETRIC, true)
         set(value) = preferences.edit().putBoolean(KEY_BIOMETRIC, value).apply()
 
+    /**
+     * Commands additionally marked as requiring confirmation on this phone.
+     *
+     * Stored locally on mobile so phone settings never overwrite a desktop's
+     * own command preferences; target desktop preferences always take priority.
+     */
+    var mobileProtectedCommands: Set<String>
+        get() = preferences.getStringSet(KEY_MOBILE_PROTECTED_COMMANDS, emptySet())
+            ?.intersect(CommandTypes.ALL.toSet())
+            ?: emptySet()
+        set(value) {
+            val sanitised = value.intersect(CommandTypes.ALL.toSet())
+            preferences.edit().putStringSet(KEY_MOBILE_PROTECTED_COMMANDS, HashSet(sanitised)).apply()
+        }
+
     // ── keystore ─────────────────────────────────────────────────────────────
 
     private fun secretKey(): SecretKey {
@@ -108,6 +123,7 @@ class TokenStore(context: Context) {
         const val KEY_REFRESH = "refreshToken"
         const val KEY_BASE_URL = "baseUrl"
         const val KEY_BIOMETRIC = "requireBiometric"
+        const val KEY_MOBILE_PROTECTED_COMMANDS = "mobileProtectedCommands"
         const val ANDROID_KEYSTORE = "AndroidKeyStore"
         const val KEY_ALIAS = "pcconnect.session.v2"
         const val TRANSFORMATION = "AES/GCM/NoPadding"

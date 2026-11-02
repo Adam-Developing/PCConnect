@@ -26,13 +26,15 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Scaffold
@@ -53,6 +55,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import uk.co.adamkhattab.pcconnect.data.CommandTypes
@@ -119,7 +122,7 @@ fun PcConnectApp(
                 onSignIn = viewModel::signIn,
                 onRegister = viewModel::register,
                 onForgotPassword = viewModel::forgotPassword,
-                modifier = Modifier.windowInsetsPadding(WindowInsets.statusBars),
+                modifier = Modifier.windowInsetsPadding(WindowInsets.systemBars),
             )
         } else {
             val openDevice = viewModel.device(openDeviceId)
@@ -130,7 +133,7 @@ fun PcConnectApp(
 
             Scaffold(
                 containerColor = PcColors.Bg,
-                contentWindowInsets = WindowInsets.statusBars,
+                contentWindowInsets = WindowInsets.systemBars,
                 snackbarHost = {
                     SnackbarHost(snackbar) { data ->
                         Snackbar(
@@ -153,7 +156,15 @@ fun PcConnectApp(
                     }
                 },
             ) { padding ->
-                Column(Modifier.fillMaxSize().padding(padding)) {
+                val layoutDir = LocalLayoutDirection.current
+                val navBarBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+                val safePadding = PaddingValues(
+                    start = padding.calculateLeftPadding(layoutDir),
+                    top = padding.calculateTopPadding(),
+                    end = padding.calculateRightPadding(layoutDir),
+                    bottom = maxOf(padding.calculateBottomPadding(), navBarBottom),
+                )
+                Column(Modifier.fillMaxSize().padding(safePadding)) {
                     AnimatedVisibility(
                         visible = openDevice == null,
                         enter = fadeIn(tween(180)) + expandVertically(tween(200)),
@@ -244,9 +255,14 @@ fun PcConnectApp(
                                     DeviceDetailScreen(
                                         device = device,
                                         state = state,
+                                        viewModel = viewModel,
+                                        onRefresh = viewModel::refresh,
                                         onBack = { openDeviceId = null },
                                         onCommand = { type -> viewModel.requestCommand(device.id, type) },
                                         onNewReminder = { composingFor = ReminderTarget(device.id) },
+                                        onEditReminder = { reminder -> composingFor = ReminderTarget(device.id, reminder) },
+                                        onToggleReminder = viewModel::toggleReminder,
+                                        onDeleteReminder = viewModel::deleteReminder,
                                         onRename = { viewModel.renameDevice(device.id, it) },
                                         onRemove = {
                                             openDeviceId = null
@@ -281,7 +297,7 @@ fun PcConnectApp(
                                         state = state,
                                         biometricAvailable = biometricAvailable,
                                         onToggleBiometric = viewModel::toggleBiometric,
-                                        onToggleCommandProtection = { cmd, deviceId -> viewModel.toggleCommandProtection(cmd, deviceId) },
+                                        onToggleCommandProtection = viewModel::toggleCommandProtection,
                                         baseUrl = viewModel.baseUrl,
                                         onBaseUrl = { viewModel.baseUrl = it },
                                         onChangePassword = viewModel::changePassword,

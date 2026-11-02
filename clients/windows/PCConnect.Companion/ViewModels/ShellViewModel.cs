@@ -60,7 +60,7 @@ public partial class ShellViewModel(
     private string _weekSummary = string.Empty;
 
     [ObservableProperty]
-    private DayColumn _todayColumn = new("Today", "", true, []);
+    private DayColumn _todayColumn = new(DateTime.Today.ToString("ddd", CultureInfo.CurrentCulture), "", true, []);
 
     [ObservableProperty]
     private string _lastCommandSummary = "Nothing yet";
@@ -104,6 +104,8 @@ public partial class ShellViewModel(
     private string _lastFormattedToday = string.Empty;
     private DateOnly _lastDate = DateOnly.FromDateTime(DateTime.Today);
     private bool _isRemindersHooked;
+    private bool _isDevicesHooked;
+    private bool _isLiveDeviceRefreshHooked;
     private bool _isSettingsHooked;
     private bool _isRealtimeSubscribed;
 
@@ -319,6 +321,32 @@ public partial class ShellViewModel(
             reminders.RefreshTargets();
         });
 
+        if (!_isDevicesHooked)
+        {
+            _isDevicesHooked = true;
+            devices.Refreshed += () => UiDispatcher.Run(() =>
+            {
+                RefreshLastCommand();
+                reminders.RefreshTargets();
+            });
+        }
+
+        if (!_isLiveDeviceRefreshHooked)
+        {
+            _isLiveDeviceRefreshHooked = true;
+            reminders.ItemsChanged += () =>
+            {
+                if (IsSignedIn)
+                {
+                    _ = UiDispatcher.RunAsync(async () =>
+                    {
+                        await devices.LoadAsync();
+                        await ResolveThisPcAsync();
+                    });
+                }
+            };
+        }
+
         if (!_isRealtimeSubscribed)
         {
             _isRealtimeSubscribed = true;
@@ -335,9 +363,10 @@ public partial class ShellViewModel(
                 });
 
             realtime.CommandStatusChanged += status =>
-                UiDispatcher.RunAsync(() =>
+                UiDispatcher.RunAsync(async () =>
                 {
                     devices.ApplyCommandStatus(status);
+                    await devices.LoadAsync();
                     RefreshLastCommand();
                 });
 
@@ -548,14 +577,14 @@ public partial class ShellViewModel(
             total += items.Count;
 
             Week.Add(new DayColumn(
-                Label: isToday ? "Today" : shortDay,
+                Label: shortDay,
                 Number: day.ToString("d MMM", CultureInfo.CurrentCulture),
                 IsToday: isToday,
                 Items: items));
         }
 
         WeekSummary = total == 1 ? "1 reminder this week" : $"{total} reminders this week";
-        TodayColumn = Week.FirstOrDefault(d => d.IsToday) ?? new DayColumn("Today", "", true, []);
+        TodayColumn = Week.FirstOrDefault(d => d.IsToday) ?? new DayColumn(DateTime.Today.ToString("ddd", CultureInfo.CurrentCulture), "", true, []);
     }
 
     private void RefreshLastCommand()
@@ -574,16 +603,22 @@ public partial class ShellViewModel(
         {
             case WeekItem wi:
             {
-                var isRecurring = !string.IsNullOrWhiteSpace(wi.RecurrenceText);
-                var reminder = isRecurring ? reminders.Items.FirstOrDefault(r => r.Id == wi.Id) : null;
-                var recurrence = isRecurring ? (wi.RecurrenceText ?? "Does not repeat") : "Does not repeat";
+                var reminder = reminders.Items.FirstOrDefault(r => r.Id == wi.Id);
+                var isRecurring = !string.IsNullOrWhiteSpace(wi.RecurrenceText) || !string.IsNullOrEmpty(reminder?.Rrule);
+                var recurrence = isRecurring
+                    ? (wi.RecurrenceText ?? (reminder is not null
+                        ? Recurrence.Describe(reminder.Rrule, reminder.DueAt.ToLocalTime(), settings.Use24HourClock)
+                        : "Does not repeat"))
+                    : "Does not repeat";
 
                 OpenEventDetail(
                     id: wi.Id,
                     title: wi.Body,
-                    timeAndDate: isRecurring ? (wi.RecurrenceText ?? string.Empty) : $"{wi.FullDate} · {wi.Time}",
+                    timeAndDate: isRecurring ? recurrence : $"{wi.FullDate} · {wi.Time}",
                     recurrence: recurrence,
-                    targets: string.IsNullOrWhiteSpace(wi.TargetText) ? "All PCs" : wi.TargetText,
+                    targets: string.IsNullOrWhiteSpace(wi.TargetText)
+                        ? (reminder is not null ? reminders.DescribeTargets(reminder.DeviceIds) : "All PCs")
+                        : wi.TargetText,
                     isCompleted: wi.IsCompleted,
                     isSnoozed: wi.IsSnoozed,
                     snoozeLabel: wi.SnoozeLabel,
@@ -705,7 +740,7 @@ public partial class ShellViewModel(
             var serverOccurrences = await api.GetReminderOccurrencesAsync(reminderId);
             if (serverOccurrences is not null && serverOccurrences.Count > 0)
             {
-                foreach (var occ in serverOccurrences)
+                foreach (var occ in SortOccurrencesOldestToNewest(serverOccurrences))
                 {
                     detail.Occurrences.Add(CreateOccurrenceItem(occ.OccursAt, occ.EffectiveBody, occ.CustomBody, occ.Status));
                 }
@@ -727,7 +762,7 @@ public partial class ShellViewModel(
             var targetCount = Recurrence.TargetOccurrenceCount(rrule);
 
             var maxYears = rrule.Contains("FREQ=YEARLY", StringComparison.OrdinalIgnoreCase) ? 6 : 2;
-            var maxDays = rrule.Contains("FREQ=HOURLY", StringComparison.OrdinalIgnoreCase) ? 3 : (maxYears * 365);
+            var maxDays = rrule.Contains("FREQ=HOURLY", StringComparison.OrdinalIgnoreCase) ? 30 : (maxYears * 365);
             var fromDate = startDate > today ? startDate : today;
             var horizon = today.AddDays(maxDays);
             var untilDate = recurrenceUntil.HasValue ? DateOnly.FromDateTime(recurrenceUntil.Value.ToLocalTime().Date) : horizon;
@@ -738,15 +773,27 @@ public partial class ShellViewModel(
 
             if (isHourly)
             {
-                var curDt = DateTime.Now;
-                if (curDt < localDue.DateTime) curDt = localDue.DateTime;
+                var intervalHours = ParseHourlyInterval(rrule);
+                var curDt = localDue.DateTime;
+                var cutoffDt = DateTime.Now.AddMinutes(-5);
+                if (curDt < cutoffDt)
+                {
+                    var elapsedHours = (cutoffDt - curDt).TotalHours;
+                    var steps = (long)Math.Ceiling(elapsedHours / intervalHours);
+                    if (steps > 0)
+                    {
+                        curDt = curDt.AddHours(steps * intervalHours);
+                    }
+                }
+
+                var untilLocal = recurrenceUntil?.ToLocalTime().DateTime;
                 var count = 0;
-                while (count < targetCount && count < 50)
+                while (count < targetCount && count < 50 && (!untilLocal.HasValue || curDt <= untilLocal.Value))
                 {
                     var dto = new DateTimeOffset(DateTime.SpecifyKind(curDt, DateTimeKind.Local));
                     detail.Occurrences.Add(CreateOccurrenceItem(dto, body, null, "pending"));
                     count++;
-                    curDt = curDt.AddHours(1);
+                    curDt = curDt.AddHours(intervalHours);
                 }
             }
             else
@@ -767,6 +814,30 @@ public partial class ShellViewModel(
         }
 
         detail.IsLoadingOccurrences = false;
+    }
+
+    public static IReadOnlyList<ReminderOccurrenceResponse> SortOccurrencesOldestToNewest(
+        IEnumerable<ReminderOccurrenceResponse> items) =>
+        items.OrderBy(static o => o.OccursAt.ToUniversalTime()).ToList();
+
+    public static int ParseHourlyInterval(string? rrule)
+    {
+        if (string.IsNullOrWhiteSpace(rrule))
+        {
+            return 1;
+        }
+
+        foreach (var part in rrule.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (part.StartsWith("INTERVAL=", StringComparison.OrdinalIgnoreCase) &&
+                int.TryParse(part["INTERVAL=".Length..], CultureInfo.InvariantCulture, out var parsed) &&
+                parsed >= 1)
+            {
+                return parsed;
+            }
+        }
+
+        return 1;
     }
 
     [RelayCommand]
@@ -1062,6 +1133,8 @@ public partial class DevicesViewModel(
     /// </summary>
     public Func<string, string, Task<string?>>? RequestStepUpPassword { get; set; }
 
+    public event Action? Refreshed;
+
     public void SetThisPc(string? deviceId)
     {
         _thisPcId = deviceId;
@@ -1099,6 +1172,7 @@ public partial class DevicesViewModel(
             }
 
             RebuildSelectedDetail();
+            Refreshed?.Invoke();
         }
         catch (Exception ex) when (ex is PcConnectApiException or HttpRequestException)
         {
@@ -1129,6 +1203,12 @@ public partial class DevicesViewModel(
         RebuildSelectedDetail();
     }
 
+    public static bool IsCommandAllowed(DeviceItem device, string type) =>
+        device.AllowedCommands.Count == 0 || device.AllowedCommands.Contains(type, StringComparer.Ordinal);
+
+    public static bool IsCommandProtected(DeviceItem device, string type) =>
+        IsCommandAllowed(device, type) && device.PasswordRequiredCommands.Contains(type, StringComparer.Ordinal);
+
     private void RebuildSelectedDetail()
     {
         SelectedCommands.Clear();
@@ -1139,11 +1219,9 @@ public partial class DevicesViewModel(
             return;
         }
 
-        var allowed = SelectedDevice.AllowedCommands;
-
         foreach (var type in CommandTypes.All)
         {
-            if (allowed.Count > 0 && !allowed.Contains(type))
+            if (!IsCommandAllowed(SelectedDevice, type))
             {
                 continue;
             }
@@ -1154,7 +1232,7 @@ public partial class DevicesViewModel(
                 Name = ShellViewModel.Describe(type),
                 IconKey = ShellViewModel.IconFor(type),
                 Accepted = true,
-                AsksForPassword = SelectedDevice.PasswordRequiredCommands.Contains(type),
+                AsksForPassword = IsCommandProtected(SelectedDevice, type),
             });
         }
 
@@ -1208,6 +1286,12 @@ public partial class DevicesViewModel(
             return;
         }
 
+        if (!IsCommandAllowed(SelectedDevice, normalised))
+        {
+            StatusMessage = $"{ShellViewModel.Describe(normalised)} is disabled in {SelectedDevice.DisplayName}'s desktop preferences.";
+            return;
+        }
+
         IsBusy = true;
         StatusMessage = string.Empty;
 
@@ -1218,7 +1302,7 @@ public partial class DevicesViewModel(
             // The target PC decides which commands need fresh confirmation.
             // Prompt before sending so the user sees one dialog rather than a
             // rejected request followed by a dialog.
-            if (SelectedDevice.PasswordRequiredCommands.Contains(normalised) && RequestStepUpPassword is not null)
+            if (IsCommandProtected(SelectedDevice, normalised) && RequestStepUpPassword is not null)
             {
                 var password = await RequestStepUpPassword(normalised, SelectedDevice.DisplayName);
                 if (password is null)
@@ -1232,6 +1316,7 @@ public partial class DevicesViewModel(
                 stepUpToken = verified?.StepUpToken;
             }
 
+            var targetDisplayName = SelectedDevice.DisplayName;
             var command = await api.IssueCommandAsync(new IssueCommandRequest(
                 Guid.CreateVersion7().ToString(),
                 SelectedDevice.Id,
@@ -1244,7 +1329,8 @@ public partial class DevicesViewModel(
             {
                 RecentCommands.Insert(0, new CommandItem(command));
                 RebuildSelectedDetail();
-                StatusMessage = $"{ShellViewModel.Describe(normalised)} sent to {SelectedDevice.DisplayName}.";
+                await LoadAsync();
+                StatusMessage = $"{ShellViewModel.Describe(normalised)} sent to {targetDisplayName}.";
             }
         }
         catch (PcConnectApiException ex)

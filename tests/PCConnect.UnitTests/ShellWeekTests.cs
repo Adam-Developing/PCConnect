@@ -63,7 +63,7 @@ public sealed class ShellWeekTests : IDisposable
 
         shell.TodayColumn.ShouldNotBeNull();
         shell.TodayColumn.IsToday.ShouldBeTrue();
-        shell.TodayColumn.Label.ShouldBe("Today");
+        shell.TodayColumn.Label.ShouldBe(today.ToString("ddd", System.Globalization.CultureInfo.CurrentCulture));
         shell.TodayColumn.IsEmpty.ShouldBeFalse();
         shell.TodayColumn.Items.Count.ShouldBe(1);
         shell.TodayColumn.Items[0].Id.ShouldBe("rem-today");
@@ -94,5 +94,137 @@ public sealed class ShellWeekTests : IDisposable
 
         shell.OnClockTick();
         propertyChangedFired.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void ShowEventDetail_opens_details_for_both_one_time_and_recurring_today_items()
+    {
+        var api = new PcConnectClient(_http, new PcConnectClientOptions { BaseAddress = "http://localhost" }, new InMemoryTokenStore());
+        var realtime = new PcConnectRealtimeClient(api, NullLogger<PcConnectRealtimeClient>.Instance);
+        var settings = new CompanionSettings(NullLogger<CompanionSettings>.Instance);
+        var startup = new StartupRegistration(NullLogger<StartupRegistration>.Instance);
+        var provisioning = new ProvisioningPipeClient(NullLogger<ProvisioningPipeClient>.Instance);
+        var devices = new DevicesViewModel(api, NullLogger<DevicesViewModel>.Instance);
+        var reminders = new RemindersViewModel(api, devices, NullLogger<RemindersViewModel>.Instance);
+        var account = new AccountViewModel(api, NullLogger<AccountViewModel>.Instance);
+        var appSettings = new SettingsViewModel(api, settings, startup, devices, NullLogger<SettingsViewModel>.Instance);
+        var shell = new ShellViewModel(api, realtime, settings, provisioning, devices, reminders, account, appSettings, NullLogger<ShellViewModel>.Instance);
+
+        var today = DateTime.Today;
+        devices.Items.Add(new DeviceItem(new DeviceResponse(
+            Id: "pc-1",
+            DisplayName: "ADAM-PC",
+            Platform: "windows",
+            OsVersion: "Windows 11",
+            AgentVersion: "2.0.0",
+            Status: "active",
+            IsOnline: true,
+            LastSeenAt: DateTimeOffset.UtcNow,
+            PairedAt: DateTimeOffset.UtcNow,
+            AllowedCommands: ["lock", "restart"],
+            PasswordRequiredCommands: ["restart"])));
+
+        reminders.Items.Add(new ReminderResponse(
+            Id: "rem-once",
+            Body: "One-time task",
+            DueAt: new DateTimeOffset(today.Year, today.Month, today.Day, 11, 0, 0, TimeSpan.Zero),
+            DueLocalTime: "11:00",
+            Timezone: "UTC",
+            Rrule: null,
+            RecurrenceUntil: null,
+            IsCompleted: false,
+            CompletedAt: null,
+            CreatedAt: DateTimeOffset.UtcNow,
+            UpdatedAt: DateTimeOffset.UtcNow,
+            DeviceIds: ["pc-1"]));
+
+        reminders.Items.Add(new ReminderResponse(
+            Id: "rem-rec",
+            Body: "Recurring task",
+            DueAt: new DateTimeOffset(today.Year, today.Month, today.Day, 9, 0, 0, TimeSpan.Zero),
+            DueLocalTime: "09:00",
+            Timezone: "UTC",
+            Rrule: "FREQ=DAILY",
+            RecurrenceUntil: null,
+            IsCompleted: false,
+            CompletedAt: null,
+            CreatedAt: DateTimeOffset.UtcNow,
+            UpdatedAt: DateTimeOffset.UtcNow,
+            DeviceIds: null));
+
+        shell.RebuildWeek();
+
+        var oneTimeItem = shell.TodayColumn.Items.Single(i => i.Id == "rem-once");
+        shell.ShowEventDetail(oneTimeItem);
+        shell.IsEventDetailOpen.ShouldBeTrue();
+        shell.ActiveEventDetail.ShouldNotBeNull();
+        shell.ActiveEventDetail!.Title.ShouldBe("One-time task");
+        shell.ActiveEventDetail.IsRecurring.ShouldBeFalse();
+        shell.ActiveEventDetail.Targets.ShouldBe("ADAM-PC");
+
+        var recurringItem = shell.TodayColumn.Items.Single(i => i.Id == "rem-rec");
+        shell.ShowEventDetail(recurringItem);
+        shell.IsEventDetailOpen.ShouldBeTrue();
+        shell.ActiveEventDetail.ShouldNotBeNull();
+        shell.ActiveEventDetail!.Title.ShouldBe("Recurring task");
+        shell.ActiveEventDetail.IsRecurring.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void SortOccurrencesOldestToNewest_orders_chronologically_and_parses_hourly_interval()
+    {
+        var items = new[]
+        {
+            new ReminderOccurrenceResponse(3, "r1", DateTimeOffset.Parse("2026-11-03T07:00:00Z"), "pending", null, null, "rhhggd"),
+            new ReminderOccurrenceResponse(1, "r1", DateTimeOffset.Parse("2026-10-30T19:00:00Z"), "completed", null, null, "rhhggd"),
+            new ReminderOccurrenceResponse(2, "r1", DateTimeOffset.Parse("2026-11-01T13:00:00Z"), "pending", null, null, "rhhggd"),
+        };
+
+        var sorted = ShellViewModel.SortOccurrencesOldestToNewest(items);
+        sorted.Select(o => o.Id).ShouldBe([1L, 2L, 3L]);
+
+        ShellViewModel.ParseHourlyInterval("FREQ=HOURLY;INTERVAL=21").ShouldBe(21);
+        ShellViewModel.ParseHourlyInterval("FREQ=HOURLY").ShouldBe(1);
+    }
+
+    [Fact]
+    public void Target_desktop_preferences_govern_available_and_protected_commands_per_desktop()
+    {
+        var desktopA = new DeviceItem(new DeviceResponse(
+            Id: "pc-a",
+            DisplayName: "ADAM-PC",
+            Platform: "windows",
+            OsVersion: "Windows 11",
+            AgentVersion: "2.0.0",
+            Status: "active",
+            IsOnline: true,
+            LastSeenAt: DateTimeOffset.UtcNow,
+            PairedAt: DateTimeOffset.UtcNow,
+            AllowedCommands: ["lock", "restart"],
+            PasswordRequiredCommands: ["restart"]));
+
+        var desktopB = new DeviceItem(new DeviceResponse(
+            Id: "pc-b",
+            DisplayName: "SECOND-PC",
+            Platform: "windows",
+            OsVersion: "Windows 11",
+            AgentVersion: "2.0.0",
+            Status: "active",
+            IsOnline: true,
+            LastSeenAt: DateTimeOffset.UtcNow,
+            PairedAt: DateTimeOffset.UtcNow,
+            AllowedCommands: ["lock", "sleep", "shutdown"],
+            PasswordRequiredCommands: ["lock", "shutdown"]));
+
+        DevicesViewModel.IsCommandAllowed(desktopA, "lock").ShouldBeTrue();
+        DevicesViewModel.IsCommandAllowed(desktopA, "shutdown").ShouldBeFalse();
+        DevicesViewModel.IsCommandProtected(desktopA, "restart").ShouldBeTrue();
+        DevicesViewModel.IsCommandProtected(desktopA, "lock").ShouldBeFalse();
+        DevicesViewModel.IsCommandProtected(desktopA, "shutdown").ShouldBeFalse();
+
+        // Preferences from desktopA do not affect desktopB
+        DevicesViewModel.IsCommandAllowed(desktopB, "shutdown").ShouldBeTrue();
+        DevicesViewModel.IsCommandAllowed(desktopB, "restart").ShouldBeFalse();
+        DevicesViewModel.IsCommandProtected(desktopB, "lock").ShouldBeTrue();
     }
 }

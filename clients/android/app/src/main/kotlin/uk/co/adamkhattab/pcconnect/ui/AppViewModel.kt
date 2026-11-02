@@ -14,6 +14,7 @@ import uk.co.adamkhattab.pcconnect.data.ApiException
 import uk.co.adamkhattab.pcconnect.data.AppLog
 import uk.co.adamkhattab.pcconnect.data.Capabilities
 import uk.co.adamkhattab.pcconnect.data.Command
+import uk.co.adamkhattab.pcconnect.data.CommandPolicy
 import uk.co.adamkhattab.pcconnect.data.CommandTypes
 import uk.co.adamkhattab.pcconnect.data.CreateReminderRequest
 import uk.co.adamkhattab.pcconnect.data.Device
@@ -59,6 +60,11 @@ data class AppState(
     val stepUpError: String? = null,
     val biometricEnabled: Boolean = false,
     /**
+     * Local phone-level protected commands. Target desktop preferences always
+     * take priority over these settings when showing or sending commands.
+     */
+    val mobileProtectedCommands: Set<String> = emptySet(),
+    /**
      * Whether the server understands a reminder that names its PCs. The picker
      * only appears when it does; otherwise every reminder shows everywhere,
      * which is what the server actually does.
@@ -90,6 +96,7 @@ class AppViewModel(
         _state.update {
             it.copy(
                 biometricEnabled = tokens.requireBiometricForDestructive,
+                mobileProtectedCommands = tokens.mobileProtectedCommands,
             )
         }
 
@@ -128,25 +135,37 @@ class AppViewModel(
                     "command ${event.id.take(8)} -> ${event.status}" + (event.resultCode?.let { " ($it)" } ?: ""),
                 )
 
-                _state.update { state ->
-                    state.copy(
-                        commands = state.commands.map {
-                            if (it.id == event.id) {
-                                it.copy(status = event.status, resultMessage = event.resultMessage)
-                            } else {
-                                it
-                            }
-                        },
-                        // The phone reports the real outcome. v1 said
-                        // {"message":"Success"} for "a row was written" (05 §6).
-                        message = when (event.status) {
-                            "succeeded" -> "Done."
-                            "expired" -> "Not delivered — that PC was offline."
-                            "failed" -> event.resultMessage ?: "That PC could not do it."
-                            else -> state.message
-                        },
-                    )
+                val outcomeMessage = when (event.status) {
+                    "succeeded" -> "Done."
+                    "expired" -> "Not delivered — that PC was offline."
+                    "failed" -> event.resultMessage ?: "That PC could not do it."
+                    else -> null
                 }
+
+                _state.update { state ->
+                    val updatedCommands = state.commands.map {
+                        if (it.id == event.id) {
+                            it.copy(status = event.status, resultMessage = event.resultMessage)
+                        } else {
+                            it
+                        }
+                    }
+                    // The phone reports the real outcome. v1 said
+                    // {"message":"Success"} for "a row was written" (05 §6).
+                    if (outcomeMessage != null) {
+                        pendingUndo = null
+                        state.copy(
+                            commands = updatedCommands,
+                            message = outcomeMessage,
+                            messageId = nextMessageId++,
+                            canUndo = false,
+                        )
+                    } else {
+                        state.copy(commands = updatedCommands)
+                    }
+                }
+
+                runCatching { syncAfterAction() }
             }
         }
 
@@ -273,6 +292,28 @@ class AppViewModel(
         }
     }
 
+    /**
+     * Silently refreshes devices, commands, and reminders after an action without
+     * clobbering any active snackbar message or pending undo state.
+     */
+    private suspend fun syncAfterAction() {
+        coroutineScope {
+            val devicesDeferred = async { runCatching { api.devices() }.getOrNull() }
+            val commandsDeferred = async { runCatching { api.commands() }.getOrNull() }
+            val remindersDeferred = async { runCatching { api.reminders() }.getOrNull() }
+            val devices = devicesDeferred.await()
+            val commands = commandsDeferred.await()
+            val reminders = remindersDeferred.await()
+            _state.update { current ->
+                current.copy(
+                    devices = devices ?: current.devices,
+                    commands = commands ?: current.commands,
+                    reminders = reminders?.sortedBy { r -> r.dueAt } ?: current.reminders,
+                )
+            }
+        }
+    }
+
     fun renameDevice(deviceId: String, displayName: String) = launchWithMessage {
         val trimmed = displayName.trim()
         if (trimmed.isEmpty()) return@launchWithMessage
@@ -291,11 +332,20 @@ class AppViewModel(
 
     // ── commands ─────────────────────────────────────────────────────────────
 
-    /** Commands that the target PC marks as protected wait for confirmation. */
+    /**
+     * Enforces target desktop preferences first (available commands + desktop-required
+     * confirmation), falling back to mobile-protected command settings only for
+     * commands allowed and left unprotected by that desktop.
+     */
     fun requestCommand(deviceId: String, type: String) {
         val device = device(deviceId) ?: return
 
-        if (type in device.passwordRequiredCommands) {
+        if (!CommandPolicy.isCommandAllowed(device, type)) {
+            emitMessage("${CommandTypes.label(type)} is disabled in ${device.displayName}'s desktop preferences.")
+            return
+        }
+
+        if (CommandPolicy.isCommandProtected(device, type, _state.value.mobileProtectedCommands)) {
             _state.update {
                 it.copy(
                     pendingCommand = PendingCommand(deviceId, device.displayName, type),
@@ -371,14 +421,15 @@ class AppViewModel(
     }
 
     private suspend fun sendCommandNow(deviceId: String, type: String, stepUpToken: String?) {
+        val targetName = device(deviceId)?.displayName ?: "that PC"
         val command = api.issueCommand(deviceId, type, stepUpToken)
 
-        _state.update {
-            it.copy(
-                commands = listOf(command) + it.commands,
-                message = "${CommandTypes.label(type)} sent to ${device(deviceId)?.displayName ?: "that PC"}.",
-            )
+        emitMessage(
+            text = "${CommandTypes.label(type)} sent to $targetName.",
+        ) { state ->
+            state.copy(commands = listOf(command) + state.commands)
         }
+        syncAfterAction()
     }
 
     // ── reminders ────────────────────────────────────────────────────────────
@@ -427,6 +478,7 @@ class AppViewModel(
         ) { state ->
             state.copy(reminders = state.reminders.upsertAll(created))
         }
+        syncAfterAction()
     }
 
     fun updateReminder(
@@ -458,11 +510,13 @@ class AppViewModel(
         ) { state ->
             state.copy(reminders = state.reminders.upsert(updated))
         }
+        syncAfterAction()
     }
 
     fun toggleReminder(reminder: Reminder) = launchWithMessage {
         val updated = api.completeReminder(reminder.id, !reminder.isCompleted)
         _state.update { state -> state.copy(reminders = state.reminders.upsert(updated)) }
+        syncAfterAction()
     }
 
     fun deleteReminder(reminder: Reminder) = launchWithMessage {
@@ -473,6 +527,7 @@ class AppViewModel(
         ) { state ->
             state.copy(reminders = state.reminders.removeById(reminder.id))
         }
+        syncAfterAction()
     }
 
     fun undoReminderChange() {
@@ -507,6 +562,7 @@ class AppViewModel(
                     emitMessage("Reminder restored.") { state ->
                         state.copy(reminders = state.reminders.upsert(restored))
                     }
+                    syncAfterAction()
                 }
 
                 is PendingReminderUndo.Edited -> {
@@ -526,6 +582,7 @@ class AppViewModel(
                     emitMessage("Changes undone.") { state ->
                         state.copy(reminders = state.reminders.upsert(reverted))
                     }
+                    syncAfterAction()
                 }
             }
         }
@@ -569,111 +626,50 @@ class AppViewModel(
         }.getOrNull()
 
         if (!serverList.isNullOrEmpty()) {
-            return serverList
+            return sortOccurrencesOldestToNewest(serverList)
         }
 
         return generateLocalOccurrences(reminder)
     }
 
-    private fun generateLocalOccurrences(reminder: Reminder): List<ReminderOccurrenceResponse> {
-        val seriesStart = runCatching {
-            Instant.parse(reminder.dueAt).atZone(java.time.ZoneId.systemDefault()).toLocalDate()
-        }.getOrNull() ?: return emptyList()
-
-        val seriesTime = runCatching {
-            Instant.parse(reminder.dueAt).atZone(java.time.ZoneId.systemDefault()).toLocalTime()
-        }.getOrNull() ?: LocalTime.of(9, 0)
-
-        val zone = java.time.ZoneId.systemDefault()
-        val today = LocalDate.now()
-        val rrule = reminder.rrule.orEmpty()
-        val targetCount = when {
-            rrule.contains("FREQ=HOURLY", ignoreCase = true) -> 10
-            rrule.contains("FREQ=DAILY", ignoreCase = true) -> 7
-            else -> 3
-        }
-
-        val maxDays = if (rrule.contains("FREQ=YEARLY", ignoreCase = true)) 365L * 6 else 365L * 2
-        val fromDate = if (seriesStart.isAfter(today)) seriesStart else today
-        val untilDate = reminder.recurrenceUntil?.let {
-            runCatching { Instant.parse(it).atZone(zone).toLocalDate() }.getOrNull()
-        }
-        val toDate = listOfNotNull(today.plusDays(maxDays), untilDate).minOrNull() ?: today.plusDays(maxDays)
-
-        val list = mutableListOf<ReminderOccurrenceResponse>()
-
-        if (rrule.contains("FREQ=HOURLY", ignoreCase = true)) {
-            var curDt = java.time.LocalDateTime.now()
-            val startDt = seriesStart.atTime(seriesTime)
-            if (curDt.isBefore(startDt)) curDt = startDt
-            while (list.size < targetCount && list.size < 50) {
-                val zdt = curDt.atZone(zone)
-                list.add(
-                    ReminderOccurrenceResponse(
-                        id = 0,
-                        reminderId = reminder.id,
-                        occursAt = zdt.toInstant().toString(),
-                        status = "pending",
-                        completedAt = null,
-                        customBody = null,
-                        effectiveBody = reminder.body,
-                    )
-                )
-                curDt = curDt.plusHours(1)
-            }
-        } else {
-            var cur = fromDate
-            while (!cur.isAfter(toDate) && list.size < targetCount) {
-                if (occursOn(reminder.rrule, seriesStart, cur)) {
-                    val zdt = cur.atTime(seriesTime).atZone(zone)
-                    val instantStr = zdt.toInstant().toString()
-                    list.add(
-                        ReminderOccurrenceResponse(
-                            id = 0,
-                            reminderId = reminder.id,
-                            occursAt = instantStr,
-                            status = "pending",
-                            completedAt = null,
-                            customBody = null,
-                            effectiveBody = reminder.body,
-                        )
-                    )
-                }
-                cur = cur.plusDays(1)
-            }
-        }
-        return list
-    }
+    private fun generateLocalOccurrences(reminder: Reminder): List<ReminderOccurrenceResponse> =
+        generateLocalOccurrencesFor(reminder)
 
     suspend fun toggleOccurrence(reminderId: String, occursAt: String, currentStatus: String): ReminderOccurrenceResponse {
         val willComplete = currentStatus != "completed"
-        return api.updateReminderOccurrence(
+        val updated = api.updateReminderOccurrence(
             reminderId,
             UpdateReminderOccurrenceRequest(
                 occursAt = occursAt,
                 status = if (willComplete) "completed" else "pending",
             )
         )
+        syncAfterAction()
+        return updated
     }
 
     suspend fun modifyOccurrenceText(reminderId: String, occursAt: String, newText: String): ReminderOccurrenceResponse {
-        return api.updateReminderOccurrence(
+        val updated = api.updateReminderOccurrence(
             reminderId,
             UpdateReminderOccurrenceRequest(
                 occursAt = occursAt,
                 customBody = newText,
             )
         )
+        syncAfterAction()
+        return updated
     }
 
     suspend fun resetOccurrenceText(reminderId: String, occursAt: String): ReminderOccurrenceResponse {
-        return api.updateReminderOccurrence(
+        val updated = api.updateReminderOccurrence(
             reminderId,
             UpdateReminderOccurrenceRequest(
                 occursAt = occursAt,
                 clearCustomBody = true,
             )
         )
+        syncAfterAction()
+        return updated
     }
 
     suspend fun revertOccurrence(
@@ -683,7 +679,7 @@ class AppViewModel(
         customBody: String? = null,
         clearCustomBody: Boolean = false,
     ): ReminderOccurrenceResponse {
-        return api.updateReminderOccurrence(
+        val updated = api.updateReminderOccurrence(
             reminderId,
             UpdateReminderOccurrenceRequest(
                 occursAt = occursAt,
@@ -692,20 +688,25 @@ class AppViewModel(
                 clearCustomBody = clearCustomBody,
             )
         )
+        syncAfterAction()
+        return updated
     }
 
     suspend fun stopOccurrence(reminderId: String, occursAt: String) {
         api.deleteReminderOccurrence(reminderId, occursAt)
+        syncAfterAction()
     }
 
     suspend fun restoreOccurrence(reminderId: String, occursAt: String): ReminderOccurrenceResponse {
-        return api.updateReminderOccurrence(
+        val updated = api.updateReminderOccurrence(
             reminderId,
             UpdateReminderOccurrenceRequest(
                 occursAt = occursAt,
                 status = "pending",
             )
         )
+        syncAfterAction()
+        return updated
     }
 
     // ── settings ─────────────────────────────────────────────────────────────
@@ -720,37 +721,14 @@ class AppViewModel(
         }
     }
 
-    fun toggleCommandProtection(commandType: String, deviceId: String? = null) = launchWithMessage {
-        val devices = _state.value.devices
-        if (devices.isEmpty()) return@launchWithMessage
+    fun toggleCommandProtection(commandType: String) {
+        if (commandType !in CommandTypes.ALL) return
 
-        val targets = if (deviceId != null) devices.filter { it.id == deviceId } else devices
-        if (targets.isEmpty()) return@launchWithMessage
-
-        val currentlyProtected = targets.all { commandType in it.passwordRequiredCommands }
-        val shouldProtect = !currentlyProtected
-
-        // Instant optimistic update so UI switches respond without lag
-        val updatedList = devices.map { dev ->
-            if (targets.any { it.id == dev.id }) {
-                val current = dev.passwordRequiredCommands.toSet()
-                val next = if (shouldProtect) current + commandType else current - commandType
-                dev.copy(passwordRequiredCommands = next.toList())
-            } else {
-                dev
-            }
-        }
-        _state.update { it.copy(devices = updatedList) }
-
-        // Persist to backend for each targeted device
-        for (dev in targets) {
-            val current = dev.passwordRequiredCommands.toSet()
-            val next = if (shouldProtect) current + commandType else current - commandType
-            api.updateDevice(dev.id, UpdateDeviceRequest(passwordRequiredCommands = next.toList()))
-        }
+        val current = _state.value.mobileProtectedCommands
+        val next = if (commandType in current) current - commandType else current + commandType
+        tokens.mobileProtectedCommands = next
+        _state.update { it.copy(mobileProtectedCommands = next) }
     }
-
-    fun toggleCommandProtectionForAll(commandType: String) = toggleCommandProtection(commandType, deviceId = null)
 
     var requireBiometric: Boolean
         get() = tokens.requireBiometricForDestructive
@@ -845,8 +823,133 @@ class AppViewModel(
             today -> "Today"
             today.plusDays(1) -> "Tomorrow"
             today.minusDays(1) -> "Yesterday"
-            else -> "${date.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.getDefault())} " +
+            else -> formatCalendarDay(date, today)
+        }
+
+        fun formatCalendarDay(date: LocalDate, today: LocalDate = LocalDate.now()): String {
+            val base = "${date.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.getDefault())} " +
                 "${date.dayOfMonth} ${date.month.getDisplayName(TextStyle.SHORT, Locale.getDefault())}"
+            return if (date.year != today.year) "$base ${date.year}" else base
+        }
+
+        /**
+         * Formats an occurrence with its explicit calendar date first so an
+         * oldest -> newest list reads chronologically even for sub-daily intervals.
+         */
+        fun formatOccurrenceMoment(
+            value: String,
+            zone: ZoneId = ZoneId.systemDefault(),
+            today: LocalDate = LocalDate.now(zone),
+        ): String {
+            val moment = zoned(value, zone) ?: return value
+            val date = moment.toLocalDate()
+            val cal = formatCalendarDay(date, today)
+            val relative = when (date) {
+                today -> " (Today)"
+                today.plusDays(1) -> " (Tomorrow)"
+                today.minusDays(1) -> " (Yesterday)"
+                else -> ""
+            }
+            val time = moment.format(TimeOnly)
+            return "$cal$relative at $time"
+        }
+
+        fun sortOccurrencesOldestToNewest(items: List<ReminderOccurrenceResponse>): List<ReminderOccurrenceResponse> =
+            items.sortedWith(
+                compareBy<ReminderOccurrenceResponse> {
+                    runCatching { Instant.parse(it.occursAt) }.getOrNull() ?: Instant.MAX
+                }.thenBy { it.occursAt },
+            )
+
+        fun parseHourlyInterval(rrule: String?): Long {
+            if (rrule.isNullOrBlank()) return 1L
+            return rrule.split(';')
+                .firstOrNull { it.trim().startsWith("INTERVAL=", ignoreCase = true) }
+                ?.substringAfter('=')
+                ?.trim()
+                ?.toLongOrNull()
+                ?.coerceAtLeast(1L)
+                ?: 1L
+        }
+
+        internal fun generateLocalOccurrencesFor(
+            reminder: Reminder,
+            now: Instant = Instant.now(),
+            zone: ZoneId = ZoneId.systemDefault(),
+        ): List<ReminderOccurrenceResponse> {
+            val dueZdt = runCatching { Instant.parse(reminder.dueAt).atZone(zone) }.getOrNull() ?: return emptyList()
+            val seriesStart = dueZdt.toLocalDate()
+            val seriesTime = dueZdt.toLocalTime()
+            val today = now.atZone(zone).toLocalDate()
+            val rrule = reminder.rrule.orEmpty()
+            val targetCount = when {
+                rrule.contains("FREQ=HOURLY", ignoreCase = true) -> 10
+                rrule.contains("FREQ=DAILY", ignoreCase = true) -> 7
+                else -> 3
+            }
+
+            val untilInstant = reminder.recurrenceUntil?.let {
+                runCatching { Instant.parse(it) }.getOrNull()
+            }
+            val list = mutableListOf<ReminderOccurrenceResponse>()
+
+            if (rrule.contains("FREQ=HOURLY", ignoreCase = true)) {
+                val intervalHours = parseHourlyInterval(rrule)
+                var curZdt = dueZdt
+                val cutoff = now.minusSeconds(300)
+                if (curZdt.toInstant().isBefore(cutoff)) {
+                    val elapsedSeconds = cutoff.epochSecond - curZdt.toInstant().epochSecond
+                    val stepSeconds = intervalHours * 3600L
+                    val steps = (elapsedSeconds + stepSeconds - 1L) / stepSeconds
+                    if (steps > 0L) {
+                        curZdt = curZdt.plusHours(steps * intervalHours)
+                    }
+                }
+                while (list.size < targetCount && list.size < 50) {
+                    val curInstant = curZdt.toInstant()
+                    if (untilInstant != null && curInstant.isAfter(untilInstant)) break
+                    list.add(
+                        ReminderOccurrenceResponse(
+                            id = 0,
+                            reminderId = reminder.id,
+                            occursAt = curInstant.toString(),
+                            status = "pending",
+                            completedAt = null,
+                            customBody = null,
+                            effectiveBody = reminder.body,
+                        ),
+                    )
+                    curZdt = curZdt.plusHours(intervalHours)
+                }
+            } else {
+                val maxDays = if (rrule.contains("FREQ=YEARLY", ignoreCase = true)) 365L * 6 else 365L * 2
+                val fromDate = if (seriesStart.isAfter(today)) seriesStart else today
+                val untilDate = untilInstant?.atZone(zone)?.toLocalDate()
+                val toDate = listOfNotNull(today.plusDays(maxDays), untilDate).minOrNull() ?: today.plusDays(maxDays)
+
+                var cur = fromDate
+                while (!cur.isAfter(toDate) && list.size < targetCount) {
+                    if (occursOn(reminder.rrule, seriesStart, cur)) {
+                        val zdt = cur.atTime(seriesTime).atZone(zone)
+                        val curInstant = zdt.toInstant()
+                        if (untilInstant == null || !curInstant.isAfter(untilInstant)) {
+                            list.add(
+                                ReminderOccurrenceResponse(
+                                    id = 0,
+                                    reminderId = reminder.id,
+                                    occursAt = curInstant.toString(),
+                                    status = "pending",
+                                    completedAt = null,
+                                    customBody = null,
+                                    effectiveBody = reminder.body,
+                                ),
+                            )
+                        }
+                    }
+                    cur = cur.plusDays(1)
+                }
+            }
+            return sortOccurrencesOldestToNewest(list)
         }
 
         /** "Yesterday 23:10" for a log line, "09:14" when it happened today. */

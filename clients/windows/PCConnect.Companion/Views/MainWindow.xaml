@@ -591,19 +591,39 @@
                 <StackPanel>
                   <TextBlock Text="Today" Style="{StaticResource CardTitle}" />
 
-                  <ItemsControl ItemsSource="{Binding TodayColumn.Items}" Margin="0,8,0,0">
+                  <ItemsControl ItemsSource="{Binding TodayColumn.Items}" Margin="0,8,0,0"
+                                Grid.IsSharedSizeScope="True">
                     <ItemsControl.ItemTemplate>
                       <DataTemplate>
-                        <Grid Margin="0,6">
-                          <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="46" />
-                            <ColumnDefinition Width="*" />
-                          </Grid.ColumnDefinitions>
-                          <TextBlock Text="{Binding Time}" Style="{StaticResource Mono}"
-                                     Foreground="{StaticResource InkSoft}" />
-                          <TextBlock Grid.Column="1" Text="{Binding Body}" Style="{StaticResource Body}"
-                                     TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" />
-                        </Grid>
+                        <Button Command="{Binding DataContext.ShowEventDetailCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                CommandParameter="{Binding}"
+                                Background="Transparent" BorderThickness="0" Padding="0" Margin="0,2"
+                                HorizontalContentAlignment="Stretch" Cursor="Hand"
+                                ToolTip="Click to view details">
+                          <Button.Template>
+                            <ControlTemplate TargetType="Button">
+                              <Border x:Name="TodayRowBd" Background="Transparent" CornerRadius="6" Padding="6,4">
+                                <Grid>
+                                  <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" SharedSizeGroup="TodayTime" />
+                                    <ColumnDefinition Width="*" />
+                                  </Grid.ColumnDefinitions>
+                                  <TextBlock Text="{Binding Time}" Style="{StaticResource Mono}"
+                                             Foreground="{StaticResource InkSoft}" Margin="0,0,12,0"
+                                             VerticalAlignment="Center" />
+                                  <TextBlock Grid.Column="1" Text="{Binding Body}" Style="{StaticResource Body}"
+                                             VerticalAlignment="Center"
+                                             TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" />
+                                </Grid>
+                              </Border>
+                              <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                  <Setter TargetName="TodayRowBd" Property="Background" Value="{StaticResource Track}" />
+                                </Trigger>
+                              </ControlTemplate.Triggers>
+                            </ControlTemplate>
+                          </Button.Template>
+                        </Button>
                       </DataTemplate>
                     </ItemsControl.ItemTemplate>
                   </ItemsControl>
@@ -928,7 +948,7 @@
                       <StackPanel Orientation="Horizontal" DockPanel.Dock="Left">
                         <Path Data="{StaticResource Icon.Key}" Fill="{StaticResource InkFaint}"
                               Width="15" Height="15" Stretch="Uniform" VerticalAlignment="Center" />
-                        <TextBlock Text="Asks for your password before it's sent"
+                        <TextBlock Text="Available and password-protected commands follow this PC's desktop preferences"
                                    Style="{StaticResource Caption}" Margin="6,0,0,0" />
                       </StackPanel>
                       <TextBlock Text="{Binding StatusMessage}" Style="{StaticResource Caption}"
@@ -1922,18 +1942,23 @@
                   </Border>
 
                   <Border Style="{StaticResource Card}" Margin="0,14,0,0">
-                    <DockPanel>
-                      <Path Data="{StaticResource Icon.Badge}" Fill="{StaticResource InkSoft}"
-                            Width="22" Height="22" Stretch="Uniform" DockPanel.Dock="Left"
+                    <Grid>
+                      <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                      </Grid.ColumnDefinitions>
+                      <Path Grid.Column="0" Data="{StaticResource Icon.Badge}" Fill="{StaticResource InkSoft}"
+                            Width="22" Height="22" Stretch="Uniform"
                             VerticalAlignment="Center" />
-                      <StackPanel DockPanel.Dock="Left" Margin="14,0,0,0" VerticalAlignment="Center">
+                      <StackPanel Grid.Column="1" Margin="14,0,12,0" VerticalAlignment="Center">
                         <TextBlock Text="This PC's name" Style="{StaticResource Body}" />
-                        <TextBlock Style="{StaticResource Caption}" TextWrapping="Wrap" MaxWidth="160"
+                        <TextBlock Style="{StaticResource Caption}" TextWrapping="Wrap"
                                    Text="How it appears on your phone and other PCs." />
                       </StackPanel>
-                      <TextBox Text="{Binding PcName, UpdateSourceTrigger=PropertyChanged}"
-                               Width="140" Height="34" MaxLength="128" HorizontalAlignment="Right" />
-                    </DockPanel>
+                      <TextBox Grid.Column="2" Text="{Binding PcName, UpdateSourceTrigger=PropertyChanged}"
+                               Width="136" Height="34" MaxLength="128" VerticalAlignment="Center" />
+                    </Grid>
                   </Border>
 
                   <Button Content="Save this PC's name" Command="{Binding RenameThisPcCommand}"
@@ -1996,8 +2021,8 @@
                   <StackPanel>
                     <StackPanel>
                       <TextBlock Text="Commands" Style="{StaticResource CardTitle}" />
-                      <TextBlock Style="{StaticResource Caption}" Margin="0,2,0,0"
-                                 Text="Choose what this PC accepts and which commands ask for your password." />
+                      <TextBlock Style="{StaticResource Caption}" Margin="0,2,0,0" TextWrapping="Wrap"
+                                 Text="Choose what this PC accepts and which commands ask for your password. Preferences set here apply only to this PC and take priority over mobile and other devices' settings." />
                     </StackPanel>
 
                     <Grid Margin="0,14,0,4">

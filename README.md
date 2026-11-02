@@ -65,7 +65,7 @@ the temporary compatibility routes described in the migration plan
 
 You need .NET 10 and Docker.
 
-On Windows, run `powershell ./make-and-run-backend.ps1`. PostgreSQL uses local port
+On Windows, run `.\make-and-run-backend.cmd`. PostgreSQL uses local port
 15432; override it with `-PostgresPort 15433` if needed. Windows can reserve ports
 in the old 55432 range, preventing Docker from binding them. The script moves a
 stopped development PostgreSQL container to the chosen port, reuses its data volume,

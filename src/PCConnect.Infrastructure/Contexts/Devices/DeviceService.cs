@@ -1,4 +1,4 @@
-﻿using System.Security.Cryptography;
+using System.Security.Cryptography;
 using Dapper;
 using Microsoft.Extensions.Logging;
 using Npgsql;
@@ -252,6 +252,13 @@ public sealed class DeviceService(
         CallerIdentity caller, Guid deviceId, UpdateDeviceRequest request, CancellationToken ct = default)
     {
         caller.Require(Scopes.DeviceManage);
+
+        if (caller.ClientKind == ClientKinds.Mobile &&
+            (request.AllowedCommands is not null || request.PasswordRequiredCommands is not null))
+        {
+            throw AppException.Forbidden(ErrorCodes.AuthScopeInsufficient,
+                "Desktop command preferences apply only to that desktop and take priority over mobile settings.");
+        }
 
         if (request.AllowedCommands is { } allowed)
         {

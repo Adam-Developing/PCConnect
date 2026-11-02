@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -55,7 +54,7 @@ fun SettingsScreen(
     state: AppState,
     biometricAvailable: Boolean,
     onToggleBiometric: (Boolean) -> Unit,
-    onToggleCommandProtection: (String, String?) -> Unit,
+    onToggleCommandProtection: (String) -> Unit,
     baseUrl: String,
     onBaseUrl: (String) -> Unit,
     onChangePassword: (String, String) -> Unit,
@@ -66,7 +65,7 @@ fun SettingsScreen(
 
     LazyColumn(
         modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 24.dp),
+        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 32.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         item { ProfileCard(state) }
@@ -166,7 +165,7 @@ private fun SecurityCard(
     state: AppState,
     biometricAvailable: Boolean,
     onToggleBiometric: (Boolean) -> Unit,
-    onToggleCommandProtection: (String, String?) -> Unit,
+    onToggleCommandProtection: (String) -> Unit,
     onChangePassword: () -> Unit,
 ) {
     PcCard(Modifier.fillMaxWidth()) {
@@ -216,43 +215,23 @@ private fun SecurityCard(
 
         RowDivider(startIndent = 16.dp)
 
-        // Clear UX/UI for picking which commands require fingerprint/confirmation
+        // Mobile-owned command protection preferences (freely editable across multiple PCs)
         Column(Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
             Text("Protected commands", color = PcColors.Ink, style = PcType.BodyStrong)
             Spacer(Modifier.height(2.dp))
-            Caption("Select which commands require confirmation before running:")
+            Caption("Choose your mobile preferences for commands sent from this phone:")
+
+            Spacer(Modifier.height(10.dp))
+
+            InfoNote(
+                text = "You can edit your mobile preferences freely for all your PCs. When controlling a specific PC, that desktop's own preferences take priority.",
+                icon = PcIcons.Info,
+                background = PcColors.PrimaryTint,
+                iconTint = PcColors.Primary,
+                modifier = Modifier.fillMaxWidth(),
+            )
 
             Spacer(Modifier.height(12.dp))
-
-            var selectedDeviceId by rememberSaveable { mutableStateOf<String?>(null) }
-
-            // Device selector if multiple PCs
-            if (state.devices.size > 1) {
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState())
-                        .padding(bottom = 10.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    val allSelected = selectedDeviceId == null
-                    PcChip(
-                        text = "All PCs",
-                        icon = PcIcons.Computer,
-                        style = if (allSelected) ChipStyle.Selected else ChipStyle.Outline,
-                        onClick = { selectedDeviceId = null },
-                    )
-                    state.devices.forEach { dev ->
-                        val isSelected = selectedDeviceId == dev.id
-                        PcChip(
-                            text = dev.displayName,
-                            icon = PcIcons.Computer,
-                            style = if (isSelected) ChipStyle.Selected else ChipStyle.Outline,
-                            onClick = { selectedDeviceId = dev.id },
-                        )
-                    }
-                }
-            }
 
             val allCommands = listOf(
                 CommandTypes.SHUTDOWN,
@@ -263,82 +242,67 @@ private fun SecurityCard(
                 CommandTypes.LOCK,
             )
 
-            if (state.devices.isEmpty()) {
-                Box(
-                    Modifier
-                        .fillMaxWidth()
-                        .clip(PcShapes.Control)
-                        .background(PcColors.Track)
-                        .padding(14.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Caption("No PCs connected yet. Once a PC connects, you can protect its commands here.")
-                }
-            } else {
-                Column(
-                    Modifier
-                        .fillMaxWidth()
-                        .clip(PcShapes.Control)
-                        .border(1.dp, PcColors.Border, PcShapes.Control),
-                ) {
-                    allCommands.forEachIndexed { index, cmdType ->
-                        if (index > 0) RowDivider()
+            val confirmLabel = if (state.biometricEnabled) "fingerprint confirmation" else "password confirmation"
 
-                        val isProtected = if (selectedDeviceId != null) {
-                            state.devices.firstOrNull { it.id == selectedDeviceId }?.passwordRequiredCommands?.contains(cmdType) == true
-                        } else {
-                            state.devices.all { cmdType in it.passwordRequiredCommands }
-                        }
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(PcShapes.Control)
+                    .border(1.dp, PcColors.Border, PcShapes.Control),
+            ) {
+                allCommands.forEachIndexed { index, cmdType ->
+                    if (index > 0) RowDivider()
 
-                        val iconTint = when (cmdType) {
-                            CommandTypes.SHUTDOWN, CommandTypes.RESTART -> PcColors.Danger
-                            CommandTypes.HIBERNATE, CommandTypes.SLEEP, CommandTypes.SIGN_OUT -> PcColors.WarnInk
-                            else -> PcColors.Primary
-                        }
+                    val isProtected = cmdType in state.mobileProtectedCommands
 
-                        Row(
+                    val iconTint = when (cmdType) {
+                        CommandTypes.SHUTDOWN, CommandTypes.RESTART -> PcColors.Danger
+                        CommandTypes.HIBERNATE, CommandTypes.SLEEP, CommandTypes.SIGN_OUT -> PcColors.WarnInk
+                        else -> PcColors.Primary
+                    }
+
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable { onToggleCommandProtection(cmdType) }
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        Box(
                             Modifier
-                                .fillMaxWidth()
-                                .clickable { onToggleCommandProtection(cmdType, selectedDeviceId) }
-                                .padding(horizontal = 14.dp, vertical = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                .size(36.dp)
+                                .clip(PcShapes.SmallControl)
+                                .background(if (isProtected) iconTint.copy(alpha = 0.12f) else PcColors.Track),
+                            contentAlignment = Alignment.Center,
                         ) {
-                            Box(
-                                Modifier
-                                    .size(36.dp)
-                                    .clip(PcShapes.SmallControl)
-                                    .background(if (isProtected) iconTint.copy(alpha = 0.12f) else PcColors.Track),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                PcIcon(
-                                    PcIcons.forCommand(cmdType),
-                                    null,
-                                    size = 20.dp,
-                                    tint = if (isProtected) iconTint else PcColors.InkSoft,
-                                )
-                            }
-
-                            Column(Modifier.weight(1f)) {
-                                Text(
-                                    CommandTypes.label(cmdType),
-                                    color = PcColors.Ink,
-                                    style = PcType.BodyStrong,
-                                )
-                                Caption(
-                                    if (isProtected) {
-                                        if (state.biometricEnabled) "Requires fingerprint confirmation" else "Requires password confirmation"
-                                    } else {
-                                        "Runs immediately without confirmation"
-                                    },
-                                )
-                            }
-
-                            PcSwitch(
-                                checked = isProtected,
-                                onCheckedChange = { onToggleCommandProtection(cmdType, selectedDeviceId) },
+                            PcIcon(
+                                PcIcons.forCommand(cmdType),
+                                null,
+                                size = 20.dp,
+                                tint = if (isProtected) iconTint else PcColors.InkSoft,
                             )
                         }
+
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                CommandTypes.label(cmdType),
+                                color = PcColors.Ink,
+                                style = PcType.BodyStrong,
+                            )
+                            Caption(
+                                if (isProtected) {
+                                    "Requires $confirmLabel"
+                                } else {
+                                    "No mobile confirmation"
+                                },
+                            )
+                        }
+
+                        PcSwitch(
+                            checked = isProtected,
+                            onCheckedChange = { onToggleCommandProtection(cmdType) },
+                        )
                     }
                 }
             }

@@ -53,6 +53,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.launch
+import uk.co.adamkhattab.pcconnect.data.Device
+import uk.co.adamkhattab.pcconnect.data.Reminder
 import uk.co.adamkhattab.pcconnect.data.ReminderOccurrenceResponse
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -66,7 +68,6 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import uk.co.adamkhattab.pcconnect.data.Reminder
 import java.time.Instant
 import java.time.LocalDate
 import java.time.YearMonth
@@ -76,10 +77,13 @@ import java.util.Locale
 
 private enum class RemindersViewTab { List, Calendar }
 
-private fun Reminder.hasHitEndDate(): Boolean =
+internal fun Reminder.hasHitEndDate(now: Instant = Instant.now()): Boolean =
     recurrenceUntil?.let {
-        runCatching { Instant.parse(it).isBefore(Instant.now()) }.getOrDefault(false)
+        runCatching { Instant.parse(it).isBefore(now) }.getOrDefault(false)
     } ?: false
+
+internal fun Reminder.isActiveReminder(now: Instant = Instant.now()): Boolean =
+    if (rrule.isNullOrBlank()) !isCompleted else !hasHitEndDate(now)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -93,7 +97,8 @@ fun RemindersScreen(
     onDelete: (Reminder) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var inspecting by remember { mutableStateOf<Reminder?>(null) }
+    var inspectingId by remember { mutableStateOf<String?>(null) }
+    val inspecting = inspectingId?.let { id -> state.reminders.firstOrNull { it.id == id } }
     var viewTab by remember { mutableStateOf(RemindersViewTab.List) }
 
     PullToRefreshBox(
@@ -123,14 +128,14 @@ fun RemindersScreen(
                         RemindersListView(
                             reminders = state.reminders,
                             onToggle = onToggle,
-                            onInspect = { inspecting = it },
+                            onInspect = { inspectingId = it.id },
                             onEdit = onEdit,
                         )
                     } else {
                         RemindersCalendarView(
                             reminders = state.reminders,
                             onToggle = onToggle,
-                            onInspect = { inspecting = it },
+                            onInspect = { inspectingId = it.id },
                             onEdit = onEdit,
                         )
                     }
@@ -169,14 +174,21 @@ fun RemindersScreen(
     inspecting?.let { reminder ->
         ReminderDetailDialog(
             reminder = reminder,
+            devices = state.devices,
+            remindersTargetable = state.remindersTargetable,
             viewModel = viewModel,
-            onDismiss = { inspecting = null },
+            onDismiss = { inspectingId = null },
+            onToggleComplete = if (reminder.rrule.isNullOrBlank()) {
+                { onToggle(reminder) }
+            } else {
+                null
+            },
             onEdit = {
-                inspecting = null
+                inspectingId = null
                 onEdit(reminder)
             },
             onDelete = {
-                inspecting = null
+                inspectingId = null
                 onDelete(reminder)
             },
         )
@@ -669,10 +681,13 @@ private fun NothingScheduled(modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun ReminderDetailDialog(
+internal fun ReminderDetailDialog(
     reminder: Reminder,
+    devices: List<Device> = emptyList(),
+    remindersTargetable: Boolean = false,
     viewModel: AppViewModel? = null,
     onDismiss: () -> Unit,
+    onToggleComplete: (() -> Unit)? = null,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
 ) {
@@ -687,11 +702,48 @@ private fun ReminderDetailDialog(
     var occurrenceUndoMessage by remember { mutableStateOf<String?>(null) }
     var occurrenceUndoAction by remember { mutableStateOf<(suspend () -> Unit)?>(null) }
 
-    LaunchedEffect(reminder.id) {
+    LaunchedEffect(reminder.id, reminder.rrule, reminder.dueAt, reminder.recurrenceUntil) {
         if (isRecurring && viewModel != null) {
             isLoadingOccurrences = true
-            occurrences = viewModel.getOccurrences(reminder)
+            occurrences = AppViewModel.sortOccurrencesOldestToNewest(viewModel.getOccurrences(reminder))
             isLoadingOccurrences = false
+        }
+    }
+
+    val statusLabel: String
+    val statusTone: Tone
+    if (isRecurring) {
+        if (reminder.hasHitEndDate()) {
+            statusLabel = "Ended"
+            statusTone = Tone.Neutral
+        } else {
+            statusLabel = "Active · Recurring"
+            statusTone = Tone.Good
+        }
+    } else {
+        when {
+            reminder.isCompleted -> {
+                statusLabel = "Completed"
+                statusTone = Tone.Good
+            }
+            AppViewModel.isPast(reminder.dueAt) -> {
+                statusLabel = "Overdue"
+                statusTone = Tone.Bad
+            }
+            else -> {
+                statusLabel = "Scheduled · One-time"
+                statusTone = Tone.Neutral
+            }
+        }
+    }
+
+    val targetSummary = remember(reminder.deviceIds, devices, remindersTargetable) {
+        val ids = reminder.deviceIds
+        if (ids.isNullOrEmpty()) {
+            "All PCs"
+        } else {
+            val names = ids.mapNotNull { id -> devices.firstOrNull { it.id == id }?.displayName }
+            if (names.isNotEmpty()) names.joinToString(", ") else "${ids.size} selected PC(s)"
         }
     }
 
@@ -699,7 +751,12 @@ private fun ReminderDetailDialog(
         onDismissRequest = onDismiss,
         containerColor = PcColors.Surface,
         shape = PcShapes.Dialog,
-        title = { Text(reminder.body, color = PcColors.Ink, style = PcType.Heading) },
+        title = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(reminder.body, color = PcColors.Ink, style = PcType.Heading)
+                OutcomeBadge(text = statusLabel, tone = statusTone)
+            }
+        },
         text = {
             Column(
                 modifier = Modifier
@@ -707,28 +764,50 @@ private fun ReminderDetailDialog(
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                if (isRecurring) {
-                    describeRecurrence(reminder.rrule, reminder.dueAt, is24Hour)?.let {
-                        Text(it, color = PcColors.InkSoft, style = PcType.BodySmall)
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(PcShapes.Control)
+                        .background(PcColors.Track)
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    if (isRecurring) {
+                        describeRecurrence(reminder.rrule, reminder.dueAt, is24Hour)?.let {
+                            DetailMetaRow("Schedule", it)
+                        }
+                        DetailMetaRow("Series start", AppViewModel.formatOccurrenceMoment(reminder.dueAt))
+                    } else {
+                        DetailMetaRow("When", AppViewModel.formatOccurrenceMoment(reminder.dueAt))
+                        DetailMetaRow("Repeats", "One-time (does not repeat)")
                     }
-                } else {
-                    Text(
-                        "${AppViewModel.formatDay(reminder.dueAt)} at ${AppViewModel.formatTime(reminder.dueAt)}",
-                        color = PcColors.InkSoft,
-                        style = PcType.BodySmall,
-                    )
+
+                    if (remindersTargetable || !reminder.deviceIds.isNullOrEmpty() || devices.isNotEmpty()) {
+                        DetailMetaRow("Shows on", targetSummary)
+                    }
+
+                    if (reminder.completedAt != null) {
+                        DetailMetaRow(
+                            if (isRecurring) "Last completed" else "Completed",
+                            AppViewModel.formatInstant(reminder.completedAt),
+                        )
+                    }
+                    if (reminder.recurrenceUntil != null) {
+                        DetailMetaRow("Ends", AppViewModel.formatInstant(reminder.recurrenceUntil))
+                    }
+                    DetailMetaRow("Timezone", reminder.timezone)
                 }
-                if (reminder.completedAt != null) {
-                    Caption("Last completed: ${AppViewModel.formatInstant(reminder.completedAt)}")
-                }
-                if (reminder.recurrenceUntil != null) {
-                    Caption("Ends: ${AppViewModel.formatInstant(reminder.recurrenceUntil)}")
-                }
-                Caption("Times are shown in ${reminder.timezone}.", color = PcColors.InkFaint)
 
                 if (isRecurring) {
-                    Spacer(Modifier.height(6.dp))
-                    Text("OCCURRENCES", color = PcColors.InkSoft, style = PcType.Section)
+                    Spacer(Modifier.height(4.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("OCCURRENCES", color = PcColors.InkSoft, style = PcType.Section)
+                        Caption("Oldest → newest")
+                    }
 
                     val undoMsg = occurrenceUndoMessage
                     val undoAct = occurrenceUndoAction
@@ -776,13 +855,7 @@ private fun ReminderDetailDialog(
                                 val isSkipped = occ.status == "skipped"
                                 val hasCustom = !occ.customBody.isNullOrBlank()
 
-                                val occDateStr = runCatching {
-                                    val instant = Instant.parse(occ.occursAt)
-                                    val zdt = instant.atZone(ZoneId.systemDefault())
-                                    val dayDesc = AppViewModel.describeDay(zdt.toLocalDate())
-                                    val timeDesc = AppViewModel.formatTime(occ.occursAt)
-                                    "$dayDesc at $timeDesc"
-                                }.getOrDefault(occ.occursAt)
+                                val occDateStr = AppViewModel.formatOccurrenceMoment(occ.occursAt)
 
                                 Row(
                                     modifier = Modifier
@@ -801,7 +874,9 @@ private fun ReminderDetailDialog(
                                             if (viewModel != null) {
                                                 scope.launch {
                                                     val updated = viewModel.toggleOccurrence(reminder.id, occ.occursAt, occ.status)
-                                                    occurrences = occurrences.map { if (it.occursAt == occ.occursAt) updated else it }
+                                                    occurrences = AppViewModel.sortOccurrencesOldestToNewest(
+                                                        occurrences.map { if (it.occursAt == occ.occursAt) updated else it },
+                                                    )
                                                 }
                                             }
                                         },
@@ -877,9 +952,11 @@ private fun ReminderDetailDialog(
                                                     val previousStatus = occ.status
                                                     scope.launch {
                                                         viewModel.stopOccurrence(reminder.id, occ.occursAt)
-                                                        occurrences = occurrences.map {
-                                                            if (it.occursAt == occ.occursAt) it.copy(status = "skipped") else it
-                                                        }
+                                                        occurrences = AppViewModel.sortOccurrencesOldestToNewest(
+                                                            occurrences.map {
+                                                                if (it.occursAt == occ.occursAt) it.copy(status = "skipped") else it
+                                                            },
+                                                        )
                                                         occurrenceUndoMessage = "Occurrence stopped."
                                                         occurrenceUndoAction = {
                                                             val restored = viewModel.revertOccurrence(
@@ -887,9 +964,11 @@ private fun ReminderDetailDialog(
                                                                 occursAt = occ.occursAt,
                                                                 status = if (previousStatus == "skipped") "pending" else previousStatus,
                                                             )
-                                                            occurrences = occurrences.map {
-                                                                if (it.occursAt == occ.occursAt) restored else it
-                                                            }
+                                                            occurrences = AppViewModel.sortOccurrencesOldestToNewest(
+                                                                occurrences.map {
+                                                                    if (it.occursAt == occ.occursAt) restored else it
+                                                                },
+                                                            )
                                                         }
                                                     }
                                                 }
@@ -904,7 +983,9 @@ private fun ReminderDetailDialog(
                                                 if (viewModel != null) {
                                                     scope.launch {
                                                         val restored = viewModel.restoreOccurrence(reminder.id, occ.occursAt)
-                                                        occurrences = occurrences.map { if (it.occursAt == occ.occursAt) restored else it }
+                                                        occurrences = AppViewModel.sortOccurrencesOldestToNewest(
+                                                            occurrences.map { if (it.occursAt == occ.occursAt) restored else it },
+                                                        )
                                                         occurrenceUndoMessage = null
                                                         occurrenceUndoAction = null
                                                     }
@@ -923,7 +1004,16 @@ private fun ReminderDetailDialog(
             }
         },
         confirmButton = {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                if (!isRecurring && onToggleComplete != null) {
+                    TextButton(onClick = onToggleComplete) {
+                        Text(
+                            if (reminder.isCompleted) "Reopen" else "Done",
+                            color = PcColors.OnlineInk,
+                            style = PcType.BodyStrong,
+                        )
+                    }
+                }
                 TextButton(onClick = onEdit) {
                     Text("Edit", color = PcColors.Primary, style = PcType.BodyStrong)
                 }
@@ -970,7 +1060,9 @@ private fun ReminderDetailDialog(
                                 val previousCustomBody = occ.customBody
                                 scope.launch {
                                     val reset = viewModel.resetOccurrenceText(reminder.id, occ.occursAt)
-                                    occurrences = occurrences.map { if (it.occursAt == occ.occursAt) reset else it }
+                                    occurrences = AppViewModel.sortOccurrencesOldestToNewest(
+                                        occurrences.map { if (it.occursAt == occ.occursAt) reset else it },
+                                    )
                                     occurrenceUndoMessage = "Occurrence reset."
                                     occurrenceUndoAction = {
                                         val reverted = viewModel.revertOccurrence(
@@ -978,7 +1070,9 @@ private fun ReminderDetailDialog(
                                             occursAt = occ.occursAt,
                                             customBody = previousCustomBody,
                                         )
-                                        occurrences = occurrences.map { if (it.occursAt == occ.occursAt) reverted else it }
+                                        occurrences = AppViewModel.sortOccurrencesOldestToNewest(
+                                            occurrences.map { if (it.occursAt == occ.occursAt) reverted else it },
+                                        )
                                     }
                                 }
                                 editingOccurrence = null
@@ -995,7 +1089,9 @@ private fun ReminderDetailDialog(
                                 val previousCustomBody = target.customBody
                                 scope.launch {
                                     val updated = viewModel.modifyOccurrenceText(reminder.id, target.occursAt, trimmed)
-                                    occurrences = occurrences.map { if (it.occursAt == target.occursAt) updated else it }
+                                    occurrences = AppViewModel.sortOccurrencesOldestToNewest(
+                                        occurrences.map { if (it.occursAt == target.occursAt) updated else it },
+                                    )
                                     occurrenceUndoMessage = "Occurrence updated."
                                     occurrenceUndoAction = {
                                         val reverted = viewModel.revertOccurrence(
@@ -1004,7 +1100,9 @@ private fun ReminderDetailDialog(
                                             customBody = previousCustomBody,
                                             clearCustomBody = previousCustomBody == null,
                                         )
-                                        occurrences = occurrences.map { if (it.occursAt == target.occursAt) reverted else it }
+                                        occurrences = AppViewModel.sortOccurrencesOldestToNewest(
+                                            occurrences.map { if (it.occursAt == target.occursAt) reverted else it },
+                                        )
                                     }
                                 }
                             }
@@ -1020,6 +1118,28 @@ private fun ReminderDetailDialog(
                     Text("Cancel", color = PcColors.InkSoft, style = PcType.BodySmall)
                 }
             },
+        )
+    }
+}
+
+@Composable
+private fun DetailMetaRow(label: String, value: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.Top,
+    ) {
+        Text(
+            label,
+            color = PcColors.InkFaint,
+            style = PcType.Caption.copy(fontWeight = FontWeight.Medium),
+            modifier = Modifier.width(104.dp),
+        )
+        Text(
+            value,
+            color = PcColors.Ink,
+            style = PcType.Caption.copy(color = PcColors.Ink),
+            modifier = Modifier.weight(1f),
         )
     }
 }

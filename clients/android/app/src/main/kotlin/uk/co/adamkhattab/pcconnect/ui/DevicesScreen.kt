@@ -28,6 +28,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import uk.co.adamkhattab.pcconnect.data.CommandPolicy
 import uk.co.adamkhattab.pcconnect.data.CommandTypes
 import uk.co.adamkhattab.pcconnect.data.Device
 
@@ -82,7 +83,7 @@ fun DevicesScreen(
                     start = 16.dp,
                     end = 16.dp,
                     top = 6.dp,
-                    bottom = 24.dp,
+                    bottom = 32.dp,
                 ),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
@@ -145,8 +146,7 @@ private fun DeviceCard(
 
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf(CommandTypes.LOCK, CommandTypes.SLEEP).forEach { type ->
-                    val allowed = device.allowedCommands.isEmpty() || type in device.allowedCommands
-                    if (allowed) {
+                    if (CommandPolicy.isCommandAllowed(device, type)) {
                         val enabled = device.isOnline
                         PcChip(
                             text = CommandTypes.label(type),
