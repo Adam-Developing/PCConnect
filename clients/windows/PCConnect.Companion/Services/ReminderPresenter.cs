@@ -82,7 +82,7 @@ public sealed class ReminderPresenter(
                 snoozeService.ClearDismissed(reminderId);
                 try
                 {
-                    await api.CompleteReminderAsync(reminderId);
+                    await api.CompleteReminderAsync(reminderId, completed: true, occurrenceAt: dueAt);
                 }
                 catch (Exception ex) when (ex is PcConnectApiException or HttpRequestException)
                 {

@@ -40,8 +40,10 @@ public partial class RemindersViewModel(
     private bool _isSnoozeHooked;
     private bool _isSettingsHooked;
     private Task? _loadTask;
+    private readonly Dictionary<(string ReminderId, long UtcMinute), ReminderOccurrenceResponse> _occurrences = new();
 
     public event Action? ItemsChanged;
+    public event Action? OccurrencesChanged;
 
     private DateOnly _viewMonth = new(DateTime.Today.Year, DateTime.Today.Month, 1);
 
@@ -698,12 +700,58 @@ public partial class RemindersViewModel(
             return false;
         }
 
+        RemoveOccurrencesForReminder(reminderId);
         Items.RemoveAt(index);
         RebuildCalendar();
         RebuildRows();
         ItemsChanged?.Invoke();
         return true;
     }
+
+    private static long UtcMinuteKey(DateTimeOffset occursAt) =>
+        occursAt.ToUniversalTime().ToUnixTimeSeconds() / 60;
+
+    public bool TryGetOccurrence(string reminderId, DateTimeOffset occursAt, out ReminderOccurrenceResponse? occurrence) =>
+        _occurrences.TryGetValue((reminderId, UtcMinuteKey(occursAt)), out occurrence);
+
+    public void SetOccurrences(string reminderId, IEnumerable<ReminderOccurrenceResponse> items)
+    {
+        var changed = false;
+        foreach (var item in items)
+        {
+            var key = (reminderId, UtcMinuteKey(item.OccursAt));
+            if (!_occurrences.TryGetValue(key, out var existing) || !OccurrenceEquals(existing, item))
+            {
+                _occurrences[key] = item;
+                changed = true;
+            }
+        }
+
+        if (changed)
+        {
+            RebuildCalendar();
+            RebuildRows();
+            OccurrencesChanged?.Invoke();
+        }
+    }
+
+    public void UpsertOccurrence(ReminderOccurrenceResponse item) =>
+        SetOccurrences(item.ReminderId, [item]);
+
+    private void RemoveOccurrencesForReminder(string reminderId)
+    {
+        var keys = _occurrences.Keys.Where(k => string.Equals(k.ReminderId, reminderId, StringComparison.Ordinal)).ToList();
+        foreach (var key in keys)
+        {
+            _occurrences.Remove(key);
+        }
+    }
+
+    private static bool OccurrenceEquals(ReminderOccurrenceResponse a, ReminderOccurrenceResponse b) =>
+        string.Equals(a.Status, b.Status, StringComparison.OrdinalIgnoreCase) &&
+        string.Equals(a.CustomBody, b.CustomBody, StringComparison.Ordinal) &&
+        string.Equals(a.EffectiveBody, b.EffectiveBody, StringComparison.Ordinal) &&
+        a.CompletedAt == b.CompletedAt;
 
     private int FindItemIndex(string id)
     {
@@ -758,18 +806,17 @@ public partial class RemindersViewModel(
 
         var hideRecurring = HideRecurring;
         var oneOffDays = new HashSet<DateOnly>();
-        var recurringSeries = new List<(string Rrule, DateOnly Start)>();
+        var recurringSeries = new List<ReminderResponse>();
 
         foreach (var r in Items)
         {
-            var start = DateOnly.FromDateTime(r.DueAt.ToLocalTime().Date);
             if (string.IsNullOrEmpty(r.Rrule))
             {
-                oneOffDays.Add(start);
+                oneOffDays.Add(DateOnly.FromDateTime(r.DueAt.ToLocalTime().Date));
             }
             else if (!hideRecurring)
             {
-                recurringSeries.Add((r.Rrule, start));
+                recurringSeries.Add(r);
             }
         }
 
@@ -781,7 +828,9 @@ public partial class RemindersViewModel(
             {
                 foreach (var series in recurringSeries)
                 {
-                    if (Recurrence.OccursOn(series.Rrule, series.Start, day))
+                    var instants = Recurrence.OccurrencesOn(series.Rrule, series.DueAt, day, series.RecurrenceUntil, series.Timezone);
+                    if (instants.Any(occ => !TryGetOccurrence(series.Id, occ, out var cached) ||
+                                            !string.Equals(cached?.Status, "skipped", StringComparison.OrdinalIgnoreCase)))
                     {
                         hasEvents = true;
                         break;
@@ -1168,48 +1217,84 @@ public partial class RemindersViewModel(
 
             foreach (var day in days)
             {
+                var dayNonRecurring = new List<(TimeSpan SortTime, ReminderRow Row)>();
+                var dayRecurring = new List<(TimeSpan SortTime, ReminderRow Row)>();
+
                 foreach (var entry in projected)
                 {
                     if (entry.IsRecurring)
                     {
-                        if (!Recurrence.OccursOn(entry.Reminder.Rrule, entry.StartDate, day) ||
-                            (entry.UntilDate is { } until && day > until))
+                        var instants = Recurrence.OccurrencesOn(
+                            entry.Reminder.Rrule,
+                            entry.Reminder.DueAt,
+                            day,
+                            entry.Reminder.RecurrenceUntil,
+                            entry.Reminder.Timezone);
+
+                        foreach (var occLocal in instants)
                         {
-                            continue;
+                            var bodyOverride = entry.Reminder.Body;
+                            var isCompleted = false;
+
+                            if (TryGetOccurrence(entry.Reminder.Id, occLocal, out var cachedOcc) && cachedOcc is not null)
+                            {
+                                if (string.Equals(cachedOcc.Status, "skipped", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    continue;
+                                }
+
+                                isCompleted = string.Equals(cachedOcc.Status, "completed", StringComparison.OrdinalIgnoreCase);
+                                if (!string.IsNullOrWhiteSpace(cachedOcc.EffectiveBody))
+                                {
+                                    bodyOverride = cachedOcc.EffectiveBody;
+                                }
+                            }
+
+                            var (isSnoozed, snoozeInfo, isDismissed) = GetSnoozeState(entry.Reminder.Id);
+                            var isPastTime = day < today || (day == today && occLocal.TimeOfDay <= nowTime);
+                            dayRecurring.Add((
+                                occLocal.TimeOfDay,
+                                CreateReminderRow(
+                                    entry.Reminder,
+                                    occLocal,
+                                    dayLabel: multiDaySelection ? Describe(day) : string.Empty,
+                                    recurrenceDesc: Recurrence.Describe(entry.Reminder.Rrule, entry.Local, Use24HourClock),
+                                    deviceLookup,
+                                    isCompleted,
+                                    isPast: !isSnoozed && (isPastTime || isCompleted),
+                                    isSnoozed,
+                                    snoozeInfo,
+                                    isDismissed,
+                                    isRecurring: true,
+                                    bodyOverride: bodyOverride)));
                         }
                     }
-                    else if (entry.StartDate != day)
+                    else if (entry.StartDate == day)
                     {
-                        continue;
-                    }
-
-                    var isCompleted = !entry.IsRecurring
-                        ? entry.Reminder.IsCompleted
-                        : (entry.Reminder.IsCompleted && day == today);
-                    var (isSnoozed, snoozeInfo, isDismissed) = GetSnoozeState(entry.Reminder.Id);
-                    var isPastTime = day < today || (day == today && entry.Local.TimeOfDay <= nowTime);
-                    var row = CreateReminderRow(
-                        entry.Reminder,
-                        entry.Local,
-                        dayLabel: !entry.IsRecurring && multiDaySelection ? Describe(day) : string.Empty,
-                        recurrenceDesc: entry.IsRecurring ? Recurrence.Describe(entry.Reminder.Rrule, entry.Local, Use24HourClock) : null,
-                        deviceLookup,
-                        isCompleted,
-                        isPast: !isSnoozed && (isPastTime || isCompleted),
-                        isSnoozed,
-                        snoozeInfo,
-                        isDismissed,
-                        isRecurring: entry.IsRecurring);
-
-                    if (entry.IsRecurring)
-                    {
-                        _allRecurringRows.Add(row);
-                    }
-                    else
-                    {
-                        _allNonRecurringRows.Add(row);
+                        var isCompleted = entry.Reminder.IsCompleted;
+                        var (isSnoozed, snoozeInfo, isDismissed) = GetSnoozeState(entry.Reminder.Id);
+                        var isPastTime = day < today || (day == today && entry.Local.TimeOfDay <= nowTime);
+                        dayNonRecurring.Add((
+                            entry.Local.TimeOfDay,
+                            CreateReminderRow(
+                                entry.Reminder,
+                                entry.Local,
+                                dayLabel: multiDaySelection ? Describe(day) : string.Empty,
+                                recurrenceDesc: null,
+                                deviceLookup,
+                                isCompleted,
+                                isPast: !isSnoozed && (isPastTime || isCompleted),
+                                isSnoozed,
+                                snoozeInfo,
+                                isDismissed,
+                                isRecurring: false)));
                     }
                 }
+
+                dayNonRecurring.Sort((a, b) => a.SortTime.CompareTo(b.SortTime));
+                dayRecurring.Sort((a, b) => a.SortTime.CompareTo(b.SortTime));
+                _allNonRecurringRows.AddRange(dayNonRecurring.Select(static x => x.Row));
+                _allRecurringRows.AddRange(dayRecurring.Select(static x => x.Row));
             }
 
             ListTitle = !multiDaySelection ? Describe(days[0]) : $"{days.Count} days selected";
@@ -1273,7 +1358,7 @@ public partial class RemindersViewModel(
             // 2. Recurring reminders (distinct definition for each recurring series)
             foreach (var (reminder, local) in recurrings)
             {
-                var hasHitEndDate = reminder.RecurrenceUntil is { } until && DateOnly.FromDateTime(until.ToLocalTime().Date) < today;
+                var hasHitEndDate = HasRecurringSeriesEnded(reminder);
                 if (hasHitEndDate)
                 {
                     pastCount++;
@@ -1290,7 +1375,7 @@ public partial class RemindersViewModel(
                     dayLabel: string.Empty,
                     recurrenceDesc: Recurrence.Describe(reminder.Rrule, local, Use24HourClock),
                     deviceLookup,
-                    isCompleted: hasHitEndDate || reminder.IsCompleted,
+                    isCompleted: hasHitEndDate,
                     isPast: false,
                     isSnoozed,
                     snoozeInfo,
@@ -1357,7 +1442,8 @@ public partial class RemindersViewModel(
         bool isSnoozed,
         ReminderSnoozeInfo? snoozeInfo,
         bool isDismissed,
-        bool isRecurring = false)
+        bool isRecurring = false,
+        string? bodyOverride = null)
     {
         var targetDesc = DescribeTargets(reminder.DeviceIds, deviceLookup);
         var detail = string.IsNullOrEmpty(recurrenceDesc)
@@ -1377,7 +1463,7 @@ public partial class RemindersViewModel(
             Id: reminder.Id,
             Time: TimeFormatting.FormatTime(local, Use24HourClock),
             DayLabel: dayLabel,
-            Body: reminder.Body,
+            Body: bodyOverride ?? reminder.Body,
             Detail: detail,
             IsCompleted: isCompleted,
             IsPast: isPast,
@@ -1883,6 +1969,11 @@ public partial class RemindersViewModel(
         }
 
         var snapshot = Items.FirstOrDefault(r => r.Id == id);
+        var hasPastOccurrences = snapshot is not null && snapshot.DueAt <= DateTimeOffset.UtcNow;
+        var isRecurringActiveWithPast = snapshot is not null &&
+                                        !string.IsNullOrWhiteSpace(snapshot.Rrule) &&
+                                        hasPastOccurrences &&
+                                        !HasRecurringSeriesEnded(snapshot);
         var previousSnooze = snoozeService?.GetSnooze(id);
         var wasDismissed = snoozeService?.IsDismissed(id) == true;
 
@@ -1897,49 +1988,88 @@ public partial class RemindersViewModel(
             {
                 CancelEdit();
             }
-            RemoveItem(id);
-            ShowStatus("Reminder deleted.", false, async () =>
-            {
-                ReminderResponse? restored;
-                try
-                {
-                    restored = await api.RestoreReminderAsync(id);
-                }
-                catch (PcConnectApiException ex) when (
-                    snapshot is not null &&
-                    ex.StatusCode is System.Net.HttpStatusCode.NotFound or System.Net.HttpStatusCode.MethodNotAllowed)
-                {
-                    var recreated = await api.CreateReminderAsync(new CreateReminderRequest(
-                        snapshot.Body,
-                        snapshot.DueAt,
-                        snapshot.Timezone,
-                        snapshot.Rrule,
-                        snapshot.RecurrenceUntil,
-                        snapshot.DeviceIds));
-                    restored = recreated is not null && snapshot.IsCompleted
-                        ? (await api.CompleteReminderAsync(recreated.Id, true) ?? recreated)
-                        : recreated;
-                }
 
-                if (restored is not null)
+            if (isRecurringActiveWithPast)
+            {
+                var ended = snapshot! with
                 {
-                    if (previousSnooze is not null)
+                    RecurrenceUntil = DateTimeOffset.UtcNow,
+                    IsCompleted = true,
+                    CompletedAt = DateTimeOffset.UtcNow,
+                    UpdatedAt = DateTimeOffset.UtcNow,
+                };
+                UpsertItem(ended);
+                ShowStatus("Future occurrences removed.", false, async () =>
+                {
+                    ReminderResponse? restored = null;
+                    try
                     {
-                        var remaining = previousSnooze.SnoozedUntil - DateTimeOffset.Now;
-                        if (remaining > TimeSpan.Zero)
+                        restored = await api.UpdateReminderAsync(id, new UpdateReminderRequest(
+                            Rrule: snapshot.Rrule,
+                            RecurrenceUntil: snapshot.RecurrenceUntil));
+                        if (restored is not null && !snapshot.IsCompleted)
                         {
-                            snoozeService?.Snooze(restored.Id, restored.Body, restored.DueAt, remaining);
+                            restored = await api.CompleteReminderAsync(id, false) ?? restored;
                         }
                     }
-                    else if (wasDismissed)
+                    catch
                     {
-                        snoozeService?.MarkDismissed(restored.Id);
+                        // Fallback to restore if update failed
                     }
 
-                    UpsertItem(restored);
-                    ShowStatus("Reminder restored.", false);
-                }
-            });
+                    if (restored is not null)
+                    {
+                        UpsertItem(restored);
+                        ShowStatus("Reminder restored.", false);
+                    }
+                });
+            }
+            else
+            {
+                RemoveItem(id);
+                ShowStatus("Reminder deleted.", false, async () =>
+                {
+                    ReminderResponse? restored;
+                    try
+                    {
+                        restored = await api.RestoreReminderAsync(id);
+                    }
+                    catch (PcConnectApiException ex) when (
+                        snapshot is not null &&
+                        ex.StatusCode is System.Net.HttpStatusCode.NotFound or System.Net.HttpStatusCode.MethodNotAllowed)
+                    {
+                        var recreated = await api.CreateReminderAsync(new CreateReminderRequest(
+                            snapshot.Body,
+                            snapshot.DueAt,
+                            snapshot.Timezone,
+                            snapshot.Rrule,
+                            snapshot.RecurrenceUntil,
+                            snapshot.DeviceIds));
+                        restored = recreated is not null && snapshot.IsCompleted
+                            ? (await api.CompleteReminderAsync(recreated.Id, true) ?? recreated)
+                            : recreated;
+                    }
+
+                    if (restored is not null)
+                    {
+                        if (previousSnooze is not null)
+                        {
+                            var remaining = previousSnooze.SnoozedUntil - DateTimeOffset.Now;
+                            if (remaining > TimeSpan.Zero)
+                            {
+                                snoozeService?.Snooze(restored.Id, restored.Body, restored.DueAt, remaining);
+                            }
+                        }
+                        else if (wasDismissed)
+                        {
+                            snoozeService?.MarkDismissed(restored.Id);
+                        }
+
+                        UpsertItem(restored);
+                        ShowStatus("Reminder restored.", false);
+                    }
+                });
+            }
         }
         catch (PcConnectApiException ex)
         {
@@ -2113,4 +2243,7 @@ public partial class RemindersViewModel(
             logger.LogWarning(ex, "Reminder completion failed");
         }
     }
+
+    internal static bool HasRecurringSeriesEnded(ReminderResponse? reminder) =>
+        ShellViewModel.HasRecurringSeriesEnded(reminder);
 }

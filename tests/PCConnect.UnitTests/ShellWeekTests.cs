@@ -227,4 +227,133 @@ public sealed class ShellWeekTests : IDisposable
         DevicesViewModel.IsCommandAllowed(desktopB, "restart").ShouldBeFalse();
         DevicesViewModel.IsCommandProtected(desktopB, "lock").ShouldBeTrue();
     }
+
+    [Fact]
+    public void RebuildWeek_tracks_completion_per_occurrence_and_never_marks_future_occurrences_completed_from_series_flag()
+    {
+        var api = new PcConnectClient(_http, new PcConnectClientOptions { BaseAddress = "http://localhost" }, new InMemoryTokenStore());
+        var realtime = new PcConnectRealtimeClient(api, NullLogger<PcConnectRealtimeClient>.Instance);
+        var settings = new CompanionSettings(NullLogger<CompanionSettings>.Instance);
+        var startup = new StartupRegistration(NullLogger<StartupRegistration>.Instance);
+        var provisioning = new ProvisioningPipeClient(NullLogger<ProvisioningPipeClient>.Instance);
+        var devices = new DevicesViewModel(api, NullLogger<DevicesViewModel>.Instance);
+        var reminders = new RemindersViewModel(api, devices, NullLogger<RemindersViewModel>.Instance, settings: settings);
+        var account = new AccountViewModel(api, NullLogger<AccountViewModel>.Instance);
+        var appSettings = new SettingsViewModel(api, settings, startup, devices, NullLogger<SettingsViewModel>.Instance);
+        var shell = new ShellViewModel(api, realtime, settings, provisioning, devices, reminders, account, appSettings, NullLogger<ShellViewModel>.Instance);
+
+        var today = DateOnly.FromDateTime(DateTime.Today);
+        var daysFromMonday = ((int)today.DayOfWeek + 6) % 7;
+        var monday = today.AddDays(-daysFromMonday);
+        var monday9amLocal = new DateTimeOffset(DateTime.SpecifyKind(monday.ToDateTime(new TimeOnly(9, 0)), DateTimeKind.Local));
+        var tuesday9amLocal = new DateTimeOffset(DateTime.SpecifyKind(monday.AddDays(1).ToDateTime(new TimeOnly(9, 0)), DateTimeKind.Local));
+        var wednesday9amLocal = new DateTimeOffset(DateTime.SpecifyKind(monday.AddDays(2).ToDateTime(new TimeOnly(9, 0)), DateTimeKind.Local));
+
+        // Simulate a recurring series whose parent IsCompleted was polluted to true.
+        reminders.Items.Add(new ReminderResponse(
+            Id: "rem-series",
+            Body: "rhhggd",
+            DueAt: monday9amLocal.ToUniversalTime(),
+            DueLocalTime: "09:00",
+            Timezone: TimeZoneInfo.Local.Id,
+            Rrule: "FREQ=DAILY",
+            RecurrenceUntil: null,
+            IsCompleted: true,
+            CompletedAt: monday9amLocal.ToUniversalTime(),
+            CreatedAt: DateTimeOffset.UtcNow,
+            UpdatedAt: DateTimeOffset.UtcNow,
+            DeviceIds: null));
+
+        // Before occurrences load, NO recurring occurrence is falsely marked completed.
+        shell.RebuildWeek();
+        shell.Week.Count.ShouldBe(7);
+        shell.Week.SelectMany(d => d.Items).ShouldAllBe(i => !i.IsCompleted);
+
+        // Mark Monday completed, Tuesday pending with custom text, Wednesday skipped.
+        reminders.SetOccurrences("rem-series",
+        [
+            new ReminderOccurrenceResponse(1, "rem-series", monday9amLocal.ToUniversalTime(), "completed", monday9amLocal, null, "rhhggd"),
+            new ReminderOccurrenceResponse(2, "rem-series", tuesday9amLocal.ToUniversalTime(), "pending", null, "Custom Tuesday", "Custom Tuesday"),
+            new ReminderOccurrenceResponse(3, "rem-series", wednesday9amLocal.ToUniversalTime(), "skipped", null, null, "rhhggd"),
+        ]);
+        shell.RebuildWeek();
+
+        shell.Week[0].Items.Single().IsCompleted.ShouldBeTrue();
+        shell.Week[1].Items.Single().IsCompleted.ShouldBeFalse();
+        shell.Week[1].Items.Single().Body.ShouldBe("Custom Tuesday");
+        shell.Week[2].Items.ShouldBeEmpty();
+        for (var idx = 3; idx < 7; idx++)
+        {
+            shell.Week[idx].Items.Single().IsCompleted.ShouldBeFalse();
+        }
+    }
+
+    [Fact]
+    public async Task ShowEventDetail_for_recurring_row_opens_active_series_and_syncs_toggled_occurrence_to_week()
+    {
+        var api = new PcConnectClient(_http, new PcConnectClientOptions { BaseAddress = "http://localhost" }, new InMemoryTokenStore());
+        var realtime = new PcConnectRealtimeClient(api, NullLogger<PcConnectRealtimeClient>.Instance);
+        var settings = new CompanionSettings(NullLogger<CompanionSettings>.Instance) { Use24HourClock = true };
+        var startup = new StartupRegistration(NullLogger<StartupRegistration>.Instance);
+        var provisioning = new ProvisioningPipeClient(NullLogger<ProvisioningPipeClient>.Instance);
+        var devices = new DevicesViewModel(api, NullLogger<DevicesViewModel>.Instance);
+        var reminders = new RemindersViewModel(api, devices, NullLogger<RemindersViewModel>.Instance, settings: settings);
+        var account = new AccountViewModel(api, NullLogger<AccountViewModel>.Instance);
+        var appSettings = new SettingsViewModel(api, settings, startup, devices, NullLogger<SettingsViewModel>.Instance);
+        var shell = new ShellViewModel(api, realtime, settings, provisioning, devices, reminders, account, appSettings, NullLogger<ShellViewModel>.Instance);
+
+        var startWall = new DateTime(2026, 10, 28, 4, 0, 0, DateTimeKind.Local);
+        var nov2 = new DateOnly(2026, 11, 2);
+        var nov5 = new DateOnly(2026, 11, 5);
+        var nov2Instants = Recurrence.OccurrencesOn("FREQ=HOURLY;INTERVAL=21", new DateTimeOffset(startWall), nov2);
+        var nov5Instants = Recurrence.OccurrencesOn("FREQ=HOURLY;INTERVAL=21", new DateTimeOffset(startWall), nov5);
+        nov2Instants.Select(i => i.Hour).ShouldBe([10]);
+        nov5Instants.Select(i => i.Hour).ShouldBe([1, 22]);
+
+        var today = DateOnly.FromDateTime(DateTime.Today);
+        var daysFromMonday = ((int)today.DayOfWeek + 6) % 7;
+        var monday = today.AddDays(-daysFromMonday);
+        var mondayDue = new DateTimeOffset(DateTime.SpecifyKind(monday.ToDateTime(new TimeOnly(8, 30)), DateTimeKind.Local));
+
+        reminders.Items.Add(new ReminderResponse(
+            Id: "rem-hourly",
+            Body: "Hourly check",
+            DueAt: mondayDue.ToUniversalTime(),
+            DueLocalTime: "08:30",
+            Timezone: TimeZoneInfo.Local.Id,
+            Rrule: "FREQ=DAILY",
+            RecurrenceUntil: null,
+            IsCompleted: true,
+            CompletedAt: DateTimeOffset.UtcNow,
+            CreatedAt: DateTimeOffset.UtcNow,
+            UpdatedAt: DateTimeOffset.UtcNow,
+            DeviceIds: null));
+        reminders.RebuildRows();
+        shell.RebuildWeek();
+
+        var recurringRow = reminders.RecurringRows.Single();
+        recurringRow.IsCompleted.ShouldBeFalse();
+
+        shell.ShowEventDetailCommand.Execute(recurringRow);
+        shell.IsEventDetailOpen.ShouldBeTrue();
+        shell.ActiveEventDetail.ShouldNotBeNull();
+        shell.ActiveEventDetail!.IsRecurring.ShouldBeTrue();
+        shell.ActiveEventDetail.IsCompleted.ShouldBeFalse();
+
+        var todayOccTime = new DateTimeOffset(DateTime.SpecifyKind(today.ToDateTime(new TimeOnly(8, 30)), DateTimeKind.Local));
+        var occVm = new OccurrenceItemViewModel
+        {
+            ReminderId = "rem-hourly",
+            OccursAt = todayOccTime,
+            SeriesBody = "Hourly check",
+            Body = "Hourly check",
+            Status = "pending",
+        };
+
+        await shell.ToggleOccurrenceCompleteCommand.ExecuteAsync(occVm);
+
+        shell.TodayColumn.Items.Single().IsCompleted.ShouldBeTrue();
+        var otherDayIdx = today == monday ? 1 : 0;
+        shell.Week[otherDayIdx].Items.Single().IsCompleted.ShouldBeFalse();
+    }
 }

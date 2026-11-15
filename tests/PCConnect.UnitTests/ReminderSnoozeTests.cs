@@ -131,7 +131,7 @@ public sealed class ReminderSnoozeTests : IDisposable
     [Fact]
     public void RebuildRows_renders_snooze_badge_and_label_for_snoozed_reminders()
     {
-        var due = DateTimeOffset.Now.AddHours(-1);
+        var due = new DateTimeOffset(DateTime.SpecifyKind(DateTime.Today, DateTimeKind.Local));
         var item = new ReminderResponse(
             Id: "rem-100",
             Body: "Team meeting",
@@ -238,7 +238,7 @@ public sealed class ReminderSnoozeTests : IDisposable
     [Fact]
     public void Overdue_reminder_on_today_shows_wont_rerun_badge_only_when_dismissed()
     {
-        var pastTimeToday = DateTime.Now.AddHours(-1);
+        var pastTimeToday = DateTime.SpecifyKind(DateTime.Today, DateTimeKind.Local);
         var due = new DateTimeOffset(pastTimeToday);
         _vm.Items.Add(new ReminderResponse(
             "rem-overdue-today",
@@ -295,7 +295,7 @@ public sealed class ReminderSnoozeTests : IDisposable
             service2.IsDismissed(reminderId.ToUpperInvariant()).ShouldBeTrue();
 
             // When vm rebuilds rows with this service, row shows won't rerun
-            var due = DateTimeOffset.Now.AddHours(-2);
+            var due = new DateTimeOffset(DateTime.SpecifyKind(DateTime.Today, DateTimeKind.Local));
             var vm2 = new RemindersViewModel(_api,
                 new DevicesViewModel(_api, NullLogger<DevicesViewModel>.Instance),
                 NullLogger<RemindersViewModel>.Instance,

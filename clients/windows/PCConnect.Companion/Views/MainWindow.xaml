@@ -135,7 +135,7 @@
             </Button>
 
             <!-- Recurring Occurrences Button -->
-            <Button Command="{Binding DataContext.ShowEventDetailCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+            <Button Command="{Binding DataContext.ShowEventDetailCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                     CommandParameter="{Binding}"
                     Visibility="{Binding IsRecurring, Converter={StaticResource BoolToVis}}"
                     ToolTip="View and manage occurrences" Width="26" Height="26" Padding="0" Margin="0,0,2,0"
@@ -306,51 +306,53 @@
 
       <!-- ── sidebar ─────────────────────────────────────────────────── -->
       <Border Background="{StaticResource Surface}" BorderBrush="{StaticResource Border}"
-              BorderThickness="0,0,1,0">
+              BorderThickness="0,0,1,0" Panel.ZIndex="10">
         <DockPanel Margin="12,14">
 
           <!-- account, pinned to the bottom -->
-          <Grid DockPanel.Dock="Bottom">
-            <Popup x:Name="AccountPopup"
-                   Placement="Top" AllowsTransparency="True"
-                   PopupAnimation="None"
-                   StaysOpen="True" HorizontalOffset="0" VerticalOffset="-6" Width="192">
-              <Border x:Name="AccountPopupCard" Width="192"
-                      Background="{StaticResource Surface}" BorderBrush="{StaticResource Border}"
-                      BorderThickness="1" CornerRadius="12" Padding="6"
-                      RenderTransformOrigin="0.5,0.5">
-                <Border.RenderTransform>
-                  <TranslateTransform x:Name="AccountMenuTranslate" Y="0" />
-                </Border.RenderTransform>
-                <Border.Effect>
-                  <DropShadowEffect BlurRadius="32" ShadowDepth="8" Opacity="0.14" Color="#0F172A" />
-                </Border.Effect>
-                <StackPanel>
-                  <StackPanel Margin="10,8,10,6">
-                    <TextBlock Text="{Binding Account.DisplayName}" Style="{StaticResource Body}"
-                               FontSize="13.5" FontWeight="SemiBold" />
-                    <TextBlock Text="{Binding Account.Email}" Style="{StaticResource Caption}"
-                               TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
+          <Grid DockPanel.Dock="Bottom" Panel.ZIndex="100">
+            <Canvas Height="0" HorizontalAlignment="Stretch" VerticalAlignment="Top" Panel.ZIndex="100">
+              <Grid x:Name="AccountPopupCard" Width="192"
+                    Canvas.Left="0" Canvas.Bottom="6"
+                    Visibility="Collapsed" Opacity="0"
+                    RenderTransformOrigin="0.5,0.5">
+                <Grid.RenderTransform>
+                  <TranslateTransform x:Name="AccountMenuTranslate" Y="10" />
+                </Grid.RenderTransform>
+                <Border Background="{StaticResource Surface}" CornerRadius="12" IsHitTestVisible="False">
+                  <Border.Effect>
+                    <DropShadowEffect BlurRadius="24" ShadowDepth="6" Direction="270" Opacity="0.22" Color="#0F172A" />
+                  </Border.Effect>
+                </Border>
+                <Border Background="{StaticResource Surface}" BorderBrush="{StaticResource Border}"
+                        BorderThickness="1" CornerRadius="12" Padding="6">
+                  <StackPanel>
+                    <StackPanel Margin="10,8,10,6">
+                      <TextBlock Text="{Binding Account.DisplayName}" Style="{StaticResource Body}"
+                                 FontSize="13.5" FontWeight="SemiBold" />
+                      <TextBlock Text="{Binding Account.Email}" Style="{StaticResource Caption}"
+                                 TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
+                    </StackPanel>
+
+                    <Border Style="{StaticResource Hairline}" Margin="4,2" />
+
+                    <Grid Margin="10,6">
+                      <TextBlock Text="This PC" Style="{StaticResource Caption}" FontSize="11.5"
+                                 Foreground="{StaticResource InkSoft}" HorizontalAlignment="Left" />
+                      <TextBlock Text="{Binding ThisPcName}" Style="{StaticResource Caption}"
+                                 FontSize="11.5" Foreground="{StaticResource Ink}"
+                                 HorizontalAlignment="Right" TextTrimming="CharacterEllipsis" />
+                    </Grid>
+
+                    <Border Style="{StaticResource Hairline}" Margin="4,2" />
+
+                    <Button Content="Sign out of this PC" Command="{Binding SignOutCommand}"
+                            Style="{StaticResource LinkButton}" Foreground="{StaticResource DangerInk}"
+                            HorizontalContentAlignment="Left" Padding="10,8" Margin="0,2,0,0" />
                   </StackPanel>
-
-                  <Border Style="{StaticResource Hairline}" Margin="4,2" />
-
-                  <Grid Margin="10,6">
-                    <TextBlock Text="This PC" Style="{StaticResource Caption}" FontSize="11.5"
-                               Foreground="{StaticResource InkSoft}" HorizontalAlignment="Left" />
-                    <TextBlock Text="{Binding ThisPcName}" Style="{StaticResource Caption}"
-                               FontSize="11.5" Foreground="{StaticResource Ink}"
-                               HorizontalAlignment="Right" TextTrimming="CharacterEllipsis" />
-                  </Grid>
-
-                  <Border Style="{StaticResource Hairline}" Margin="4,2" />
-
-                  <Button Content="Sign out of this PC" Command="{Binding SignOutCommand}"
-                          Style="{StaticResource LinkButton}" Foreground="{StaticResource DangerInk}"
-                          HorizontalContentAlignment="Left" Padding="10,8" Margin="0,2,0,0" />
-                </StackPanel>
-              </Border>
-            </Popup>
+                </Border>
+              </Grid>
+            </Canvas>
 
             <Button x:Name="AccountButton" Command="{Binding ToggleAccountMenuCommand}" BorderThickness="0"
                     Background="Transparent" Padding="6,8" HorizontalContentAlignment="Stretch">
@@ -607,19 +609,35 @@
                                   <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="Auto" SharedSizeGroup="TodayTime" />
                                     <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
                                   </Grid.ColumnDefinitions>
-                                  <TextBlock Text="{Binding Time}" Style="{StaticResource Mono}"
+                                  <TextBlock x:Name="TodayTimeTxt" Text="{Binding Time}" Style="{StaticResource Mono}"
                                              Foreground="{StaticResource InkSoft}" Margin="0,0,12,0"
-                                             VerticalAlignment="Center" />
-                                  <TextBlock Grid.Column="1" Text="{Binding Body}" Style="{StaticResource Body}"
                                              VerticalAlignment="Center"
-                                             TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" />
+                                             TextDecorations="{Binding IsCompleted, Converter={StaticResource Strike}}" />
+                                  <TextBlock x:Name="TodayBodyTxt" Grid.Column="1" Text="{Binding Body}" Style="{StaticResource Body}"
+                                             VerticalAlignment="Center"
+                                             TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"
+                                             TextDecorations="{Binding IsCompleted, Converter={StaticResource Strike}}" />
+                                  <StackPanel Grid.Column="2" Orientation="Horizontal"
+                                              VerticalAlignment="Center" Margin="8,0,0,0"
+                                              Visibility="{Binding IsCompleted, Converter={StaticResource BoolToVis}}">
+                                    <Path Data="{StaticResource Icon.Check}" Fill="{StaticResource OnlineInk}"
+                                          Width="11" Height="11" Stretch="Uniform" VerticalAlignment="Center" Margin="0,0,4,0" />
+                                    <TextBlock Text="Done" FontSize="11.5" FontWeight="SemiBold"
+                                               Foreground="{StaticResource OnlineInk}" VerticalAlignment="Center" />
+                                  </StackPanel>
                                 </Grid>
                               </Border>
                               <ControlTemplate.Triggers>
                                 <Trigger Property="IsMouseOver" Value="True">
                                   <Setter TargetName="TodayRowBd" Property="Background" Value="{StaticResource Track}" />
                                 </Trigger>
+                                <DataTrigger Binding="{Binding IsCompleted}" Value="True">
+                                  <Setter TargetName="TodayTimeTxt" Property="Foreground" Value="{StaticResource InkFaint}" />
+                                  <Setter TargetName="TodayBodyTxt" Property="Foreground" Value="{StaticResource InkFaint}" />
+                                  <Setter TargetName="TodayRowBd" Property="ToolTip" Value="Completed · Click to view details" />
+                                </DataTrigger>
                               </ControlTemplate.Triggers>
                             </ControlTemplate>
                           </Button.Template>
@@ -2276,98 +2294,123 @@
             <TextBlock Text="{Binding Title}" FontSize="16" FontWeight="SemiBold"
                        Foreground="{StaticResource Ink}" TextWrapping="Wrap" Margin="0,0,0,14" />
 
-            <!-- Details Grid -->
-            <Border Background="{StaticResource Track}" CornerRadius="10" Padding="14,10" Margin="0,0,0,16">
-              <StackPanel>
-                <!-- Time & Date -->
-                <Grid Margin="0,2,0,6">
-                  <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="*" />
-                  </Grid.ColumnDefinitions>
-                  <TextBlock Text="When" Style="{StaticResource Caption}" Foreground="{StaticResource InkSoft}" Width="80" />
-                  <TextBlock Grid.Column="1" Text="{Binding TimeAndDate}" Style="{StaticResource Body}"
-                             FontWeight="Medium" Foreground="{StaticResource Ink}" TextWrapping="Wrap" />
-                </Grid>
-
-                <!-- Recurrence -->
-                <Grid Margin="0,2,0,6">
-                  <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="*" />
-                  </Grid.ColumnDefinitions>
-                  <TextBlock Text="Repeats" Style="{StaticResource Caption}" Foreground="{StaticResource InkSoft}" Width="80" />
-                  <TextBlock Grid.Column="1" Text="{Binding Recurrence}" Style="{StaticResource Body}"
-                             Foreground="{StaticResource Ink}" TextWrapping="Wrap" />
-                </Grid>
-
-                <!-- Targets -->
-                <Grid Margin="0,2,0,6">
-                  <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="*" />
-                  </Grid.ColumnDefinitions>
-                  <TextBlock Text="Targets" Style="{StaticResource Caption}" Foreground="{StaticResource InkSoft}" Width="80" />
-                  <TextBlock Grid.Column="1" Text="{Binding Targets}" Style="{StaticResource Body}"
-                             Foreground="{StaticResource Ink}" TextWrapping="Wrap" />
-                </Grid>
-
-                <!-- Status -->
-                <Grid Margin="0,4,0,2">
-                  <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="*" />
-                  </Grid.ColumnDefinitions>
-                  <TextBlock Text="Status" Style="{StaticResource Caption}" Foreground="{StaticResource InkSoft}" Width="80" VerticalAlignment="Center" />
-                  <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                    <!-- Completed Badge -->
-                    <Border Background="{StaticResource OnlineTint}" BorderBrush="{StaticResource OnlineDot}"
-                            BorderThickness="1" CornerRadius="4" Padding="6,2"
-                            Visibility="{Binding IsCompletedBadgeVisible, Converter={StaticResource BoolToVis}}">
-                      <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                        <Path Data="{StaticResource Icon.Check}" Fill="{StaticResource OnlineInk}" Width="11" Height="11"
-                              Stretch="Uniform" VerticalAlignment="Center" Margin="0,0,5,0" />
-                        <TextBlock Text="Completed" FontSize="11.5" FontWeight="SemiBold" Foreground="{StaticResource OnlineInk}" />
-                      </StackPanel>
-                    </Border>
-
-                    <!-- Won't rerun Badge -->
-                    <Border Background="{StaticResource DangerTint}" BorderBrush="{StaticResource Danger}"
-                            BorderThickness="1" CornerRadius="4" Padding="6,2"
-                            Visibility="{Binding IsWonTRerunBadgeVisible, Converter={StaticResource BoolToVis}}"
-                            ToolTip="Dismissed — this reminder will not alert again.">
-                      <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                        <Path Data="{StaticResource Icon.Schedule}" Fill="{StaticResource DangerInk}" Width="11" Height="11"
-                              Stretch="Uniform" VerticalAlignment="Center" Margin="0,0,5,0" />
-                        <TextBlock Text="Won't rerun" FontSize="11.5" FontWeight="SemiBold" Foreground="{StaticResource DangerInk}" />
-                      </StackPanel>
-                    </Border>
-
-                    <!-- Snoozed Badge -->
-                    <Border Background="{StaticResource WarnTint}" BorderBrush="{StaticResource WarnDot}"
-                            BorderThickness="1" CornerRadius="4" Padding="6,2"
-                            Visibility="{Binding IsSnoozedBadgeVisible, Converter={StaticResource BoolToVis}}">
-                      <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                        <Path Data="{StaticResource Icon.Schedule}" Fill="{StaticResource WarnInk}" Width="11" Height="11"
-                              Stretch="Uniform" VerticalAlignment="Center" Margin="0,0,5,0" />
-                        <TextBlock Text="{Binding StatusText}" FontSize="11.5" FontWeight="SemiBold" Foreground="{StaticResource WarnInk}" />
-                      </StackPanel>
-                    </Border>
-
-                    <!-- Active / Scheduled Badge -->
-                    <Border Background="{StaticResource PrimaryTint}" BorderBrush="{StaticResource Primary}"
-                            BorderThickness="1" CornerRadius="4" Padding="6,2"
-                            Visibility="{Binding IsActiveBadgeVisible, Converter={StaticResource BoolToVis}}">
-                      <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                        <Path Data="{StaticResource Icon.Schedule}" Fill="{StaticResource Primary}" Width="11" Height="11"
-                              Stretch="Uniform" VerticalAlignment="Center" Margin="0,0,5,0" />
-                        <TextBlock Text="Scheduled" FontSize="11.5" FontWeight="SemiBold" Foreground="{StaticResource Primary}" />
-                      </StackPanel>
-                    </Border>
+            <!-- Schedule Hero Card + Compact Info Tiles -->
+            <StackPanel Margin="0,0,0,16">
+              <Border Background="{StaticResource PrimaryTint}" BorderBrush="#DBEAFE" BorderThickness="1"
+                      CornerRadius="10" Padding="12,10" Margin="0,0,0,8">
+                <DockPanel>
+                  <Border Width="34" Height="34" CornerRadius="8" Background="{StaticResource Surface}"
+                          BorderBrush="#DBEAFE" BorderThickness="1" DockPanel.Dock="Left" VerticalAlignment="Center">
+                    <Grid>
+                      <Path Data="{StaticResource Icon.EventRepeat}" Fill="{StaticResource Primary}"
+                            Width="16" Height="16" Stretch="Uniform"
+                            HorizontalAlignment="Center" VerticalAlignment="Center"
+                            Visibility="{Binding IsRecurring, Converter={StaticResource BoolToVis}}" />
+                      <Path Data="{StaticResource Icon.Schedule}" Fill="{StaticResource Primary}"
+                            Width="16" Height="16" Stretch="Uniform"
+                            HorizontalAlignment="Center" VerticalAlignment="Center"
+                            Visibility="{Binding IsRecurring, Converter={StaticResource NotBoolToVis}}" />
+                    </Grid>
+                  </Border>
+                  <StackPanel Margin="12,0,0,0" VerticalAlignment="Center">
+                    <TextBlock Text="{Binding TimeAndDate}" Style="{StaticResource Body}"
+                               FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource Ink}" TextWrapping="Wrap" />
+                    <TextBlock Text="{Binding Recurrence}" Style="{StaticResource Caption}"
+                               FontSize="12" Foreground="{StaticResource InkSoft}" Margin="0,2,0,0" TextWrapping="Wrap" />
                   </StackPanel>
-                </Grid>
-              </StackPanel>
-            </Border>
+                </DockPanel>
+              </Border>
+
+              <Grid>
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="*" />
+                  <ColumnDefinition Width="8" />
+                  <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+
+                <!-- Targets Tile -->
+                <Border Grid.Column="0" Background="{StaticResource Surface}" BorderBrush="{StaticResource Border}"
+                        BorderThickness="1" CornerRadius="10" Padding="12,9">
+                  <StackPanel>
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                      <Border Width="20" Height="20" CornerRadius="10" Background="{StaticResource PrimaryTint}" Margin="0,0,6,0">
+                        <Path Data="{StaticResource Icon.Devices}" Fill="{StaticResource Primary}"
+                              Width="11" Height="11" Stretch="Uniform"
+                              HorizontalAlignment="Center" VerticalAlignment="Center" />
+                      </Border>
+                      <TextBlock Text="Shows on" Style="{StaticResource Caption}" FontSize="11.5"
+                                 FontWeight="Medium" Foreground="{StaticResource InkSoft}" VerticalAlignment="Center" />
+                    </StackPanel>
+                    <TextBlock Text="{Binding Targets}" Style="{StaticResource Body}"
+                               FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource Ink}"
+                               Margin="0,5,0,0" TextWrapping="Wrap" />
+                  </StackPanel>
+                </Border>
+
+                <!-- Status Tile -->
+                <Border Grid.Column="2" Background="{StaticResource Surface}" BorderBrush="{StaticResource Border}"
+                        BorderThickness="1" CornerRadius="10" Padding="12,9">
+                  <StackPanel>
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                      <Border Width="20" Height="20" CornerRadius="10" Background="{StaticResource Track}" Margin="0,0,6,0">
+                        <Path Data="{StaticResource Icon.EventAvailable}" Fill="{StaticResource InkSoft}"
+                              Width="11" Height="11" Stretch="Uniform"
+                              HorizontalAlignment="Center" VerticalAlignment="Center" />
+                      </Border>
+                      <TextBlock Text="Status" Style="{StaticResource Caption}" FontSize="11.5"
+                                 FontWeight="Medium" Foreground="{StaticResource InkSoft}" VerticalAlignment="Center" />
+                    </StackPanel>
+
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,5,0,0">
+                      <!-- Completed Badge -->
+                      <Border Background="{StaticResource OnlineTint}" BorderBrush="{StaticResource OnlineDot}"
+                              BorderThickness="1" CornerRadius="4" Padding="6,2"
+                              Visibility="{Binding IsCompletedBadgeVisible, Converter={StaticResource BoolToVis}}">
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                          <Path Data="{StaticResource Icon.Check}" Fill="{StaticResource OnlineInk}" Width="11" Height="11"
+                                Stretch="Uniform" VerticalAlignment="Center" Margin="0,0,5,0" />
+                          <TextBlock Text="Completed" FontSize="11.5" FontWeight="SemiBold" Foreground="{StaticResource OnlineInk}" />
+                        </StackPanel>
+                      </Border>
+
+                      <!-- Won't rerun Badge -->
+                      <Border Background="{StaticResource DangerTint}" BorderBrush="{StaticResource Danger}"
+                              BorderThickness="1" CornerRadius="4" Padding="6,2"
+                              Visibility="{Binding IsWonTRerunBadgeVisible, Converter={StaticResource BoolToVis}}"
+                              ToolTip="Dismissed — this reminder will not alert again.">
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                          <Path Data="{StaticResource Icon.Schedule}" Fill="{StaticResource DangerInk}" Width="11" Height="11"
+                                Stretch="Uniform" VerticalAlignment="Center" Margin="0,0,5,0" />
+                          <TextBlock Text="Won't rerun" FontSize="11.5" FontWeight="SemiBold" Foreground="{StaticResource DangerInk}" />
+                        </StackPanel>
+                      </Border>
+
+                      <!-- Snoozed Badge -->
+                      <Border Background="{StaticResource WarnTint}" BorderBrush="{StaticResource WarnDot}"
+                              BorderThickness="1" CornerRadius="4" Padding="6,2"
+                              Visibility="{Binding IsSnoozedBadgeVisible, Converter={StaticResource BoolToVis}}">
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                          <Path Data="{StaticResource Icon.Schedule}" Fill="{StaticResource WarnInk}" Width="11" Height="11"
+                                Stretch="Uniform" VerticalAlignment="Center" Margin="0,0,5,0" />
+                          <TextBlock Text="{Binding StatusText}" FontSize="11.5" FontWeight="SemiBold" Foreground="{StaticResource WarnInk}" />
+                        </StackPanel>
+                      </Border>
+
+                      <!-- Active / Scheduled Badge -->
+                      <Border Background="{StaticResource PrimaryTint}" BorderBrush="{StaticResource Primary}"
+                              BorderThickness="1" CornerRadius="4" Padding="6,2"
+                              Visibility="{Binding IsActiveBadgeVisible, Converter={StaticResource BoolToVis}}">
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                          <Path Data="{StaticResource Icon.Schedule}" Fill="{StaticResource Primary}" Width="11" Height="11"
+                                Stretch="Uniform" VerticalAlignment="Center" Margin="0,0,5,0" />
+                          <TextBlock Text="Scheduled" FontSize="11.5" FontWeight="SemiBold" Foreground="{StaticResource Primary}" />
+                        </StackPanel>
+                      </Border>
+                    </StackPanel>
+                  </StackPanel>
+                </Border>
+              </Grid>
+            </StackPanel>
 
             <!-- Occurrences Breakdown for Recurring Reminders -->
             <StackPanel Visibility="{Binding IsRecurring, Converter={StaticResource BoolToVis}}" Margin="0,0,0,16">
@@ -2415,19 +2458,19 @@
 
                             <!-- Info / Content -->
                             <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                              <DockPanel>
-                                <TextBlock Text="{Binding DateLabel}" FontWeight="SemiBold" FontSize="11.5" Foreground="{StaticResource Ink}" />
-                                <Border Margin="6,0,0,0" Padding="4,1" CornerRadius="3" Background="{StaticResource DangerTint}"
+                              <WrapPanel Orientation="Horizontal">
+                                <TextBlock Text="{Binding DateLabel}" FontWeight="SemiBold" FontSize="11.5" Foreground="{StaticResource Ink}" VerticalAlignment="Center" />
+                                <Border Margin="6,0,0,0" Padding="4,1" CornerRadius="3" Background="{StaticResource DangerTint}" VerticalAlignment="Center"
                                         Visibility="{Binding IsSkipped, Converter={StaticResource BoolToVis}}">
                                   <TextBlock Text="Stopped" FontSize="10" FontWeight="SemiBold" Foreground="{StaticResource DangerInk}" />
                                 </Border>
-                                <Border Margin="6,0,0,0" Padding="4,1" CornerRadius="3" Background="{StaticResource OnlineTint}"
+                                <Border Margin="6,0,0,0" Padding="4,1" CornerRadius="3" Background="{StaticResource OnlineTint}" VerticalAlignment="Center"
                                         Visibility="{Binding IsCompleted, Converter={StaticResource BoolToVis}}">
-                                  <TextBlock Text="Completed" FontSize="10" FontWeight="SemiBold" Foreground="{StaticResource OnlineInk}" />
+                                  <TextBlock Text="Done" FontSize="10" FontWeight="SemiBold" Foreground="{StaticResource OnlineInk}" />
                                 </Border>
                                 <TextBlock Text="(edited)" FontSize="10" Foreground="{StaticResource InkSoft}" Margin="6,0,0,0"
                                            Visibility="{Binding HasCustomText, Converter={StaticResource BoolToVis}}" VerticalAlignment="Center" />
-                              </DockPanel>
+                              </WrapPanel>
 
                               <!-- View mode text -->
                               <TextBlock Text="{Binding Body}" Style="{StaticResource Body}" FontSize="12.5"

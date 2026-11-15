@@ -561,6 +561,44 @@ public sealed class ReminderCrudTests : IDisposable
     }
 
     [Fact]
+    public async Task DeleteAsync_recurring_reminder_removes_future_occurrences_and_keeps_past()
+    {
+        var due = DateTimeOffset.UtcNow.AddDays(-2);
+        var original = new ReminderResponse(
+            Id: "rem-rec-del",
+            Body: "Daily standup",
+            DueAt: due,
+            DueLocalTime: "09:00",
+            Timezone: "Europe/London",
+            Rrule: "FREQ=DAILY",
+            RecurrenceUntil: null,
+            IsCompleted: false,
+            CompletedAt: null,
+            CreatedAt: due.AddDays(-1),
+            UpdatedAt: due.AddDays(-1),
+            DeviceIds: ["dev-1"]);
+        _vm.Items.Add(original);
+
+        var deleteCalled = false;
+        _handler.DeleteHandler = req =>
+        {
+            req.RequestUri!.AbsolutePath.ShouldBe("/v2/reminders/rem-rec-del");
+            deleteCalled = true;
+            return new HttpResponseMessage(HttpStatusCode.NoContent);
+        };
+
+        await _vm.DeleteCommand.ExecuteAsync("rem-rec-del");
+
+        deleteCalled.ShouldBeTrue();
+        _vm.StatusMessage.ShouldBe("Future occurrences removed.");
+        _vm.CanUndo.ShouldBeTrue();
+        _vm.Items.Count.ShouldBe(1);
+        _vm.Items.Single().Id.ShouldBe("rem-rec-del");
+        _vm.Items.Single().IsCompleted.ShouldBeTrue();
+        _vm.Items.Single().RecurrenceUntil.ShouldNotBeNull();
+    }
+
+    [Fact]
     public async Task Edit_via_AddAsync_enables_undo_and_UndoAsync_reverts_all_fields_including_targets()
     {
         var due = DateTimeOffset.UtcNow.AddHours(4);

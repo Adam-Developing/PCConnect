@@ -324,19 +324,119 @@ public sealed class ReminderService(
     {
         caller.Require(Scopes.ReminderWrite);
 
-        await using var connection = await db.OpenAsync(ct);
-        var affected = await connection.ExecuteAsync(new CommandDefinition("""
-            UPDATE reminders SET deleted_at = now(), updated_at = now()
-             WHERE public_id = @PublicId AND user_id = @UserId AND deleted_at IS NULL
-            """, new { PublicId = reminderId, UserId = caller.UserId }, cancellationToken: ct));
-
-        if (affected == 0)
+        var (action, updatedReminder) = await db.InTransactionAsync(async (connection, tx) =>
         {
-            throw AppException.NotFound(ErrorCodes.ReminderNotFound, "No such reminder.");
-        }
+            var row = await LoadOwnedAsync(connection, tx, caller.UserId, reminderId, ct);
 
-        await realtime.ReminderChangedAsync(caller.UserPublicId,
-            new ReminderChangedEvent("deleted", null, reminderId.ToString()), ct);
+            if (string.IsNullOrWhiteSpace(row.Rrule))
+            {
+                await connection.ExecuteAsync(new CommandDefinition("""
+                    UPDATE reminders SET deleted_at = now(), updated_at = now()
+                     WHERE id = @Id AND deleted_at IS NULL
+                    """, new { row.Id }, tx, cancellationToken: ct));
+
+                return ("deleted", (ReminderResponse?)null);
+            }
+
+            var now = clock.UtcNow;
+
+            var storedPastOccurrences = (await connection.QueryAsync<DateTimeOffset>(new CommandDefinition("""
+                SELECT occurs_at_utc FROM reminder_occurrences
+                 WHERE reminder_id = @Id AND occurs_at_utc < @Now
+                 ORDER BY occurs_at_utc ASC
+                """, new { row.Id, Now = now }, tx, cancellationToken: ct))).ToList();
+
+            var expandedPastOccurrences = row.DueAtUtc < now
+                ? recurrence.Expand(row.Rrule, row.DueAtUtc, row.Timezone, row.DueAtUtc, now.AddSeconds(-1), row.RecurrenceUntil)
+                    .Select(static o => o.ToUniversalTime()).ToList()
+                : [];
+
+            var allPastInstants = new SortedSet<DateTimeOffset>(
+                storedPastOccurrences.Concat(expandedPastOccurrences));
+
+            var hasFutureStored = await connection.ExecuteScalarAsync<bool>(new CommandDefinition("""
+                SELECT EXISTS(
+                    SELECT 1 FROM reminder_occurrences
+                     WHERE reminder_id = @Id AND occurs_at_utc >= @Now
+                )
+                """, new { row.Id, Now = now }, tx, cancellationToken: ct));
+
+            var hasFutureExpanded = (row.RecurrenceUntil is null || row.RecurrenceUntil >= now) &&
+                recurrence.Expand(row.Rrule, row.DueAtUtc, row.Timezone, now, now.AddDays(RecurrenceExpander.HorizonDays), row.RecurrenceUntil).Count > 0;
+
+            var hasFuture = hasFutureStored || hasFutureExpanded;
+
+            if (allPastInstants.Count == 0 || !hasFuture)
+            {
+                await connection.ExecuteAsync(new CommandDefinition("""
+                    DELETE FROM reminder_occurrences WHERE reminder_id = @Id AND occurs_at_utc >= @Now;
+                    UPDATE reminders SET deleted_at = now(), updated_at = now()
+                     WHERE id = @Id AND deleted_at IS NULL;
+                    """, new { row.Id, Now = now }, tx, cancellationToken: ct));
+
+                return ("deleted", (ReminderResponse?)null);
+            }
+
+            // Removing recurring reminders removes future occurrences, but keeps past occurrences.
+            await connection.ExecuteAsync(new CommandDefinition("""
+                DELETE FROM reminder_occurrences
+                 WHERE reminder_id = @Id AND occurs_at_utc >= @Now
+                """, new { row.Id, Now = now }, tx, cancellationToken: ct));
+
+            if (allPastInstants.Count > 0)
+            {
+                await using var command = new NpgsqlCommand("""
+                    INSERT INTO reminder_occurrences (reminder_id, occurs_at_utc)
+                    SELECT $1, unnest($2)
+                    ON CONFLICT (reminder_id, occurs_at_utc) DO NOTHING
+                    """, connection, tx);
+                command.Parameters.Add(new NpgsqlParameter<long> { Value = row.Id });
+                command.Parameters.Add(new NpgsqlParameter<DateTimeOffset[]>
+                {
+                    NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Array | NpgsqlTypes.NpgsqlDbType.TimestampTz,
+                    Value = allPastInstants.ToArray(),
+                });
+                await command.ExecuteNonQueryAsync(ct);
+            }
+
+            var untilUtc = allPastInstants.Max;
+            if (row.RecurrenceUntil is { } existingUntil && existingUntil < untilUtc)
+            {
+                untilUtc = existingUntil;
+            }
+
+            var updated = await connection.QuerySingleAsync<ReminderRow>(new CommandDefinition($"""
+                UPDATE reminders
+                   SET recurrence_until = @Until,
+                       is_completed = true,
+                       completed_at = COALESCE(completed_at, @Now),
+                       updated_at = now()
+                 WHERE id = @Id
+                RETURNING {ReturningColumnsSql}
+                """, new { row.Id, Until = untilUtc, Now = now }, tx, cancellationToken: ct));
+
+            var dek = await TryLoadDataKeyAsync(connection, caller.UserId, ct, tx);
+            try
+            {
+                var targets = await LoadTargetsAsync(connection, tx, [updated.Id], ct);
+                return ("updated", (ReminderResponse?)ToResponse(updated, dek, targets.GetValueOrDefault(updated.Id)));
+            }
+            finally
+            {
+                ZeroKey(dek);
+            }
+        }, ct);
+
+        if (action == "deleted")
+        {
+            await realtime.ReminderChangedAsync(caller.UserPublicId,
+                new ReminderChangedEvent("deleted", null, reminderId.ToString()), ct);
+        }
+        else if (updatedReminder is not null)
+        {
+            await realtime.ReminderChangedAsync(caller.UserPublicId,
+                new ReminderChangedEvent("updated", updatedReminder, reminderId.ToString()), ct);
+        }
     }
 
     public async Task<ReminderResponse> RestoreAsync(
@@ -401,11 +501,17 @@ public sealed class ReminderService(
             var effectiveLimit = Math.Min(limit, targetCount);
             var defaultToUtc = DefaultOccurrenceHorizon(row.Rrule, clock.UtcNow);
 
-            var fromUtc = from?.ToUniversalTime() ?? (row.DueAtUtc > clock.UtcNow.AddDays(-14) ? row.DueAtUtc : clock.UtcNow.AddDays(-14));
             var toUtc = to?.ToUniversalTime() ?? defaultToUtc;
             if (row.RecurrenceUntil is { } until && until < toUtc)
             {
                 toUtc = until;
+            }
+
+            var lookbackBase = toUtc < clock.UtcNow ? toUtc : clock.UtcNow;
+            var fromUtc = from?.ToUniversalTime() ?? (row.DueAtUtc > lookbackBase.AddDays(-14) ? row.DueAtUtc : lookbackBase.AddDays(-14));
+            if (fromUtc > toUtc)
+            {
+                fromUtc = row.DueAtUtc <= toUtc ? row.DueAtUtc : toUtc;
             }
 
             var dek = await TryLoadDataKeyAsync(connection, caller.UserId, ct, tx);
@@ -431,15 +537,25 @@ public sealed class ReminderService(
                 var allInstants = new SortedSet<DateTimeOffset>(
                     stored.Select(static s => s.OccursAtUtc.ToUniversalTime()).Concat(expandedInstants));
 
-                var cutoff = clock.UtcNow.AddMinutes(-5);
-                var upcomingInstants = allInstants.Where(i => i >= cutoff).Take(effectiveLimit).ToList();
-                if (upcomingInstants.Count == 0)
+                SortedSet<DateTimeOffset> selectedInstants;
+                if (from.HasValue && to.HasValue)
                 {
-                    upcomingInstants = allInstants.TakeLast(effectiveLimit).ToList();
+                    var rangeLimit = Math.Clamp(limit, 1, 200);
+                    selectedInstants = new SortedSet<DateTimeOffset>(
+                        allInstants.Where(i => i >= fromUtc && i <= toUtc).Take(rangeLimit));
                 }
+                else
+                {
+                    var cutoff = clock.UtcNow.AddMinutes(-5);
+                    var upcomingInstants = allInstants.Where(i => i >= cutoff).Take(effectiveLimit).ToList();
+                    if (upcomingInstants.Count == 0)
+                    {
+                        upcomingInstants = allInstants.TakeLast(effectiveLimit).ToList();
+                    }
 
-                var pastStored = allInstants.Where(i => i < cutoff && storedDict.TryGetValue(i, out var s) && s.Status != "pending").TakeLast(3).ToList();
-                var selectedInstants = new SortedSet<DateTimeOffset>(pastStored.Concat(upcomingInstants));
+                    var pastStored = allInstants.Where(i => i < cutoff && storedDict.TryGetValue(i, out var s) && s.Status != "pending").TakeLast(3).ToList();
+                    selectedInstants = new SortedSet<DateTimeOffset>(pastStored.Concat(upcomingInstants));
+                }
 
                 var results = new List<ReminderOccurrenceResponse>(selectedInstants.Count);
                 foreach (var instant in selectedInstants)
@@ -562,7 +678,29 @@ public sealed class ReminderService(
                         ClearCustomBody = request.ClearCustomBody ?? false,
                     }, tx, cancellationToken: ct));
 
-                var seriesBody = DecryptBodyOrPlaceholder(dek, row.BodyCiphertext, caller.UserId, row.PublicId);
+                var refreshedParent = await connection.QuerySingleAsync<ReminderRow>(new CommandDefinition($"""
+                    UPDATE reminders
+                       SET is_completed = CASE
+                               WHEN recurrence_until IS NULL OR recurrence_until >= @Now THEN false
+                               ELSE is_completed
+                           END,
+                           completed_at = CASE
+                               WHEN @Status = 'completed' THEN COALESCE(@CompletedAt, now())
+                               ELSE completed_at
+                           END,
+                           updated_at = now()
+                     WHERE id = @Id
+                    RETURNING {ReturningColumnsSql}
+                    """,
+                    new
+                    {
+                        row.Id,
+                        Now = clock.UtcNow,
+                        Status = request.Status?.ToLowerInvariant(),
+                        CompletedAt = completedAt,
+                    }, tx, cancellationToken: ct));
+
+                var seriesBody = DecryptBodyOrPlaceholder(dek, refreshedParent.BodyCiphertext, caller.UserId, refreshedParent.PublicId);
                 string? effectiveCustom = null;
                 if (updated.CustomBodyCiphertext is not null)
                 {
@@ -571,15 +709,15 @@ public sealed class ReminderService(
 
                 var occurrenceResponse = new ReminderOccurrenceResponse(
                     updated.Id,
-                    row.PublicId.ToString(),
+                    refreshedParent.PublicId.ToString(),
                     updated.OccursAtUtc,
                     updated.Status,
                     updated.CompletedAt,
                     effectiveCustom,
                     effectiveCustom ?? seriesBody);
 
-                var targets = await LoadTargetsAsync(connection, tx, [row.Id], ct);
-                return (occurrenceResponse, ToResponse(row, dek, targets.GetValueOrDefault(row.Id)));
+                var targets = await LoadTargetsAsync(connection, tx, [refreshedParent.Id], ct);
+                return (occurrenceResponse, ToResponse(refreshedParent, dek, targets.GetValueOrDefault(refreshedParent.Id)));
             }
             finally
             {
@@ -800,9 +938,11 @@ public sealed class ReminderService(
         {
             var series = (await connection.QueryAsync<ReminderRow>(new CommandDefinition(
                 SelectSql + """
-                 WHERE r.deleted_at IS NULL AND r.rrule IS NOT NULL AND r.is_completed = false
+                 WHERE r.deleted_at IS NULL
+                   AND r.rrule IS NOT NULL
+                   AND (r.recurrence_until IS NULL OR r.recurrence_until >= @Now)
                  LIMIT 1000
-                """, transaction: tx, cancellationToken: ct))).ToList();
+                """, new { Now = clock.UtcNow }, transaction: tx, cancellationToken: ct))).ToList();
 
             var written = 0;
             foreach (var row in series)

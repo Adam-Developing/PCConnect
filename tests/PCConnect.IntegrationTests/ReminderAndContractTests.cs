@@ -264,6 +264,39 @@ public class ReminderTests(ApiFixture fixture)
     }
 
     [Fact]
+    public async Task Deleting_recurring_reminder_removes_future_occurrences_and_keeps_past_occurrences()
+    {
+        var user = await fixture.RegisterUserAsync();
+        var start = DateTimeOffset.UtcNow.AddDays(-3);
+
+        var created = await (await user.Client.PostAsJsonAsync("/v2/reminders",
+            new CreateReminderRequest("Daily exercise", start, "Europe/London", "FREQ=DAILY")))
+            .Content.ReadFromJsonAsync<ReminderResponse>();
+
+        var deleteRes = await user.Client.DeleteAsync($"/v2/reminders/{created!.Id}");
+        deleteRes.StatusCode.ShouldBe(HttpStatusCode.NoContent);
+
+        // Reminder series is ended rather than wiped: past occurrences are retained
+        var readBack = await user.Client.GetFromJsonAsync<ReminderResponse>($"/v2/reminders/{created.Id}");
+        readBack.ShouldNotBeNull();
+        readBack.Id.ShouldBe(created.Id);
+        readBack.IsCompleted.ShouldBeTrue();
+        readBack.RecurrenceUntil.ShouldNotBeNull();
+        readBack.RecurrenceUntil.Value.ShouldBeLessThan(DateTimeOffset.UtcNow);
+
+        // Occurrences check: past occurrences exist, future occurrences are gone
+        var occurrences = await user.Client.GetFromJsonAsync<List<ReminderOccurrenceResponse>>(
+            $"/v2/reminders/{created.Id}/occurrences?from={start:O}&to={DateTimeOffset.UtcNow.AddDays(7):O}");
+        occurrences.ShouldNotBeNull();
+        occurrences.ShouldNotBeEmpty();
+        occurrences.All(o => o.OccursAt <= DateTimeOffset.UtcNow).ShouldBeTrue();
+
+        // Deleting the ended series from history soft-deletes it completely
+        (await user.Client.DeleteAsync($"/v2/reminders/{created.Id}")).StatusCode.ShouldBe(HttpStatusCode.NoContent);
+        (await user.Client.GetAsync($"/v2/reminders/{created.Id}")).StatusCode.ShouldBe(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
     public async Task Updating_a_reminder_with_clearDeviceIds_reverts_targeting_to_all_devices()
     {
         var user = await fixture.RegisterUserAsync();

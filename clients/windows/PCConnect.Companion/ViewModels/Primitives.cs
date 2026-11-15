@@ -874,6 +874,174 @@ public static class Recurrence
         return day == seriesStart;
     }
 
+    /// <summary>
+    /// Concrete local occurrence instants of a reminder falling on <paramref name="day"/>,
+    /// honouring hourly intervals, <c>COUNT</c>, <paramref name="recurrenceUntil"/>, and the
+    /// reminder's IANA/Windows <paramref name="timezone"/>.
+    /// </summary>
+    public static IReadOnlyList<DateTimeOffset> OccurrencesOn(
+        string? rrule,
+        DateTimeOffset dueAt,
+        DateOnly day,
+        DateTimeOffset? recurrenceUntil = null,
+        string? timezone = null)
+    {
+        var localStart = dueAt.ToLocalTime();
+        if (string.IsNullOrWhiteSpace(rrule))
+        {
+            return DateOnly.FromDateTime(localStart.Date) == day ? [localStart] : [];
+        }
+
+        ReadOnlySpan<char> freq = default;
+        var interval = 1;
+        var count = 0;
+
+        var span = StripPrefix(rrule);
+        foreach (var range in span.Split(';'))
+        {
+            var part = span[range];
+            var eq = part.IndexOf('=');
+            if (eq <= 0)
+            {
+                continue;
+            }
+
+            var key = part[..eq];
+            var val = part[(eq + 1)..];
+            if (key.Equals("FREQ", StringComparison.OrdinalIgnoreCase))
+            {
+                freq = val;
+            }
+            else if (key.Equals("INTERVAL", StringComparison.OrdinalIgnoreCase) && int.TryParse(val, out var n) && n > 0)
+            {
+                interval = n;
+            }
+            else if (key.Equals("COUNT", StringComparison.OrdinalIgnoreCase) && int.TryParse(val, out var c) && c > 0)
+            {
+                count = c;
+            }
+        }
+
+        var tz = ResolveTimeZoneOrLocal(timezone);
+        var startInTz = TimeZoneInfo.ConvertTime(dueAt, tz);
+
+        if (freq.Equals("HOURLY", StringComparison.OrdinalIgnoreCase))
+        {
+            var startWall = DateTime.SpecifyKind(startInTz.DateTime, DateTimeKind.Unspecified);
+            var localDayStart = new DateTimeOffset(DateTime.SpecifyKind(day.ToDateTime(TimeOnly.MinValue), DateTimeKind.Local));
+            var localDayNext = new DateTimeOffset(DateTime.SpecifyKind(day.AddDays(1).ToDateTime(TimeOnly.MinValue), DateTimeKind.Local));
+            var windowStartWall = DateTime.SpecifyKind(TimeZoneInfo.ConvertTime(localDayStart, tz).DateTime.AddHours(-2), DateTimeKind.Unspecified);
+            var windowEndWall = DateTime.SpecifyKind(TimeZoneInfo.ConvertTime(localDayNext, tz).DateTime.AddHours(2), DateTimeKind.Unspecified);
+
+            if (windowEndWall < startWall)
+            {
+                return [];
+            }
+
+            var k = windowStartWall > startWall
+                ? Math.Max(0L, (long)Math.Floor((windowStartWall - startWall).TotalHours / interval))
+                : 0L;
+
+            var hourlyResults = new List<DateTimeOffset>();
+            while (count == 0 || k < count)
+            {
+                var wall = startWall.AddHours(k * interval);
+                if (wall > windowEndWall)
+                {
+                    break;
+                }
+
+                var occLocal = ToLocalInstant(wall, tz);
+                if (recurrenceUntil.HasValue && occLocal > recurrenceUntil.Value)
+                {
+                    break;
+                }
+
+                if (occLocal >= localStart && DateOnly.FromDateTime(occLocal.Date) == day)
+                {
+                    hourlyResults.Add(occLocal);
+                }
+
+                k++;
+            }
+
+            hourlyResults.Sort();
+            return hourlyResults;
+        }
+
+        var seriesStartDate = DateOnly.FromDateTime(startInTz.Date);
+        var seriesTime = TimeOnly.FromTimeSpan(startInTz.TimeOfDay);
+        DateOnly[] candidateDates = string.Equals(tz.Id, TimeZoneInfo.Local.Id, StringComparison.Ordinal)
+            ? [day]
+            : [day.AddDays(-1), day, day.AddDays(1)];
+
+        var results = new List<DateTimeOffset>(1);
+        foreach (var candDate in candidateDates)
+        {
+            if (!OccursOn(rrule, seriesStartDate, candDate))
+            {
+                continue;
+            }
+
+            var occLocal = ToLocalInstant(candDate.ToDateTime(seriesTime), tz);
+            if (occLocal < localStart)
+            {
+                continue;
+            }
+
+            if (recurrenceUntil.HasValue && occLocal > recurrenceUntil.Value)
+            {
+                continue;
+            }
+
+            if (DateOnly.FromDateTime(occLocal.Date) == day)
+            {
+                results.Add(occLocal);
+            }
+        }
+
+        results.Sort();
+        return results;
+    }
+
+    private static DateTimeOffset ToLocalInstant(DateTime wallInTz, TimeZoneInfo tz)
+    {
+        var unspecified = DateTime.SpecifyKind(wallInTz, DateTimeKind.Unspecified);
+        if (tz.IsInvalidTime(unspecified))
+        {
+            unspecified = unspecified.AddHours(1);
+        }
+
+        return new DateTimeOffset(unspecified, tz.GetUtcOffset(unspecified)).ToLocalTime();
+    }
+
+    private static TimeZoneInfo ResolveTimeZoneOrLocal(string? timezone)
+    {
+        if (!string.IsNullOrWhiteSpace(timezone))
+        {
+            try
+            {
+                return TimeZoneInfo.FindSystemTimeZoneById(timezone);
+            }
+            catch (Exception ex) when (ex is TimeZoneNotFoundException or InvalidTimeZoneException)
+            {
+                if (TimeZoneInfo.TryConvertIanaIdToWindowsId(timezone, out var winId))
+                {
+                    try
+                    {
+                        return TimeZoneInfo.FindSystemTimeZoneById(winId);
+                    }
+                    catch (Exception inner) when (inner is TimeZoneNotFoundException or InvalidTimeZoneException)
+                    {
+                        // Fall back to local timezone below.
+                    }
+                }
+            }
+        }
+
+        return TimeZoneInfo.Local;
+    }
+
     private static int DayBit(ReadOnlySpan<char> code)
     {
         if (code.Equals("MO", StringComparison.OrdinalIgnoreCase)) return 1 << 0;

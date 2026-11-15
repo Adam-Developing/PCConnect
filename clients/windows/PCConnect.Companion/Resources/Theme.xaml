@@ -1606,16 +1606,22 @@
     <Setter Property="Template">
       <Setter.Value>
         <ControlTemplate TargetType="{x:Type ContextMenu}">
-          <Border Background="{TemplateBinding Background}"
-                  BorderBrush="{TemplateBinding BorderBrush}"
-                  BorderThickness="{TemplateBinding BorderThickness}"
-                  CornerRadius="{StaticResource ControlRadius}"
-                  Padding="{TemplateBinding Padding}">
-            <Border.Effect>
-              <DropShadowEffect BlurRadius="16" ShadowDepth="4" Opacity="0.12" Color="#000000" />
-            </Border.Effect>
-            <StackPanel IsItemsHost="True" KeyboardNavigation.DirectionalNavigation="Cycle" />
-          </Border>
+          <Grid Margin="12,8,12,16">
+            <Border Background="{TemplateBinding Background}"
+                    CornerRadius="{StaticResource ControlRadius}"
+                    IsHitTestVisible="False">
+              <Border.Effect>
+                <DropShadowEffect BlurRadius="16" ShadowDepth="4" Direction="270" Opacity="0.16" Color="#0F172A" />
+              </Border.Effect>
+            </Border>
+            <Border Background="{TemplateBinding Background}"
+                    BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="{TemplateBinding BorderThickness}"
+                    CornerRadius="{StaticResource ControlRadius}"
+                    Padding="{TemplateBinding Padding}">
+              <StackPanel IsItemsHost="True" KeyboardNavigation.DirectionalNavigation="Cycle" />
+            </Border>
+          </Grid>
         </ControlTemplate>
       </Setter.Value>
     </Setter>

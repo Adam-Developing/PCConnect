@@ -378,9 +378,13 @@ public sealed class PcConnectClient(HttpClient http, PcConnectClientOptions opti
     public Task<ReminderResponse?> RestoreReminderAsync(string reminderId, CancellationToken ct = default) =>
         SendAsync<ReminderResponse>(HttpMethod.Post, $"/v2/reminders/{reminderId}/restore", null, true, ct);
 
-    public Task<ReminderResponse?> CompleteReminderAsync(string reminderId, bool completed = true, CancellationToken ct = default) =>
+    public Task<ReminderResponse?> CompleteReminderAsync(
+        string reminderId,
+        bool completed = true,
+        DateTimeOffset? occurrenceAt = null,
+        CancellationToken ct = default) =>
         SendAsync<ReminderResponse>(HttpMethod.Post, $"/v2/reminders/{reminderId}/complete",
-            new CompleteReminderRequest(completed), true, ct);
+            new CompleteReminderRequest(completed, occurrenceAt), true, ct);
 
     public Task<IReadOnlyList<ReminderOccurrenceResponse>?> GetReminderOccurrencesAsync(
         string reminderId, DateTimeOffset? from = null, DateTimeOffset? to = null, int limit = 50, CancellationToken ct = default)

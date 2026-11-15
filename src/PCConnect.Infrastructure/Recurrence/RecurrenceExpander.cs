@@ -38,7 +38,7 @@ public sealed class RecurrenceExpander(ILogger<RecurrenceExpander> logger)
         DateTimeOffset? until)
     {
         var effectiveTo = until is { } u && u < to ? u : to;
-        if (effectiveTo <= from)
+        if (effectiveTo < from)
         {
             return [];
         }

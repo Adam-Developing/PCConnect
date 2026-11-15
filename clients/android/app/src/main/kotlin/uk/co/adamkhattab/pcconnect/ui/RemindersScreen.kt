@@ -1,6 +1,7 @@
 package uk.co.adamkhattab.pcconnect.ui
 
 import android.text.format.DateFormat
+import androidx.annotation.DrawableRes
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateContentSize
@@ -9,19 +10,24 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -48,6 +54,8 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -59,9 +67,12 @@ import uk.co.adamkhattab.pcconnect.data.ReminderOccurrenceResponse
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
@@ -70,6 +81,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import java.time.Instant
 import java.time.LocalDate
+import java.time.Month
 import java.time.YearMonth
 import java.time.ZoneId
 import java.time.format.TextStyle
@@ -301,6 +313,12 @@ private fun RemindersListView(
     }
 }
 
+private enum class CalendarViewMode {
+    Days,
+    Months,
+    Years,
+}
+
 @Composable
 private fun RemindersCalendarView(
     reminders: List<Reminder>,
@@ -310,6 +328,54 @@ private fun RemindersCalendarView(
 ) {
     var viewMonth by remember { mutableStateOf(YearMonth.now()) }
     var selectedDate by remember { mutableStateOf<LocalDate?>(LocalDate.now()) }
+    var viewMode by remember { mutableStateOf(CalendarViewMode.Days) }
+    var pickerYear by remember(viewMonth) { mutableIntStateOf(viewMonth.year) }
+    var decadeStart by remember(pickerYear) { mutableIntStateOf((pickerYear / 12) * 12) }
+
+    val density = LocalDensity.current
+    val swipeThresholdPx = with(density) { 40.dp.toPx() }
+    var totalDragX by remember { mutableFloatStateOf(0f) }
+
+    val calendarSwipeModifier = Modifier.pointerInput(viewMode, viewMonth, pickerYear, decadeStart) {
+        detectHorizontalDragGestures(
+            onDragStart = {
+                totalDragX = 0f
+            },
+            onHorizontalDrag = { change, dragAmount ->
+                change.consume()
+                totalDragX += dragAmount
+            },
+            onDragEnd = {
+                if (totalDragX < -swipeThresholdPx) {
+                    when (viewMode) {
+                        CalendarViewMode.Days -> {
+                            viewMonth = viewMonth.plusMonths(1)
+                            if (selectedDate != null && YearMonth.from(selectedDate) != viewMonth) {
+                                selectedDate = null
+                            }
+                        }
+                        CalendarViewMode.Months -> pickerYear++
+                        CalendarViewMode.Years -> decadeStart += 12
+                    }
+                } else if (totalDragX > swipeThresholdPx) {
+                    when (viewMode) {
+                        CalendarViewMode.Days -> {
+                            viewMonth = viewMonth.minusMonths(1)
+                            if (selectedDate != null && YearMonth.from(selectedDate) != viewMonth) {
+                                selectedDate = null
+                            }
+                        }
+                        CalendarViewMode.Months -> pickerYear--
+                        CalendarViewMode.Years -> decadeStart -= 12
+                    }
+                }
+                totalDragX = 0f
+            },
+            onDragCancel = {
+                totalDragX = 0f
+            },
+        )
+    }
 
     LazyColumn(
         Modifier.fillMaxSize(),
@@ -330,35 +396,99 @@ private fun RemindersCalendarView(
                                 Modifier
                                     .size(36.dp)
                                     .clip(CircleShape)
-                                    .clickable { viewMonth = viewMonth.minusMonths(1) },
+                                    .clickable {
+                                        when (viewMode) {
+                                            CalendarViewMode.Days -> {
+                                                viewMonth = viewMonth.minusMonths(1)
+                                                if (selectedDate != null && YearMonth.from(selectedDate) != viewMonth) {
+                                                    selectedDate = null
+                                                }
+                                            }
+                                            CalendarViewMode.Months -> pickerYear--
+                                            CalendarViewMode.Years -> decadeStart -= 12
+                                        }
+                                    },
                                 contentAlignment = Alignment.Center,
                             ) {
                                 PcIcon(
                                     PcIcons.ChevronRight,
-                                    "Previous month",
+                                    contentDescription = when (viewMode) {
+                                        CalendarViewMode.Days -> "Previous month"
+                                        CalendarViewMode.Months -> "Previous year"
+                                        CalendarViewMode.Years -> "Previous decade"
+                                    },
                                     size = 20.dp,
                                     modifier = Modifier.graphicsLayer { rotationZ = 180f },
                                     tint = PcColors.Ink,
                                 )
                             }
 
-                            Text(
-                                "${viewMonth.month.getDisplayName(TextStyle.FULL, Locale.getDefault())} ${viewMonth.year}",
-                                color = PcColors.Ink,
-                                style = PcType.Heading.copy(fontSize = 17.sp),
-                                modifier = Modifier.padding(horizontal = 8.dp),
-                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable {
+                                        when (viewMode) {
+                                            CalendarViewMode.Days -> {
+                                                pickerYear = viewMonth.year
+                                                decadeStart = (pickerYear / 12) * 12
+                                                viewMode = CalendarViewMode.Months
+                                            }
+                                            CalendarViewMode.Months -> {
+                                                decadeStart = (pickerYear / 12) * 12
+                                                viewMode = CalendarViewMode.Years
+                                            }
+                                            CalendarViewMode.Years -> {
+                                                viewMode = CalendarViewMode.Months
+                                            }
+                                        }
+                                    }
+                                    .padding(horizontal = 6.dp, vertical = 4.dp),
+                            ) {
+                                Text(
+                                    text = when (viewMode) {
+                                        CalendarViewMode.Days -> "${viewMonth.month.getDisplayName(TextStyle.FULL, Locale.getDefault())} ${viewMonth.year}"
+                                        CalendarViewMode.Months -> pickerYear.toString()
+                                        CalendarViewMode.Years -> "$decadeStart - ${decadeStart + 11}"
+                                    },
+                                    color = PcColors.Ink,
+                                    style = PcType.Heading.copy(fontSize = 17.sp),
+                                    maxLines = 1,
+                                )
+                                Spacer(Modifier.width(4.dp))
+                                PcIcon(
+                                    id = if (viewMode == CalendarViewMode.Years) PcIcons.ExpandLess else PcIcons.ExpandMore,
+                                    contentDescription = "Switch calendar view",
+                                    size = 18.dp,
+                                    tint = PcColors.Primary,
+                                )
+                            }
 
                             Box(
                                 Modifier
                                     .size(36.dp)
                                     .clip(CircleShape)
-                                    .clickable { viewMonth = viewMonth.plusMonths(1) },
+                                    .clickable {
+                                        when (viewMode) {
+                                            CalendarViewMode.Days -> {
+                                                viewMonth = viewMonth.plusMonths(1)
+                                                if (selectedDate != null && YearMonth.from(selectedDate) != viewMonth) {
+                                                    selectedDate = null
+                                                }
+                                            }
+                                            CalendarViewMode.Months -> pickerYear++
+                                            CalendarViewMode.Years -> decadeStart += 12
+                                        }
+                                    },
                                 contentAlignment = Alignment.Center,
                             ) {
                                 PcIcon(
                                     PcIcons.ChevronRight,
-                                    "Next month",
+                                    contentDescription = when (viewMode) {
+                                        CalendarViewMode.Days -> "Next month"
+                                        CalendarViewMode.Months -> "Next year"
+                                        CalendarViewMode.Years -> "Next decade"
+                                    },
                                     size = 20.dp,
                                     tint = PcColors.Ink,
                                 )
@@ -367,8 +497,12 @@ private fun RemindersCalendarView(
 
                         TextButton(
                             onClick = {
+                                val now = LocalDate.now()
+                                pickerYear = now.year
+                                decadeStart = (now.year / 12) * 12
                                 viewMonth = YearMonth.now()
-                                selectedDate = LocalDate.now()
+                                selectedDate = now
+                                viewMode = CalendarViewMode.Days
                             },
                         ) {
                             Text("Today", color = PcColors.Primary, style = PcType.BodyStrong)
@@ -377,106 +511,207 @@ private fun RemindersCalendarView(
 
                     Spacer(Modifier.height(10.dp))
 
-                    // Weekday headers
-                    Row(
-                        Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clipToBounds()
+                            .then(calendarSwipeModifier),
                     ) {
-                        listOf("M", "T", "W", "T", "F", "S", "S").forEach { initial ->
-                            Box(
-                                Modifier.weight(1f),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Text(
-                                    initial,
-                                    color = PcColors.InkFaint,
-                                    style = PcType.Caption.copy(fontWeight = FontWeight.SemiBold),
-                                )
-                            }
-                        }
-                    }
-
-                    Spacer(Modifier.height(8.dp))
-
-                    // Month days grid
-                    val firstDay = viewMonth.atDay(1)
-                    val daysInMonth = viewMonth.lengthOfMonth()
-                    val startOffset = (firstDay.dayOfWeek.value + 6) % 7
-                    val totalSlots = ((startOffset + daysInMonth + 6) / 7) * 7
-
-                    val today = LocalDate.now()
-
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        for (week in 0 until totalSlots / 7) {
-                            Row(
-                                Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                            ) {
-                                for (dayCol in 0..6) {
-                                    val slot = week * 7 + dayCol
-                                    val dayNum = slot - startOffset + 1
-
-                                    if (dayNum in 1..daysInMonth) {
-                                        val date = viewMonth.atDay(dayNum)
-                                        val isCurrent = date == today
-                                        val isPicked = date == selectedDate
-
-                                        // Check if any reminder occurs on this day
-                                        val hasEvents = reminders.any { r ->
-                                            val seriesStart = runCatching {
-                                                Instant.parse(r.dueAt).atZone(ZoneId.systemDefault()).toLocalDate()
-                                            }.getOrNull() ?: return@any false
-
-                                            if (r.hasHitEndDate()) return@any false
-                                            occursOn(r.rrule, seriesStart, date)
-                                        }
-
-                                        Box(
-                                            Modifier
-                                                .weight(1f)
-                                                .aspectRatio(1f)
-                                                .clip(CircleShape)
-                                                .then(
-                                                    when {
-                                                        isPicked -> Modifier.background(PcColors.Primary)
-                                                        isCurrent -> Modifier.border(1.5.dp, PcColors.Primary, CircleShape)
-                                                        else -> Modifier
-                                                    },
-                                                )
-                                                .clickable {
-                                                    selectedDate = if (selectedDate == date) null else date
-                                                },
-                                            contentAlignment = Alignment.Center,
+                        AnimatedContent(
+                            targetState = viewMode,
+                            transitionSpec = {
+                                fadeIn(animationSpec = tween(220)) togetherWith fadeOut(animationSpec = tween(180))
+                            },
+                            label = "CalendarViewModeTransition",
+                        ) { mode ->
+                            when (mode) {
+                                CalendarViewMode.Days -> {
+                                    Column {
+                                        // Weekday headers
+                                        Row(
+                                            Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
                                         ) {
-                                            Column(
-                                                horizontalAlignment = Alignment.CenterHorizontally,
-                                                verticalArrangement = Arrangement.Center,
-                                            ) {
-                                                Text(
-                                                    dayNum.toString(),
-                                                    color = when {
-                                                        isPicked -> Color.White
-                                                        isCurrent -> PcColors.Primary
-                                                        else -> PcColors.Ink
-                                                    },
-                                                    style = PcType.BodySmall.copy(
-                                                        fontWeight = if (isPicked || isCurrent) FontWeight.SemiBold else FontWeight.Normal,
-                                                    ),
-                                                )
-
-                                                if (hasEvents) {
-                                                    Box(
-                                                        Modifier
-                                                            .padding(top = 2.dp)
-                                                            .size(4.dp)
-                                                            .clip(CircleShape)
-                                                            .background(if (isPicked) Color.White else PcColors.Primary),
+                                            listOf("M", "T", "W", "T", "F", "S", "S").forEach { initial ->
+                                                Box(
+                                                    Modifier.weight(1f),
+                                                    contentAlignment = Alignment.Center,
+                                                ) {
+                                                    Text(
+                                                        initial,
+                                                        color = PcColors.InkFaint,
+                                                        style = PcType.Caption.copy(fontWeight = FontWeight.SemiBold),
                                                     )
                                                 }
                                             }
                                         }
-                                    } else {
-                                        Box(Modifier.weight(1f).aspectRatio(1f))
+
+                                        Spacer(Modifier.height(8.dp))
+
+                                        AnimatedContent(
+                                            targetState = viewMonth,
+                                            transitionSpec = {
+                                                if (targetState.isAfter(initialState)) {
+                                                    (slideInHorizontally { width -> width } + fadeIn(animationSpec = tween(220))).togetherWith(
+                                                        slideOutHorizontally { width -> -width } + fadeOut(animationSpec = tween(180)),
+                                                    )
+                                                } else {
+                                                    (slideInHorizontally { width -> -width } + fadeIn(animationSpec = tween(220))).togetherWith(
+                                                        slideOutHorizontally { width -> width } + fadeOut(animationSpec = tween(180)),
+                                                    )
+                                                }
+                                            },
+                                            label = "CalendarDaysTransition",
+                                        ) { currentMonth ->
+                                            val firstDay = currentMonth.atDay(1)
+                                            val daysInMonth = currentMonth.lengthOfMonth()
+                                            val startOffset = (firstDay.dayOfWeek.value + 6) % 7
+                                            val totalSlots = ((startOffset + daysInMonth + 6) / 7) * 7
+                                            val today = LocalDate.now()
+
+                                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                                for (week in 0 until totalSlots / 7) {
+                                                    Row(
+                                                        Modifier.fillMaxWidth(),
+                                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                                    ) {
+                                                        for (dayCol in 0..6) {
+                                                            val slot = week * 7 + dayCol
+                                                            val dayNum = slot - startOffset + 1
+
+                                                            if (dayNum in 1..daysInMonth) {
+                                                                val date = currentMonth.atDay(dayNum)
+                                                                val isCurrent = date == today
+                                                                val isPicked = date == selectedDate
+
+                                                                // Check if any reminder occurs on this day
+                                                                val hasEvents = reminders.any { r ->
+                                                                    val seriesStart = runCatching {
+                                                                        Instant.parse(r.dueAt).atZone(ZoneId.systemDefault()).toLocalDate()
+                                                                    }.getOrNull() ?: return@any false
+
+                                                                    val untilDate = r.recurrenceUntil?.let {
+                                                                        runCatching { Instant.parse(it).atZone(ZoneId.systemDefault()).toLocalDate() }.getOrNull()
+                                                                    }
+                                                                    if (untilDate != null && date > untilDate) return@any false
+                                                                    occursOn(r.rrule, seriesStart, date)
+                                                                }
+
+                                                                Box(
+                                                                    Modifier
+                                                                        .weight(1f)
+                                                                        .aspectRatio(1f)
+                                                                        .clip(CircleShape)
+                                                                        .then(
+                                                                            when {
+                                                                                isPicked -> Modifier.background(PcColors.Primary)
+                                                                                isCurrent -> Modifier.border(1.5.dp, PcColors.Primary, CircleShape)
+                                                                                else -> Modifier
+                                                                            },
+                                                                        )
+                                                                        .clickable {
+                                                                            selectedDate = if (selectedDate == date) null else date
+                                                                        },
+                                                                    contentAlignment = Alignment.Center,
+                                                                ) {
+                                                                    Column(
+                                                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                                                        verticalArrangement = Arrangement.Center,
+                                                                    ) {
+                                                                        Text(
+                                                                            dayNum.toString(),
+                                                                            color = when {
+                                                                                isPicked -> Color.White
+                                                                                isCurrent -> PcColors.Primary
+                                                                                else -> PcColors.Ink
+                                                                            },
+                                                                            style = PcType.BodySmall.copy(
+                                                                                fontWeight = if (isPicked || isCurrent) FontWeight.SemiBold else FontWeight.Normal,
+                                                                            ),
+                                                                        )
+
+                                                                        if (hasEvents) {
+                                                                            Box(
+                                                                                Modifier
+                                                                                    .padding(top = 2.dp)
+                                                                                    .size(4.dp)
+                                                                                    .clip(CircleShape)
+                                                                                    .background(if (isPicked) Color.White else PcColors.Primary),
+                                                                            )
+                                                                        }
+                                                                    }
+                                                                }
+                                                            } else {
+                                                                Box(Modifier.weight(1f).aspectRatio(1f))
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                CalendarViewMode.Months -> {
+                                    AnimatedContent(
+                                        targetState = pickerYear,
+                                        transitionSpec = {
+                                            if (targetState > initialState) {
+                                                (slideInHorizontally { width -> width } + fadeIn(animationSpec = tween(220))).togetherWith(
+                                                    slideOutHorizontally { width -> -width } + fadeOut(animationSpec = tween(180)),
+                                                )
+                                            } else {
+                                                (slideInHorizontally { width -> -width } + fadeIn(animationSpec = tween(220))).togetherWith(
+                                                    slideOutHorizontally { width -> width } + fadeOut(animationSpec = tween(180)),
+                                                )
+                                            }
+                                        },
+                                        label = "CalendarMonthsTransition",
+                                    ) { yearForMonths ->
+                                        CalendarMonthsGrid(
+                                            pickerYear = yearForMonths,
+                                            selectedMonth = viewMonth,
+                                            onMonthSelected = { selectedM ->
+                                                viewMonth = YearMonth.of(yearForMonths, selectedM)
+                                                if (selectedDate != null && YearMonth.from(selectedDate) != viewMonth) {
+                                                    selectedDate = null
+                                                }
+                                                viewMode = CalendarViewMode.Days
+                                            },
+                                            onBackToCalendar = {
+                                                viewMode = CalendarViewMode.Days
+                                            },
+                                        )
+                                    }
+                                }
+
+                                CalendarViewMode.Years -> {
+                                    AnimatedContent(
+                                        targetState = decadeStart,
+                                        transitionSpec = {
+                                            if (targetState > initialState) {
+                                                (slideInHorizontally { width -> width } + fadeIn(animationSpec = tween(220))).togetherWith(
+                                                    slideOutHorizontally { width -> -width } + fadeOut(animationSpec = tween(180)),
+                                                )
+                                            } else {
+                                                (slideInHorizontally { width -> -width } + fadeIn(animationSpec = tween(220))).togetherWith(
+                                                    slideOutHorizontally { width -> width } + fadeOut(animationSpec = tween(180)),
+                                                )
+                                            }
+                                        },
+                                        label = "CalendarYearsTransition",
+                                    ) { currentDecadeStart ->
+                                        CalendarYearsGrid(
+                                            decadeStart = currentDecadeStart,
+                                            selectedYear = pickerYear,
+                                            onYearSelected = { chosenYear ->
+                                                pickerYear = chosenYear
+                                                viewMode = CalendarViewMode.Months
+                                            },
+                                            onBackToCalendar = {
+                                                viewMode = CalendarViewMode.Days
+                                            },
+                                        )
                                     }
                                 }
                             }
@@ -495,11 +730,28 @@ private fun RemindersCalendarView(
                         Instant.parse(r.dueAt).atZone(ZoneId.systemDefault()).toLocalDate()
                     }.getOrNull() ?: return@filter false
 
-                    if (r.hasHitEndDate()) return@filter false
+                    val untilDate = r.recurrenceUntil?.let {
+                        runCatching { Instant.parse(it).atZone(ZoneId.systemDefault()).toLocalDate() }.getOrNull()
+                    }
+                    if (untilDate != null && filterDate > untilDate) return@filter false
                     occursOn(r.rrule, seriesStart, filterDate)
                 }
             } else {
-                reminders
+                reminders.filter { r ->
+                    val seriesStart = runCatching {
+                        Instant.parse(r.dueAt).atZone(ZoneId.systemDefault()).toLocalDate()
+                    }.getOrNull() ?: return@filter false
+
+                    val untilDate = r.recurrenceUntil?.let {
+                        runCatching { Instant.parse(it).atZone(ZoneId.systemDefault()).toLocalDate() }.getOrNull()
+                    }
+                    val daysInMonth = viewMonth.lengthOfMonth()
+                    (1..daysInMonth).any { day ->
+                        val date = viewMonth.atDay(day)
+                        if (untilDate != null && date > untilDate) false
+                        else occursOn(r.rrule, seriesStart, date)
+                    }
+                }
             }
 
             val title = if (filterDate != null) {
@@ -526,6 +778,157 @@ private fun RemindersCalendarView(
                     onToggle = onToggle,
                     onInspect = onInspect,
                     onEdit = onEdit,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun CalendarMonthsGrid(
+    pickerYear: Int,
+    selectedMonth: YearMonth,
+    onMonthSelected: (Month) -> Unit,
+    onBackToCalendar: () -> Unit,
+) {
+    val now = LocalDate.now()
+    val allMonths = Month.values()
+
+    Column(
+        Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        for (row in 0 until 4) {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                for (col in 0 until 3) {
+                    val month = allMonths[row * 3 + col]
+                    val isPicked = pickerYear == selectedMonth.year && month == selectedMonth.month
+                    val isCurrent = pickerYear == now.year && month == now.month
+
+                    Box(
+                        Modifier
+                            .weight(1f)
+                            .height(42.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .then(
+                                when {
+                                    isPicked -> Modifier.background(PcColors.Primary)
+                                    isCurrent -> Modifier
+                                        .background(PcColors.PrimaryTint)
+                                        .border(1.5.dp, PcColors.Primary, RoundedCornerShape(8.dp))
+                                    else -> Modifier
+                                        .background(PcColors.Surface)
+                                        .border(1.dp, PcColors.Border, RoundedCornerShape(8.dp))
+                                },
+                            )
+                            .clickable { onMonthSelected(month) },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            month.getDisplayName(TextStyle.SHORT, Locale.getDefault()),
+                            color = when {
+                                isPicked -> Color.White
+                                isCurrent -> PcColors.Primary
+                                else -> PcColors.Ink
+                            },
+                            style = PcType.BodySmall.copy(
+                                fontWeight = if (isPicked || isCurrent) FontWeight.SemiBold else FontWeight.Normal,
+                            ),
+                        )
+                    }
+                }
+            }
+        }
+
+        Spacer(Modifier.height(4.dp))
+
+        Box(
+            Modifier.fillMaxWidth(),
+            contentAlignment = Alignment.Center,
+        ) {
+            TextButton(onClick = onBackToCalendar) {
+                Text(
+                    "Back to calendar",
+                    color = PcColors.Primary,
+                    style = PcType.Caption.copy(fontWeight = FontWeight.SemiBold),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun CalendarYearsGrid(
+    decadeStart: Int,
+    selectedYear: Int,
+    onYearSelected: (Int) -> Unit,
+    onBackToCalendar: () -> Unit,
+) {
+    val currentYear = LocalDate.now().year
+
+    Column(
+        Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        for (row in 0 until 4) {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                for (col in 0 until 3) {
+                    val year = decadeStart + row * 3 + col
+                    val isPicked = year == selectedYear
+                    val isCurrent = year == currentYear
+
+                    Box(
+                        Modifier
+                            .weight(1f)
+                            .height(42.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .then(
+                                when {
+                                    isPicked -> Modifier.background(PcColors.Primary)
+                                    isCurrent -> Modifier
+                                        .background(PcColors.PrimaryTint)
+                                        .border(1.5.dp, PcColors.Primary, RoundedCornerShape(8.dp))
+                                    else -> Modifier
+                                        .background(PcColors.Surface)
+                                        .border(1.dp, PcColors.Border, RoundedCornerShape(8.dp))
+                                },
+                            )
+                            .clickable { onYearSelected(year) },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            year.toString(),
+                            color = when {
+                                isPicked -> Color.White
+                                isCurrent -> PcColors.Primary
+                                else -> PcColors.Ink
+                            },
+                            style = PcType.BodySmall.copy(
+                                fontWeight = if (isPicked || isCurrent) FontWeight.SemiBold else FontWeight.Normal,
+                            ),
+                        )
+                    }
+                }
+            }
+        }
+
+        Spacer(Modifier.height(4.dp))
+
+        Box(
+            Modifier.fillMaxWidth(),
+            contentAlignment = Alignment.Center,
+        ) {
+            TextButton(onClick = onBackToCalendar) {
+                Text(
+                    "Back to calendar",
+                    color = PcColors.Primary,
+                    style = PcType.Caption.copy(fontWeight = FontWeight.SemiBold),
                 )
             }
         }
@@ -578,7 +981,7 @@ private fun ReminderRow(
     onClick: () -> Unit,
     onEdit: () -> Unit,
 ) {
-    val done = reminder.isCompleted
+    val done = if (isRecurring) reminder.hasHitEndDate() else reminder.isCompleted
     val is24Hour = DateFormat.is24HourFormat(LocalContext.current)
 
     Row(
@@ -752,50 +1155,145 @@ internal fun ReminderDetailDialog(
         containerColor = PcColors.Surface,
         shape = PcShapes.Dialog,
         title = {
+            val statusDot = when (statusTone) {
+                Tone.Good -> PcColors.OnlineDot
+                Tone.Bad -> PcColors.Danger
+                Tone.Neutral -> PcColors.InkDisabled
+            }
+            val statusInk = when (statusTone) {
+                Tone.Good -> PcColors.OnlineInk
+                Tone.Bad -> PcColors.DangerInk
+                Tone.Neutral -> PcColors.InkSoft
+            }
+            val statusBg = when (statusTone) {
+                Tone.Good -> PcColors.OnlineBg
+                Tone.Bad -> PcColors.DangerBg
+                Tone.Neutral -> PcColors.Track
+            }
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(reminder.body, color = PcColors.Ink, style = PcType.Heading)
-                OutcomeBadge(text = statusLabel, tone = statusTone)
+                StatusPill(text = statusLabel, ink = statusInk, background = statusBg, dot = statusDot)
             }
         },
         text = {
+            val showTargets = remindersTargetable || !reminder.deviceIds.isNullOrEmpty() || devices.isNotEmpty()
+            val completedMoment = reminder.completedAt?.let {
+                AppViewModel.formatOccurrenceMoment(it, compact = true)
+            }
+            val scheduleHeadline = if (isRecurring) {
+                describeRecurrence(reminder.rrule, reminder.dueAt, is24Hour) ?: "Recurring"
+            } else {
+                AppViewModel.formatOccurrenceMoment(reminder.dueAt)
+            }
+            val scheduleSubline = if (isRecurring) {
+                "Starts ${AppViewModel.formatOccurrenceMoment(reminder.dueAt, compact = true)}"
+            } else {
+                "One-time reminder"
+            }
+            val scheduleEndLine = if (isRecurring && reminder.recurrenceUntil != null) {
+                "Ends ${AppViewModel.formatOccurrenceMoment(reminder.recurrenceUntil, compact = true)}"
+            } else {
+                null
+            }
+
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Column(
+                // Schedule hero card
+                Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(PcShapes.Control)
-                        .background(PcColors.Track)
+                        .background(PcColors.PrimaryTint)
+                        .border(1.dp, PcColors.Primary.copy(alpha = 0.16f), PcShapes.Control)
                         .padding(horizontal = 12.dp, vertical = 10.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    if (isRecurring) {
-                        describeRecurrence(reminder.rrule, reminder.dueAt, is24Hour)?.let {
-                            DetailMetaRow("Schedule", it)
-                        }
-                        DetailMetaRow("Series start", AppViewModel.formatOccurrenceMoment(reminder.dueAt))
-                    } else {
-                        DetailMetaRow("When", AppViewModel.formatOccurrenceMoment(reminder.dueAt))
-                        DetailMetaRow("Repeats", "One-time (does not repeat)")
-                    }
-
-                    if (remindersTargetable || !reminder.deviceIds.isNullOrEmpty() || devices.isNotEmpty()) {
-                        DetailMetaRow("Shows on", targetSummary)
-                    }
-
-                    if (reminder.completedAt != null) {
-                        DetailMetaRow(
-                            if (isRecurring) "Last completed" else "Completed",
-                            AppViewModel.formatInstant(reminder.completedAt),
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(PcShapes.SmallControl)
+                            .background(PcColors.Surface)
+                            .border(1.dp, PcColors.Primary.copy(alpha = 0.14f), PcShapes.SmallControl),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        PcIcon(
+                            if (isRecurring) PcIcons.EventRepeat else PcIcons.Schedule,
+                            null,
+                            size = 19.dp,
+                            tint = PcColors.Primary,
                         )
                     }
-                    if (reminder.recurrenceUntil != null) {
-                        DetailMetaRow("Ends", AppViewModel.formatInstant(reminder.recurrenceUntil))
+
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(2.dp),
+                    ) {
+                        Text(
+                            scheduleHeadline,
+                            color = PcColors.Ink,
+                            style = PcType.BodyStrong.copy(fontSize = 14.5.sp),
+                        )
+                        Text(
+                            scheduleSubline,
+                            color = PcColors.InkSoft,
+                            style = PcType.Caption.copy(fontSize = 12.sp),
+                        )
+                        if (scheduleEndLine != null) {
+                            Text(
+                                scheduleEndLine,
+                                color = PcColors.InkSoft,
+                                style = PcType.Caption.copy(fontSize = 12.sp),
+                            )
+                        }
                     }
-                    DetailMetaRow("Timezone", reminder.timezone)
+                }
+
+                // Compact visual metadata tiles (Timezone intentionally omitted)
+                if (showTargets && completedMoment != null) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(IntrinsicSize.Min),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        DetailInfoTile(
+                            icon = PcIcons.Devices,
+                            iconTint = PcColors.Primary,
+                            iconBg = PcColors.PrimaryTint,
+                            label = "Shows on",
+                            value = targetSummary,
+                            modifier = Modifier.weight(1f).fillMaxHeight(),
+                        )
+                        DetailInfoTile(
+                            icon = PcIcons.EventAvailable,
+                            iconTint = PcColors.OnlineInk,
+                            iconBg = PcColors.OnlineBg,
+                            label = if (isRecurring) "Last done" else "Completed",
+                            value = completedMoment,
+                            modifier = Modifier.weight(1f).fillMaxHeight(),
+                        )
+                    }
+                } else if (showTargets) {
+                    DetailInfoBanner(
+                        icon = PcIcons.Devices,
+                        iconTint = PcColors.Primary,
+                        iconBg = PcColors.PrimaryTint,
+                        label = "Shows on",
+                        value = targetSummary,
+                    )
+                } else if (completedMoment != null) {
+                    DetailInfoBanner(
+                        icon = PcIcons.EventAvailable,
+                        iconTint = PcColors.OnlineInk,
+                        iconBg = PcColors.OnlineBg,
+                        label = if (isRecurring) "Last done" else "Completed",
+                        value = completedMoment,
+                    )
                 }
 
                 if (isRecurring) {
@@ -855,14 +1353,14 @@ internal fun ReminderDetailDialog(
                                 val isSkipped = occ.status == "skipped"
                                 val hasCustom = !occ.customBody.isNullOrBlank()
 
-                                val occDateStr = AppViewModel.formatOccurrenceMoment(occ.occursAt)
+                                val occDateStr = AppViewModel.formatOccurrenceMoment(occ.occursAt, compact = true)
 
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .clip(PcShapes.Control)
                                         .background(PcColors.Track)
-                                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                                        .padding(start = 10.dp, end = 6.dp, top = 7.dp, bottom = 7.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 ) {
@@ -882,36 +1380,34 @@ internal fun ReminderDetailDialog(
                                         },
                                     )
 
-                                    Column(Modifier.weight(1f)) {
+                                    Column(
+                                        modifier = Modifier.weight(1f),
+                                        verticalArrangement = Arrangement.spacedBy(1.dp),
+                                    ) {
                                         Row(
+                                            modifier = Modifier.fillMaxWidth(),
                                             verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp),
                                         ) {
                                             Text(
                                                 occDateStr,
-                                                color = PcColors.Ink,
+                                                color = if (isCompleted || isSkipped) PcColors.InkSoft else PcColors.Ink,
                                                 style = PcType.Label.copy(fontSize = 12.sp),
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                                modifier = Modifier.weight(1f, fill = false),
                                             )
                                             if (isSkipped) {
-                                                Text(
-                                                    "Stopped",
-                                                    color = PcColors.DangerInk,
-                                                    style = PcType.Caption.copy(fontSize = 10.sp, fontWeight = FontWeight.Bold),
-                                                    modifier = Modifier
-                                                        .clip(RoundedCornerShape(3.dp))
-                                                        .background(PcColors.DangerBg)
-                                                        .padding(horizontal = 4.dp, vertical = 1.dp),
+                                                OccurrenceBadge(
+                                                    text = "Stopped",
+                                                    ink = PcColors.DangerInk,
+                                                    bg = PcColors.DangerBg,
                                                 )
-                                            }
-                                            if (isCompleted) {
-                                                Text(
-                                                    "Completed",
-                                                    color = PcColors.OnlineInk,
-                                                    style = PcType.Caption.copy(fontSize = 10.sp, fontWeight = FontWeight.Bold),
-                                                    modifier = Modifier
-                                                        .clip(RoundedCornerShape(3.dp))
-                                                        .background(PcColors.OnlineBg)
-                                                        .padding(horizontal = 4.dp, vertical = 1.dp),
+                                            } else if (isCompleted) {
+                                                OccurrenceBadge(
+                                                    text = "Done",
+                                                    ink = PcColors.OnlineInk,
+                                                    bg = PcColors.OnlineBg,
                                                 )
                                             }
                                             if (hasCustom) {
@@ -919,81 +1415,88 @@ internal fun ReminderDetailDialog(
                                                     "(edited)",
                                                     color = PcColors.InkFaint,
                                                     style = PcType.Caption.copy(fontSize = 10.sp),
+                                                    maxLines = 1,
+                                                    softWrap = false,
                                                 )
                                             }
                                         }
 
                                         Text(
                                             occ.effectiveBody,
-                                            color = if (isCompleted) PcColors.InkFaint else PcColors.Ink,
+                                            color = if (isCompleted || isSkipped) PcColors.InkFaint else PcColors.Ink,
                                             style = PcType.BodySmall.copy(fontSize = 12.sp),
                                             textDecoration = if (isCompleted || isSkipped) TextDecoration.LineThrough else null,
-                                            maxLines = 2,
+                                            maxLines = if (hasCustom) 2 else 1,
                                             overflow = TextOverflow.Ellipsis,
                                         )
                                     }
 
-                                    // Edit text button
-                                    IconButton(
-                                        onClick = {
-                                            editingOccurrence = occ
-                                            editText = occ.effectiveBody
-                                        },
-                                        modifier = Modifier.size(28.dp),
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(0.dp),
                                     ) {
-                                        PcIcon(PcIcons.Edit, "Edit text", size = 15.dp, tint = PcColors.InkSoft)
-                                    }
-
-                                    // Stop / Skip or Restore button
-                                    if (!isSkipped) {
+                                        // Edit text button
                                         IconButton(
                                             onClick = {
-                                                if (viewModel != null) {
-                                                    val previousStatus = occ.status
-                                                    scope.launch {
-                                                        viewModel.stopOccurrence(reminder.id, occ.occursAt)
-                                                        occurrences = AppViewModel.sortOccurrencesOldestToNewest(
-                                                            occurrences.map {
-                                                                if (it.occursAt == occ.occursAt) it.copy(status = "skipped") else it
-                                                            },
-                                                        )
-                                                        occurrenceUndoMessage = "Occurrence stopped."
-                                                        occurrenceUndoAction = {
-                                                            val restored = viewModel.revertOccurrence(
-                                                                reminderId = reminder.id,
-                                                                occursAt = occ.occursAt,
-                                                                status = if (previousStatus == "skipped") "pending" else previousStatus,
-                                                            )
+                                                editingOccurrence = occ
+                                                editText = occ.effectiveBody
+                                            },
+                                            modifier = Modifier.size(28.dp),
+                                        ) {
+                                            PcIcon(PcIcons.Edit, "Edit text", size = 15.dp, tint = PcColors.InkSoft)
+                                        }
+
+                                        // Stop / Skip or Restore button
+                                        if (!isSkipped) {
+                                            IconButton(
+                                                onClick = {
+                                                    if (viewModel != null) {
+                                                        val previousStatus = occ.status
+                                                        scope.launch {
+                                                            viewModel.stopOccurrence(reminder.id, occ.occursAt)
                                                             occurrences = AppViewModel.sortOccurrencesOldestToNewest(
                                                                 occurrences.map {
-                                                                    if (it.occursAt == occ.occursAt) restored else it
+                                                                    if (it.occursAt == occ.occursAt) it.copy(status = "skipped") else it
                                                                 },
                                                             )
+                                                            occurrenceUndoMessage = "Occurrence stopped."
+                                                            occurrenceUndoAction = {
+                                                                val restored = viewModel.revertOccurrence(
+                                                                    reminderId = reminder.id,
+                                                                    occursAt = occ.occursAt,
+                                                                    status = if (previousStatus == "skipped") "pending" else previousStatus,
+                                                                )
+                                                                occurrences = AppViewModel.sortOccurrencesOldestToNewest(
+                                                                    occurrences.map {
+                                                                        if (it.occursAt == occ.occursAt) restored else it
+                                                                    },
+                                                                )
+                                                            }
                                                         }
                                                     }
-                                                }
-                                            },
-                                            modifier = Modifier.size(28.dp),
-                                        ) {
-                                            PcIcon(PcIcons.Close, "Stop occurrence", size = 15.dp, tint = PcColors.DangerInk)
-                                        }
-                                    } else {
-                                        IconButton(
-                                            onClick = {
-                                                if (viewModel != null) {
-                                                    scope.launch {
-                                                        val restored = viewModel.restoreOccurrence(reminder.id, occ.occursAt)
-                                                        occurrences = AppViewModel.sortOccurrencesOldestToNewest(
-                                                            occurrences.map { if (it.occursAt == occ.occursAt) restored else it },
-                                                        )
-                                                        occurrenceUndoMessage = null
-                                                        occurrenceUndoAction = null
+                                                },
+                                                modifier = Modifier.size(28.dp),
+                                            ) {
+                                                PcIcon(PcIcons.Close, "Stop occurrence", size = 15.dp, tint = PcColors.DangerInk)
+                                            }
+                                        } else {
+                                            IconButton(
+                                                onClick = {
+                                                    if (viewModel != null) {
+                                                        scope.launch {
+                                                            val restored = viewModel.restoreOccurrence(reminder.id, occ.occursAt)
+                                                            occurrences = AppViewModel.sortOccurrencesOldestToNewest(
+                                                                occurrences.map { if (it.occursAt == occ.occursAt) restored else it },
+                                                            )
+                                                            occurrenceUndoMessage = null
+                                                            occurrenceUndoAction = null
+                                                        }
                                                     }
-                                                }
-                                            },
-                                            modifier = Modifier.size(28.dp),
-                                        ) {
-                                            PcIcon(PcIcons.RestartAlt, "Restore occurrence", size = 15.dp, tint = PcColors.OnlineInk)
+                                                },
+                                                modifier = Modifier.size(28.dp),
+                                            ) {
+                                                PcIcon(PcIcons.RestartAlt, "Restore occurrence", size = 15.dp, tint = PcColors.OnlineInk)
+                                            }
                                         }
                                     }
                                 }
@@ -1123,23 +1626,112 @@ internal fun ReminderDetailDialog(
 }
 
 @Composable
-private fun DetailMetaRow(label: String, value: String) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.Top,
+private fun DetailInfoTile(
+    @DrawableRes icon: Int,
+    iconTint: Color,
+    iconBg: Color,
+    label: String,
+    value: String,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier
+            .clip(PcShapes.Control)
+            .background(PcColors.Surface)
+            .border(1.dp, PcColors.Border, PcShapes.Control)
+            .padding(horizontal = 11.dp, vertical = 9.dp),
+        verticalArrangement = Arrangement.spacedBy(5.dp),
     ) {
-        Text(
-            label,
-            color = PcColors.InkFaint,
-            style = PcType.Caption.copy(fontWeight = FontWeight.Medium),
-            modifier = Modifier.width(104.dp),
-        )
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(22.dp)
+                    .clip(CircleShape)
+                    .background(iconBg),
+                contentAlignment = Alignment.Center,
+            ) {
+                PcIcon(icon, null, size = 13.dp, tint = iconTint)
+            }
+            Text(
+                label,
+                color = PcColors.InkSoft,
+                style = PcType.Caption.copy(fontSize = 11.sp, fontWeight = FontWeight.Medium),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
         Text(
             value,
             color = PcColors.Ink,
-            style = PcType.Caption.copy(color = PcColors.Ink),
-            modifier = Modifier.weight(1f),
+            style = PcType.Label.copy(fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold),
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
         )
     }
+}
+
+@Composable
+private fun DetailInfoBanner(
+    @DrawableRes icon: Int,
+    iconTint: Color,
+    iconBg: Color,
+    label: String,
+    value: String,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(PcShapes.Control)
+            .background(PcColors.Surface)
+            .border(1.dp, PcColors.Border, PcShapes.Control)
+            .padding(horizontal = 12.dp, vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(28.dp)
+                .clip(CircleShape)
+                .background(iconBg),
+            contentAlignment = Alignment.Center,
+        ) {
+            PcIcon(icon, null, size = 15.dp, tint = iconTint)
+        }
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                label,
+                color = PcColors.InkSoft,
+                style = PcType.Caption.copy(fontSize = 11.sp, fontWeight = FontWeight.Medium),
+            )
+            Text(
+                value,
+                color = PcColors.Ink,
+                style = PcType.Label.copy(fontSize = 13.sp, fontWeight = FontWeight.SemiBold),
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+@Composable
+private fun OccurrenceBadge(
+    text: String,
+    ink: Color,
+    bg: Color,
+) {
+    Text(
+        text,
+        color = ink,
+        style = PcType.Caption.copy(fontSize = 10.sp, fontWeight = FontWeight.SemiBold),
+        maxLines = 1,
+        softWrap = false,
+        modifier = Modifier
+            .clip(RoundedCornerShape(4.dp))
+            .background(bg)
+            .padding(horizontal = 5.dp, vertical = 1.dp),
+    )
 }

@@ -521,11 +521,23 @@ class AppViewModel(
 
     fun deleteReminder(reminder: Reminder) = launchWithMessage {
         api.deleteReminder(reminder.id)
+        val hasPastOccurrences = runCatching { Instant.parse(reminder.dueAt).isBefore(Instant.now()) }.getOrDefault(false)
+        val isRecurringActiveWithPast = !reminder.rrule.isNullOrBlank() && hasPastOccurrences && !reminder.hasHitEndDate()
+        val msg = if (isRecurringActiveWithPast) "Future occurrences removed." else "Reminder deleted."
         emitMessage(
-            text = "Reminder deleted.",
+            text = msg,
             undo = PendingReminderUndo.Deleted(reminder),
         ) { state ->
-            state.copy(reminders = state.reminders.removeById(reminder.id))
+            if (isRecurringActiveWithPast) {
+                val ended = reminder.copy(
+                    recurrenceUntil = Instant.now().toString(),
+                    isCompleted = true,
+                    completedAt = Instant.now().toString(),
+                )
+                state.copy(reminders = state.reminders.upsert(ended))
+            } else {
+                state.copy(reminders = state.reminders.removeById(reminder.id))
+            }
         }
         syncAfterAction()
     }
@@ -536,27 +548,43 @@ class AppViewModel(
         launchWithMessage {
             when (undo) {
                 is PendingReminderUndo.Deleted -> {
-                    val restored = try {
-                        api.restoreReminder(undo.snapshot.id)
-                    } catch (e: ApiException) {
-                        if (e.statusCode == 404 || e.statusCode == 405) {
-                            val recreated = api.createReminder(
-                                CreateReminderRequest(
-                                    body = undo.snapshot.body,
-                                    dueAt = undo.snapshot.dueAt,
-                                    timezone = undo.snapshot.timezone,
+                    val hasPastOccurrences = runCatching { Instant.parse(undo.snapshot.dueAt).isBefore(Instant.now()) }.getOrDefault(false)
+                    val isRecurringActiveWithPast = !undo.snapshot.rrule.isNullOrBlank() && hasPastOccurrences && !undo.snapshot.hasHitEndDate()
+                    val restored = if (isRecurringActiveWithPast) {
+                        try {
+                            api.updateReminder(
+                                undo.snapshot.id,
+                                UpdateReminderRequest(
                                     rrule = undo.snapshot.rrule,
                                     recurrenceUntil = undo.snapshot.recurrenceUntil,
-                                    deviceIds = undo.snapshot.deviceIds,
                                 ),
                             )
-                            if (undo.snapshot.isCompleted) {
-                                api.completeReminder(recreated.id, true)
+                        } catch (e: Exception) {
+                            api.restoreReminder(undo.snapshot.id)
+                        }
+                    } else {
+                        try {
+                            api.restoreReminder(undo.snapshot.id)
+                        } catch (e: ApiException) {
+                            if (e.statusCode == 404 || e.statusCode == 405) {
+                                val recreated = api.createReminder(
+                                    CreateReminderRequest(
+                                        body = undo.snapshot.body,
+                                        dueAt = undo.snapshot.dueAt,
+                                        timezone = undo.snapshot.timezone,
+                                        rrule = undo.snapshot.rrule,
+                                        recurrenceUntil = undo.snapshot.recurrenceUntil,
+                                        deviceIds = undo.snapshot.deviceIds,
+                                    ),
+                                )
+                                if (undo.snapshot.isCompleted) {
+                                    api.completeReminder(recreated.id, true)
+                                } else {
+                                    recreated
+                                }
                             } else {
-                                recreated
+                                throw e
                             }
-                        } else {
-                            throw e
                         }
                     }
                     emitMessage("Reminder restored.") { state ->
@@ -840,17 +868,21 @@ class AppViewModel(
             value: String,
             zone: ZoneId = ZoneId.systemDefault(),
             today: LocalDate = LocalDate.now(zone),
+            compact: Boolean = false,
         ): String {
             val moment = zoned(value, zone) ?: return value
             val date = moment.toLocalDate()
             val cal = formatCalendarDay(date, today)
+            val time = moment.format(TimeOnly)
+            if (compact) {
+                return "$cal · $time"
+            }
             val relative = when (date) {
                 today -> " (Today)"
                 today.plusDays(1) -> " (Tomorrow)"
                 today.minusDays(1) -> " (Yesterday)"
                 else -> ""
             }
-            val time = moment.format(TimeOnly)
             return "$cal$relative at $time"
         }
 

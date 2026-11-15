@@ -104,9 +104,6 @@ public partial class MainWindow : Window
             }
         };
 
-        LocationChanged += (_, _) => RepositionAccountPopup();
-        SizeChanged += (_, _) => RepositionAccountPopup();
-
         PreviewMouseDown += OnWindowPreviewMouseDown;
         PreviewMouseWheel += (_, _) =>
         {
@@ -121,14 +118,16 @@ public partial class MainWindow : Window
     {
         if (DataContext is ShellViewModel { IsAccountMenuOpen: true } shell)
         {
-            if (IsElementOrChildOf(e.OriginalSource as DependencyObject, AccountButton))
+            var source = e.OriginalSource as DependencyObject;
+            if (IsElementOrChildOf(source, AccountPopupCard))
             {
-                shell.IsAccountMenuOpen = false;
-                e.Handled = true;
+                return;
             }
-            else
+
+            shell.IsAccountMenuOpen = false;
+            if (IsElementOrChildOf(source, AccountButton))
             {
-                shell.IsAccountMenuOpen = false;
+                e.Handled = true;
             }
         }
     }
@@ -646,33 +645,36 @@ public partial class MainWindow : Window
         }
     }
 
-    private void RepositionAccountPopup()
-    {
-        if (AccountPopup.IsOpen)
-        {
-            var offset = AccountPopup.HorizontalOffset;
-            AccountPopup.HorizontalOffset = offset + 0.0001;
-            AccountPopup.HorizontalOffset = offset;
-        }
-    }
-
     private int _accountMenuAnimationVersion;
 
     private void OpenAccountMenu()
     {
         var version = ++_accountMenuAnimationVersion;
-        AccountPopup.IsOpen = true;
+        var wasVisible = AccountPopupCard.Visibility == Visibility.Visible;
+        AccountPopupCard.Visibility = Visibility.Visible;
 
-        var startY = AccountMenuTranslate.Y;
+        var startY = wasVisible ? AccountMenuTranslate.Y : 10.0;
         if (double.IsNaN(startY) || Math.Abs(startY) < 0.01) startY = 10.0;
+        var startOpacity = wasVisible ? AccountPopupCard.Opacity : 0.0;
 
         var slideAnim = new DoubleAnimation(startY, 0.0, TimeSpan.FromMilliseconds(200))
         {
             EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
         };
-        var fadeAnim = new DoubleAnimation(AccountPopupCard.Opacity, 1.0, TimeSpan.FromMilliseconds(180))
+        var fadeAnim = new DoubleAnimation(startOpacity, 1.0, TimeSpan.FromMilliseconds(180))
         {
             EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+        };
+
+        fadeAnim.Completed += (_, _) =>
+        {
+            if (version == _accountMenuAnimationVersion && DataContext is ShellViewModel { IsAccountMenuOpen: true })
+            {
+                AccountPopupCard.BeginAnimation(OpacityProperty, null);
+                AccountMenuTranslate.BeginAnimation(TranslateTransform.YProperty, null);
+                AccountPopupCard.Opacity = 1.0;
+                AccountMenuTranslate.Y = 0.0;
+            }
         };
 
         AccountMenuTranslate.BeginAnimation(TranslateTransform.YProperty, slideAnim);
@@ -681,7 +683,7 @@ public partial class MainWindow : Window
 
     private void CloseAccountMenu()
     {
-        if (!AccountPopup.IsOpen) return;
+        if (AccountPopupCard.Visibility != Visibility.Visible) return;
         var version = ++_accountMenuAnimationVersion;
 
         var startY = AccountMenuTranslate.Y;
@@ -700,9 +702,11 @@ public partial class MainWindow : Window
         {
             if (version == _accountMenuAnimationVersion && DataContext is ShellViewModel { IsAccountMenuOpen: false })
             {
-                AccountPopup.IsOpen = false;
-                AccountMenuTranslate.Y = 0.0;
-                AccountPopupCard.Opacity = 1.0;
+                AccountPopupCard.BeginAnimation(OpacityProperty, null);
+                AccountMenuTranslate.BeginAnimation(TranslateTransform.YProperty, null);
+                AccountPopupCard.Visibility = Visibility.Collapsed;
+                AccountMenuTranslate.Y = 10.0;
+                AccountPopupCard.Opacity = 0.0;
             }
         };
 
