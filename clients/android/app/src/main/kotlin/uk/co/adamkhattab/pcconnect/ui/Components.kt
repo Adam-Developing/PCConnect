@@ -172,7 +172,7 @@ fun StatusPill(
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         if (dot != null) Dot(dot)
-        Text(text, color = ink, style = PcType.Label, maxLines = 1)
+        Text(text, color = ink, style = PcType.Label, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
@@ -415,7 +415,7 @@ fun PcTextField(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.Bottom,
             ) {
-                FieldLabel(label.orEmpty())
+                FieldLabel(label.orEmpty(), Modifier.weight(1f))
                 labelTrailing?.invoke()
             }
         }
@@ -484,9 +484,11 @@ fun PickerField(
         ) {
             Text(
                 value,
+                modifier = Modifier.weight(1f).padding(end = 6.dp),
                 color = PcColors.Ink,
                 style = if (mono) PcType.MonoTime.copy(fontSize = 15.sp) else PcType.Body,
                 maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
             PcIcon(icon, null, size = 20.dp, tint = PcColors.InkFaint)
         }

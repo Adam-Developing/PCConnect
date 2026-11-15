@@ -35,18 +35,18 @@
         </BeginStoryboard>
       </EventTrigger>
     </StackPanel.Triggers>
-    <StackPanel Orientation="Horizontal">
-      <Border Width="44" Height="44" CornerRadius="12" Background="{StaticResource DangerTint}"
+    <DockPanel>
+      <Border DockPanel.Dock="Left" Width="44" Height="44" CornerRadius="12" Background="{StaticResource DangerTint}"
               VerticalAlignment="Top">
         <Path x:Name="CommandIcon" Fill="{StaticResource Danger}" Width="24" Height="24"
               Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center" />
       </Border>
 
       <StackPanel Margin="14,0,0,0" VerticalAlignment="Center">
-        <TextBlock x:Name="PromptText" Style="{StaticResource Heading}" />
-        <TextBlock x:Name="DeviceStatusText" Style="{StaticResource Caption}" Margin="0,2,0,0" />
+        <TextBlock x:Name="PromptText" Style="{StaticResource Heading}" TextWrapping="Wrap" />
+        <TextBlock x:Name="DeviceStatusText" Style="{StaticResource Caption}" Margin="0,2,0,0" TextWrapping="Wrap" />
       </StackPanel>
-    </StackPanel>
+    </DockPanel>
 
     <TextBlock Style="{StaticResource Subtle}" Margin="0,14,0,0" LineHeight="20">
       <Run Text="This ends whatever is running there. You're already signed in, but it still needs your " />

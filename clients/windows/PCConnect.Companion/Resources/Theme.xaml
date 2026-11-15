@@ -255,6 +255,7 @@
 
   <!-- The default is the design's quiet button: white, bordered, 8px. -->
   <Style TargetType="Button">
+    <Setter Property="FocusVisualStyle" Value="{x:Null}" />
     <Setter Property="Background" Value="{StaticResource Surface}" />
     <Setter Property="Foreground" Value="{StaticResource Ink}" />
     <Setter Property="BorderBrush" Value="{StaticResource Border}" />
@@ -480,6 +481,7 @@
 
   <!-- A borderless label that behaves like a link. -->
   <Style x:Key="LinkButton" TargetType="Button">
+    <Setter Property="FocusVisualStyle" Value="{x:Null}" />
     <Setter Property="Background" Value="Transparent" />
     <Setter Property="Foreground" Value="{StaticResource Primary}" />
     <Setter Property="BorderThickness" Value="0" />
@@ -554,6 +556,7 @@
   <!-- ═══ sidebar ════════════════════════════════════════════════════ -->
 
   <Style x:Key="NavItem" TargetType="RadioButton">
+    <Setter Property="FocusVisualStyle" Value="{x:Null}" />
     <Setter Property="Foreground" Value="{StaticResource Ink}" />
     <Setter Property="FontSize" Value="14" />
     <Setter Property="FontWeight" Value="Medium" />
@@ -1136,6 +1139,7 @@
 
   <!-- The design's switch: a 36×20 track with a 16 knob. -->
   <Style x:Key="Switch" TargetType="CheckBox">
+    <Setter Property="FocusVisualStyle" Value="{x:Null}" />
     <Setter Property="Cursor" Value="Hand" />
     <Setter Property="Template">
       <Setter.Value>
@@ -1278,6 +1282,7 @@
   </Style>
 
   <Style TargetType="CheckBox">
+    <Setter Property="FocusVisualStyle" Value="{x:Null}" />
     <Setter Property="Foreground" Value="{StaticResource Ink}" />
     <Setter Property="FontSize" Value="13.5" />
     <Setter Property="Cursor" Value="Hand" />
@@ -1310,6 +1315,7 @@
   </Style>
 
   <Style TargetType="RadioButton">
+    <Setter Property="FocusVisualStyle" Value="{x:Null}" />
     <Setter Property="Foreground" Value="{StaticResource Ink}" />
     <Setter Property="FontSize" Value="13.5" />
     <Setter Property="Cursor" Value="Hand" />
@@ -1335,6 +1341,7 @@
   </Style>
 
   <Style x:Key="SegmentRadio" TargetType="RadioButton">
+    <Setter Property="FocusVisualStyle" Value="{x:Null}" />
     <Setter Property="Foreground" Value="{StaticResource InkSoft}" />
     <Setter Property="FontSize" Value="12" />
     <Setter Property="FontWeight" Value="Medium" />
@@ -1373,6 +1380,7 @@
   </Style>
 
   <Style TargetType="ComboBoxItem">
+    <Setter Property="FocusVisualStyle" Value="{x:Null}" />
     <Setter Property="Background" Value="Transparent" />
     <Setter Property="Foreground" Value="{StaticResource Ink}" />
     <Setter Property="FontSize" Value="13" />
@@ -1402,6 +1410,7 @@
   </Style>
 
   <Style TargetType="ComboBox">
+    <Setter Property="FocusVisualStyle" Value="{x:Null}" />
     <Setter Property="Foreground" Value="{StaticResource Ink}" />
     <Setter Property="Background" Value="{StaticResource Surface}" />
     <Setter Property="BorderBrush" Value="{StaticResource Border}" />
@@ -1512,6 +1521,7 @@
   </Style>
 
   <Style TargetType="ListBoxItem">
+    <Setter Property="FocusVisualStyle" Value="{x:Null}" />
     <Setter Property="Padding" Value="0" />
     <Setter Property="Margin" Value="0,0,0,10" />
     <Setter Property="Cursor" Value="Hand" />

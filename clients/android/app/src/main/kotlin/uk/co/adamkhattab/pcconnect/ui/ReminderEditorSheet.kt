@@ -43,6 +43,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import uk.co.adamkhattab.pcconnect.data.Device
@@ -370,8 +371,11 @@ private fun RepeatEditor(
                     ) {
                         Text(
                             repeat.until?.let { AppViewModel.describeDay(it) } ?: "Never",
+                            modifier = Modifier.weight(1f).padding(end = 6.dp),
                             color = PcColors.Ink,
                             style = PcType.BodySmall.copy(fontSize = 14.5.sp),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
                         PcIcon(
                             if (repeat.until == null) PcIcons.ExpandMore else PcIcons.Close,
@@ -457,8 +461,11 @@ private fun IntervalField(interval: Int, unit: String, onChange: (Int) -> Unit, 
             ) {
                 Text(
                     "$interval $unit",
+                    modifier = Modifier.weight(1f).padding(end = 6.dp),
                     color = PcColors.Ink,
                     style = PcType.BodySmall.copy(fontSize = 14.5.sp),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
                 PcIcon(PcIcons.ExpandMore, null, size = 20.dp, tint = PcColors.InkFaint)
             }
@@ -564,9 +571,11 @@ private fun PickerField(
             PcIcon(icon, null, size = 18.dp, tint = PcColors.InkFaint)
             Text(
                 value,
+                modifier = Modifier.weight(1f),
                 color = PcColors.Ink,
                 style = if (mono) PcType.MonoTime else PcType.BodySmall.copy(fontSize = 14.5.sp),
                 maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
     }

@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -189,6 +190,7 @@ private fun DetailTopBar(device: Device, onBack: () -> Unit, onEdit: () -> Unit)
                     color = if (device.isOnline) PcColors.OnlineInk else PcColors.InkSoft,
                     style = PcType.Caption,
                     maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
         }
@@ -298,7 +300,7 @@ private fun RemindersSection(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            SectionLabel(if (targetable) "Reminders on this PC" else "Reminders")
+            SectionLabel(if (targetable) "Reminders on this PC" else "Reminders", Modifier.weight(1f).padding(end = 8.dp))
 
             Row(
                 Modifier.clip(PcShapes.Pill),
@@ -359,9 +361,10 @@ private fun ReminderLine(reminder: Reminder, onClick: () -> Unit) {
     ) {
         Text(
             AppViewModel.formatTime(reminder.dueAt),
-            Modifier.width(42.dp),
+            Modifier.widthIn(min = 42.dp),
             color = PcColors.InkSoft,
             style = PcType.MonoTime.copy(fontSize = 13.sp),
+            maxLines = 1,
         )
 
         Column(Modifier.weight(1f)) {
@@ -391,9 +394,10 @@ private fun RecentSection(commands: List<Command>) {
                 ) {
                     Text(
                         AppViewModel.formatTime(command.issuedAt),
-                        Modifier.width(42.dp),
+                        Modifier.widthIn(min = 42.dp),
                         color = PcColors.InkSoft,
                         style = PcType.MonoTime.copy(fontSize = 13.sp),
+                        maxLines = 1,
                     )
                     Column(Modifier.weight(1f)) {
                         Text(
@@ -409,7 +413,7 @@ private fun RecentSection(commands: List<Command>) {
                                 error,
                                 color = PcColors.DangerInk,
                                 style = PcType.Caption.copy(fontSize = 12.sp),
-                                maxLines = 1,
+                                maxLines = 2,
                                 overflow = TextOverflow.Ellipsis,
                             )
                         }

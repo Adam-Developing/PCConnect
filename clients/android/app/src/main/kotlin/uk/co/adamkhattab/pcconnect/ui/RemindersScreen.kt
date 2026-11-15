@@ -391,7 +391,10 @@ private fun RemindersCalendarView(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        Row(
+                            modifier = Modifier.weight(1f, fill = false),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
                             Box(
                                 Modifier
                                     .size(36.dp)
@@ -426,6 +429,7 @@ private fun RemindersCalendarView(
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 modifier = Modifier
+                                    .weight(1f, fill = false)
                                     .clip(RoundedCornerShape(8.dp))
                                     .clickable {
                                         when (viewMode) {
@@ -451,9 +455,11 @@ private fun RemindersCalendarView(
                                         CalendarViewMode.Months -> pickerYear.toString()
                                         CalendarViewMode.Years -> "$decadeStart - ${decadeStart + 11}"
                                     },
+                                    modifier = Modifier.weight(1f, fill = false),
                                     color = PcColors.Ink,
                                     style = PcType.Heading.copy(fontSize = 17.sp),
                                     maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
                                 )
                                 Spacer(Modifier.width(4.dp))
                                 PcIcon(
@@ -952,7 +958,7 @@ private fun ReminderGroup(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.Bottom,
         ) {
-            SectionLabel(title)
+            SectionLabel(title, Modifier.weight(1f).padding(end = 8.dp))
             if (trailing != null) Caption(trailing)
         }
 

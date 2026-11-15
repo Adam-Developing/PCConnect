@@ -54,7 +54,7 @@
           </Grid.ColumnDefinitions>
 
           <Button Grid.Column="0" Command="{Binding DataContext.ShowEventDetailCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                  CommandParameter="{Binding}" Background="Transparent" BorderThickness="0" Padding="0"
+                  CommandParameter="{Binding}" Background="Transparent" BorderThickness="0" Padding="0" Margin="0,0,6,0"
                   HorizontalContentAlignment="Stretch" Cursor="Hand">
             <Button.Template>
               <ControlTemplate TargetType="Button">
@@ -172,19 +172,19 @@
           <ColumnDefinition Width="*" />
           <ColumnDefinition Width="Auto" />
         </Grid.ColumnDefinitions>
-        <StackPanel>
+        <StackPanel Grid.Column="0" Margin="0,0,12,0" VerticalAlignment="Center" ClipToBounds="True">
           <TextBlock Text="{Binding Event}" Style="{StaticResource Body}" FontSize="13.5"
-                     TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" />
-          <StackPanel Orientation="Horizontal">
-            <TextBlock Text="{Binding Time}" Style="{StaticResource Mono}" FontSize="12"
-                       Foreground="{StaticResource InkFaint}" />
-            <TextBlock Text=" · " Style="{StaticResource Caption}" />
-            <TextBlock Text="{Binding Source}" Style="{StaticResource Caption}" TextWrapping="NoWrap" />
-          </StackPanel>
+                     TextWrapping="Wrap" />
+          <TextBlock Style="{StaticResource Caption}" Margin="0,2,0,0" TextWrapping="Wrap">
+            <Run Text="{Binding Time, Mode=OneWay}" FontFamily="{StaticResource MonoFont}" FontSize="12"
+                 Foreground="{StaticResource InkFaint}" /><Run Text=" · " /><Run Text="{Binding Source, Mode=OneWay}" />
+          </TextBlock>
         </StackPanel>
-        <Border Grid.Column="1" Style="{StaticResource Pill}"
+        <Border Grid.Column="1" CornerRadius="10" Padding="10,4" MaxWidth="190"
+                VerticalAlignment="Center" ToolTip="{Binding Outcome}"
                 Background="{Binding Tone, Converter={StaticResource ToneTint}}">
           <TextBlock Text="{Binding Outcome}" Style="{StaticResource PillText}"
+                     TextWrapping="Wrap" TextAlignment="Right"
                      Foreground="{Binding Tone, Converter={StaticResource ToneInk}}" />
         </Border>
       </Grid>
@@ -329,7 +329,8 @@
                   <StackPanel>
                     <StackPanel Margin="10,8,10,6">
                       <TextBlock Text="{Binding Account.DisplayName}" Style="{StaticResource Body}"
-                                 FontSize="13.5" FontWeight="SemiBold" />
+                                 FontSize="13.5" FontWeight="SemiBold"
+                                 TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
                       <TextBlock Text="{Binding Account.Email}" Style="{StaticResource Caption}"
                                  TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
                     </StackPanel>
@@ -337,11 +338,16 @@
                     <Border Style="{StaticResource Hairline}" Margin="4,2" />
 
                     <Grid Margin="10,6">
-                      <TextBlock Text="This PC" Style="{StaticResource Caption}" FontSize="11.5"
-                                 Foreground="{StaticResource InkSoft}" HorizontalAlignment="Left" />
-                      <TextBlock Text="{Binding ThisPcName}" Style="{StaticResource Caption}"
+                      <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                      </Grid.ColumnDefinitions>
+                      <TextBlock Grid.Column="0" Text="This PC" Style="{StaticResource Caption}" FontSize="11.5"
+                                 Foreground="{StaticResource InkSoft}" HorizontalAlignment="Left" Margin="0,0,8,0" />
+                      <TextBlock Grid.Column="1" Text="{Binding ThisPcName}" Style="{StaticResource Caption}"
                                  FontSize="11.5" Foreground="{StaticResource Ink}"
-                                 HorizontalAlignment="Right" TextTrimming="CharacterEllipsis" />
+                                 HorizontalAlignment="Right" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"
+                                 ToolTip="{Binding ThisPcName}" />
                     </Grid>
 
                     <Border Style="{StaticResource Hairline}" Margin="4,2" />
@@ -507,15 +513,19 @@
               <RowDefinition Height="*" />
             </Grid.RowDefinitions>
 
-            <DockPanel LastChildFill="False">
-              <StackPanel Orientation="Horizontal" DockPanel.Dock="Left" VerticalAlignment="Bottom">
-                <TextBlock Text="PCConnect" Style="{StaticResource PageTitle}" />
-                <TextBlock Text="{Binding ThisPcName}" Style="{StaticResource Subtle}" FontSize="16"
-                           FontWeight="Medium" Margin="12,0,0,2" VerticalAlignment="Bottom" />
-              </StackPanel>
-              <TextBlock Text="{Binding Today}" Style="{StaticResource Caption}" DockPanel.Dock="Right"
+            <Grid>
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+              </Grid.ColumnDefinitions>
+              <TextBlock Grid.Column="0" Text="PCConnect" Style="{StaticResource PageTitle}" VerticalAlignment="Bottom" />
+              <TextBlock Grid.Column="1" Text="{Binding ThisPcName}" Style="{StaticResource Subtle}" FontSize="16"
+                         FontWeight="Medium" Margin="12,0,12,2" VerticalAlignment="Bottom"
+                         TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
+              <TextBlock Grid.Column="2" Text="{Binding Today}" Style="{StaticResource Caption}"
                          VerticalAlignment="Bottom" />
-            </DockPanel>
+            </Grid>
 
             <StackPanel Grid.Row="1" Margin="0,18,0,0">
               <Border BorderBrush="{StaticResource WarnDot}" BorderThickness="1"
@@ -561,17 +571,29 @@
                   </DockPanel>
 
                   <Grid Margin="0,14,0,0">
-                    <TextBlock Text="Signed in as" Style="{StaticResource Subtle}"
-                               Foreground="{StaticResource InkSoft}" HorizontalAlignment="Left" />
-                    <TextBlock Text="{Binding Account.DisplayName}" Style="{StaticResource Subtle}"
-                               FontWeight="Medium" HorizontalAlignment="Right" />
+                    <Grid.ColumnDefinitions>
+                      <ColumnDefinition Width="Auto" />
+                      <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Grid.Column="0" Text="Signed in as" Style="{StaticResource Subtle}"
+                               Foreground="{StaticResource InkSoft}" HorizontalAlignment="Left" Margin="0,0,12,0" />
+                    <TextBlock Grid.Column="1" Text="{Binding Account.DisplayName}" Style="{StaticResource Subtle}"
+                               FontWeight="Medium" HorizontalAlignment="Right"
+                               TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"
+                               ToolTip="{Binding Account.DisplayName}" />
                   </Grid>
 
                   <Grid Margin="0,10,0,0">
-                    <TextBlock Text="Last command" Style="{StaticResource Subtle}"
-                               Foreground="{StaticResource InkSoft}" HorizontalAlignment="Left" />
-                    <TextBlock Text="{Binding LastCommandSummary}" Style="{StaticResource Subtle}"
-                               FontWeight="Medium" HorizontalAlignment="Right" />
+                    <Grid.ColumnDefinitions>
+                      <ColumnDefinition Width="Auto" />
+                      <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Grid.Column="0" Text="Last command" Style="{StaticResource Subtle}"
+                               Foreground="{StaticResource InkSoft}" HorizontalAlignment="Left" Margin="0,0,12,0" />
+                    <TextBlock Grid.Column="1" Text="{Binding LastCommandSummary}" Style="{StaticResource Subtle}"
+                               FontWeight="Medium" HorizontalAlignment="Right"
+                               TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"
+                               ToolTip="{Binding LastCommandSummary}" />
                   </Grid>
 
                   <Border Style="{StaticResource Note}" Margin="0,14,0,0">
@@ -681,12 +703,17 @@
                               Padding="6,8,2,8" Margin="2,2"
                               PreviewMouseWheel="OnDayColumnPreviewMouseWheel">
                         <DockPanel LastChildFill="True">
-                          <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="2,0,0,8">
-                            <TextBlock x:Name="Label" Text="{Binding Label}" FontSize="12"
+                          <Grid DockPanel.Dock="Top" Margin="2,0,2,8">
+                            <Grid.ColumnDefinitions>
+                              <ColumnDefinition Width="Auto" />
+                              <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock x:Name="Label" Grid.Column="0" Text="{Binding Label}" FontSize="12"
                                        FontWeight="SemiBold" Foreground="{StaticResource InkSoft}" />
-                            <TextBlock Text="{Binding Number}" FontSize="12" Margin="6,0,0,0"
-                                       Foreground="{StaticResource InkFaint}" />
-                          </StackPanel>
+                            <TextBlock Grid.Column="1" Text="{Binding Number}" FontSize="12" Margin="6,0,0,0"
+                                       Foreground="{StaticResource InkFaint}"
+                                       TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
+                          </Grid>
 
                           <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
                                         Focusable="False" Padding="0,0,3,0">
@@ -872,8 +899,9 @@
                         <Path Data="{StaticResource Icon.ChevronRight}" Fill="{StaticResource InkDisabled}"
                               Width="20" Height="20" Stretch="Uniform" DockPanel.Dock="Right"
                               VerticalAlignment="Center" />
-                        <StackPanel>
-                          <TextBlock Text="{Binding DisplayName}" Style="{StaticResource CardTitle}" />
+                        <StackPanel Margin="0,0,8,0">
+                          <TextBlock Text="{Binding DisplayName}" Style="{StaticResource CardTitle}"
+                                     TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
                           <DockPanel Margin="0,2,0,0">
                             <Ellipse Width="7" Height="7" VerticalAlignment="Center" DockPanel.Dock="Left"
                                      Fill="{Binding IsOnline, Converter={StaticResource OnlineBrush}}" />
@@ -910,19 +938,23 @@
                          Visibility="{Binding SelectedDevice, Converter={StaticResource NotNullToVis}}">
                 <Border DockPanel.Dock="Top" Style="{StaticResource Card}" Margin="0,0,0,14">
                   <StackPanel>
-                    <DockPanel LastChildFill="False">
-                      <StackPanel DockPanel.Dock="Left">
+                    <Grid>
+                      <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                      </Grid.ColumnDefinitions>
+                      <StackPanel Grid.Column="0" Margin="0,0,12,0">
                         <TextBlock Text="{Binding SelectedDevice.DisplayName}" Style="{StaticResource Heading}"
-                                   FontSize="17" />
-                        <StackPanel Orientation="Horizontal" Margin="0,2,0,0">
-                          <Ellipse Width="7" Height="7" VerticalAlignment="Center"
+                                   FontSize="17" TextWrapping="Wrap" />
+                        <DockPanel Margin="0,2,0,0">
+                          <Ellipse Width="7" Height="7" VerticalAlignment="Center" DockPanel.Dock="Left"
                                    Fill="{Binding SelectedDevice.IsOnline, Converter={StaticResource OnlineBrush}}" />
                           <TextBlock Text="{Binding SelectedDevice.Summary}" Style="{StaticResource Caption}"
-                                     Foreground="{StaticResource InkSoft}" Margin="6,0,0,0" />
-                        </StackPanel>
+                                     Foreground="{StaticResource InkSoft}" Margin="6,0,0,0" TextWrapping="Wrap" />
+                        </DockPanel>
                       </StackPanel>
 
-                      <Button DockPanel.Dock="Right" Command="{Binding ShowLogCommand}"
+                      <Button Grid.Column="1" Command="{Binding ShowLogCommand}" VerticalAlignment="Top"
                               Padding="10,0" Height="32" ToolTip="Activity for this PC">
                         <StackPanel Orientation="Horizontal">
                           <Path Data="{StaticResource Icon.History}" Fill="{StaticResource InkSoft}"
@@ -931,7 +963,7 @@
                                      Foreground="{StaticResource Ink}" FontSize="12.5" />
                         </StackPanel>
                       </Button>
-                    </DockPanel>
+                    </Grid>
 
                     <ItemsControl ItemsSource="{Binding SelectedCommands}" Margin="0,14,0,0">
                       <ItemsControl.ItemsPanel>
@@ -953,8 +985,8 @@
                                     Width="15" Height="15" Stretch="Uniform" DockPanel.Dock="Right"
                                     VerticalAlignment="Center"
                                     Visibility="{Binding AsksForPassword, Converter={StaticResource BoolToVis}}" />
-                              <TextBlock Text="{Binding Name}" Margin="8,0,0,0" VerticalAlignment="Center"
-                                         FontWeight="SemiBold"
+                              <TextBlock Text="{Binding Name}" Margin="8,0,6,0" VerticalAlignment="Center"
+                                         FontWeight="SemiBold" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"
                                          Foreground="{Binding IsDestructive, Converter={StaticResource DangerText}}" />
                             </DockPanel>
                           </Button>
@@ -962,16 +994,20 @@
                       </ItemsControl.ItemTemplate>
                     </ItemsControl>
 
-                    <DockPanel LastChildFill="False">
-                      <StackPanel Orientation="Horizontal" DockPanel.Dock="Left">
+                    <Grid>
+                      <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                      </Grid.ColumnDefinitions>
+                      <DockPanel Grid.Column="0">
                         <Path Data="{StaticResource Icon.Key}" Fill="{StaticResource InkFaint}"
-                              Width="15" Height="15" Stretch="Uniform" VerticalAlignment="Center" />
+                              Width="15" Height="15" Stretch="Uniform" DockPanel.Dock="Left" VerticalAlignment="Center" />
                         <TextBlock Text="Available and password-protected commands follow this PC's desktop preferences"
-                                   Style="{StaticResource Caption}" Margin="6,0,0,0" />
-                      </StackPanel>
-                      <TextBlock Text="{Binding StatusMessage}" Style="{StaticResource Caption}"
-                                 DockPanel.Dock="Right" Foreground="{StaticResource InkSoft}" />
-                    </DockPanel>
+                                   Style="{StaticResource Caption}" Margin="6,0,0,0" TextWrapping="Wrap" VerticalAlignment="Center" />
+                      </DockPanel>
+                      <TextBlock Grid.Column="1" Text="{Binding StatusMessage}" Style="{StaticResource Caption}"
+                                 Margin="12,0,0,0" VerticalAlignment="Center" Foreground="{StaticResource InkSoft}" />
+                    </Grid>
                   </StackPanel>
                 </Border>
 
@@ -995,7 +1031,7 @@
           <!-- the activity log, over the page -->
           <Grid Background="#730F172A" DataContext="{Binding Devices}"
                 Visibility="{Binding IsLogOpen, Converter={StaticResource BoolToVis}}">
-            <Grid Width="680" MaxHeight="580" VerticalAlignment="Center" HorizontalAlignment="Center">
+            <Grid Width="680" MaxWidth="680" MaxHeight="580" Margin="32" VerticalAlignment="Center" HorizontalAlignment="Center">
               <!-- Shadow Layer: childless border, avoids bitmap rasterization of text -->
               <Border Background="{StaticResource Surface}" CornerRadius="14">
                 <Border.Effect>
@@ -1009,23 +1045,28 @@
                       TextOptions.TextRenderingMode="ClearType"
                       UseLayoutRounding="True" SnapsToDevicePixels="True">
                 <DockPanel Margin="22,20">
-                  <DockPanel DockPanel.Dock="Top" LastChildFill="False">
-                    <StackPanel DockPanel.Dock="Left">
-                      <TextBlock Style="{StaticResource CardTitle}" FontSize="17">
+                  <Grid DockPanel.Dock="Top">
+                    <Grid.ColumnDefinitions>
+                      <ColumnDefinition Width="*" />
+                      <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0" Margin="0,0,12,0">
+                      <TextBlock Style="{StaticResource CardTitle}" FontSize="17" TextWrapping="Wrap">
                         <Run Text="Activity · " /><Run Text="{Binding SelectedDevice.DisplayName, Mode=OneWay}" />
                       </TextBlock>
                       <TextBlock Style="{StaticResource Caption}" Margin="0,2,0,0" TextWrapping="Wrap"
                                  Text="Every command sent to this PC, newest first. Nothing secret is recorded." />
                     </StackPanel>
-                    <Button DockPanel.Dock="Right" Command="{Binding CloseLogCommand}" BorderThickness="0"
+                    <Button Grid.Column="1" Command="{Binding CloseLogCommand}" BorderThickness="0"
                             Background="Transparent" Padding="6" VerticalAlignment="Top">
                       <Path Data="{StaticResource Icon.Close}" Fill="{StaticResource InkSoft}"
                             Width="20" Height="20" Stretch="Uniform" />
                     </Button>
-                  </DockPanel>
+                  </Grid>
 
                   <ScrollViewer Margin="0,14,0,0" VerticalScrollBarVisibility="Auto">
                     <ItemsControl ItemsSource="{Binding SelectedActivity}"
+                                  Padding="0,0,6,0"
                                   ItemTemplate="{StaticResource ActivityRowTemplate}" />
                   </ScrollViewer>
                 </DockPanel>
@@ -1082,18 +1123,22 @@
                   </Grid.ColumnDefinitions>
 
                   <DockPanel Margin="0,0,12,0">
-                    <DockPanel DockPanel.Dock="Top" LastChildFill="False">
-                      <StackPanel DockPanel.Dock="Left">
-                        <TextBlock Text="{Binding ListTitle}" Style="{StaticResource CardTitle}" />
+                    <Grid DockPanel.Dock="Top">
+                      <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                      </Grid.ColumnDefinitions>
+                      <StackPanel Grid.Column="0" Margin="0,0,8,0">
+                        <TextBlock Text="{Binding ListTitle}" Style="{StaticResource CardTitle}" TextWrapping="Wrap" />
                         <TextBlock Text="{Binding ListSummary}" Style="{StaticResource Caption}"
-                                   Margin="0,2,0,0" />
+                                   Margin="0,2,0,0" TextWrapping="Wrap" />
                       </StackPanel>
-                      <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                      <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
                         <Button Content="Show all" Command="{Binding ClearSelectionCommand}"
                                 Height="28" Padding="10,0" FontSize="12.5"
                                 Visibility="{Binding HasSelection, Converter={StaticResource BoolToVis}}" />
                       </StackPanel>
-                    </DockPanel>
+                    </Grid>
 
                     <!-- Action bar for filtering reminders (completed and recurring) -->
                     <UniformGrid Rows="1" DockPanel.Dock="Top" Margin="0,8,0,2">
@@ -1106,13 +1151,17 @@
                           <ControlTemplate TargetType="Button">
                             <Border x:Name="Bd" Background="{TemplateBinding Background}"
                                     CornerRadius="8" Padding="6,0">
-                              <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
-                                <Path x:Name="Ico" Data="{StaticResource Icon.CheckCircle}" Fill="{StaticResource InkSoft}"
+                              <Grid HorizontalAlignment="Center" VerticalAlignment="Center">
+                                <Grid.ColumnDefinitions>
+                                  <ColumnDefinition Width="Auto" />
+                                  <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Path x:Name="Ico" Grid.Column="0" Data="{StaticResource Icon.CheckCircle}" Fill="{StaticResource InkSoft}"
                                       Width="13" Height="13" Stretch="Uniform" Margin="0,0,5,0" VerticalAlignment="Center" />
-                                <TextBlock x:Name="Txt" Text="{Binding DataContext.CompletedRemindersButtonText, RelativeSource={RelativeSource AncestorType=Button}}"
-                                           FontSize="11.5" FontWeight="Medium" TextTrimming="CharacterEllipsis"
+                                <TextBlock x:Name="Txt" Grid.Column="1" Text="{Binding DataContext.CompletedRemindersButtonText, RelativeSource={RelativeSource AncestorType=Button}}"
+                                           FontSize="11.5" FontWeight="Medium" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"
                                            Foreground="{StaticResource InkSoft}" VerticalAlignment="Center" />
-                              </StackPanel>
+                              </Grid>
                             </Border>
                             <ControlTemplate.Triggers>
                               <Trigger Property="IsMouseOver" Value="True">
@@ -1134,13 +1183,17 @@
                           <ControlTemplate TargetType="Button">
                             <Border x:Name="Bd" Background="{TemplateBinding Background}"
                                     CornerRadius="8" Padding="6,0">
-                              <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
-                                <Path x:Name="Ico" Data="{StaticResource Icon.EventRepeat}" Fill="{StaticResource InkSoft}"
+                              <Grid HorizontalAlignment="Center" VerticalAlignment="Center">
+                                <Grid.ColumnDefinitions>
+                                  <ColumnDefinition Width="Auto" />
+                                  <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Path x:Name="Ico" Grid.Column="0" Data="{StaticResource Icon.EventRepeat}" Fill="{StaticResource InkSoft}"
                                       Width="13" Height="13" Stretch="Uniform" Margin="0,0,5,0" VerticalAlignment="Center" />
-                                <TextBlock x:Name="Txt" Text="{Binding DataContext.HideRecurringButtonText, RelativeSource={RelativeSource AncestorType=Button}}"
-                                           FontSize="11.5" FontWeight="Medium" TextTrimming="CharacterEllipsis"
+                                <TextBlock x:Name="Txt" Grid.Column="1" Text="{Binding DataContext.HideRecurringButtonText, RelativeSource={RelativeSource AncestorType=Button}}"
+                                           FontSize="11.5" FontWeight="Medium" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"
                                            Foreground="{StaticResource InkSoft}" VerticalAlignment="Center" />
-                              </StackPanel>
+                              </Grid>
                             </Border>
                             <ControlTemplate.Triggers>
                               <Trigger Property="IsMouseOver" Value="True">
@@ -1160,12 +1213,12 @@
                         <!-- Non-recurring section header (shown when recurring reminders are also present and visible) -->
                         <Border Margin="0,4,0,4"
                                 Visibility="{Binding ShowNonRecurringHeader, Converter={StaticResource BoolToVis}}">
-                          <DockPanel>
+                          <WrapPanel Orientation="Horizontal" VerticalAlignment="Center">
                             <TextBlock Text="{Binding NonRecurringSectionTitle}" FontSize="12.5" FontWeight="SemiBold"
                                        Foreground="{StaticResource InkSoft}" VerticalAlignment="Center" />
                             <TextBlock Text="{Binding NonRecurringCountText}" FontSize="11.5"
                                        Foreground="{StaticResource InkFaint}" Margin="6,0,0,0" VerticalAlignment="Center" />
-                          </DockPanel>
+                          </WrapPanel>
                         </Border>
 
                         <!-- Non-recurring items -->
@@ -1174,16 +1227,14 @@
                         <!-- Recurring section header -->
                         <Border Margin="0,14,0,4"
                                 Visibility="{Binding ShowRecurringSection, Converter={StaticResource BoolToVis}}">
-                          <DockPanel>
-                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                              <Path Data="{StaticResource Icon.EventRepeat}" Fill="{StaticResource InkSoft}"
-                                    Width="13" Height="13" Stretch="Uniform" Margin="0,0,6,0" VerticalAlignment="Center" />
-                              <TextBlock Text="{Binding RecurringSectionTitle}" FontSize="12.5" FontWeight="SemiBold"
-                                         Foreground="{StaticResource InkSoft}" VerticalAlignment="Center" />
-                              <TextBlock Text="{Binding RecurringCountText}" FontSize="11.5"
-                                         Foreground="{StaticResource InkFaint}" Margin="6,0,0,0" VerticalAlignment="Center" />
-                            </StackPanel>
-                          </DockPanel>
+                          <WrapPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <Path Data="{StaticResource Icon.EventRepeat}" Fill="{StaticResource InkSoft}"
+                                  Width="13" Height="13" Stretch="Uniform" Margin="0,0,6,0" VerticalAlignment="Center" />
+                            <TextBlock Text="{Binding RecurringSectionTitle}" FontSize="12.5" FontWeight="SemiBold"
+                                       Foreground="{StaticResource InkSoft}" VerticalAlignment="Center" />
+                            <TextBlock Text="{Binding RecurringCountText}" FontSize="11.5"
+                                       Foreground="{StaticResource InkFaint}" Margin="6,0,0,0" VerticalAlignment="Center" />
+                          </WrapPanel>
                         </Border>
 
                         <!-- Recurring items -->
@@ -1870,8 +1921,8 @@
 
             <Grid Grid.Row="1" Margin="0,18,0,0">
               <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="380" />
-                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="0.95*" MaxWidth="400" />
+                <ColumnDefinition Width="1.15*" />
               </Grid.ColumnDefinitions>
 
               <ScrollViewer Margin="0,0,16,0" VerticalScrollBarVisibility="Auto">
@@ -2034,7 +2085,8 @@
                 </StackPanel>
               </ScrollViewer>
 
-              <DockPanel Grid.Column="1" LastChildFill="False">
+              <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto">
+              <DockPanel LastChildFill="False">
                 <Border DockPanel.Dock="Top" Style="{StaticResource Card}" Margin="0,0,0,14">
                   <StackPanel>
                     <StackPanel>
@@ -2046,14 +2098,14 @@
                     <Grid Margin="0,14,0,4">
                       <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="96" />
-                        <ColumnDefinition Width="140" />
+                        <ColumnDefinition Width="76" />
+                        <ColumnDefinition Width="124" />
                       </Grid.ColumnDefinitions>
-                      <TextBlock Text="COMMAND" Style="{StaticResource ColumnLabel}" />
+                      <TextBlock Text="COMMAND" Style="{StaticResource ColumnLabel}" VerticalAlignment="Bottom" />
                       <TextBlock Grid.Column="1" Text="ACCEPTED" Style="{StaticResource ColumnLabel}"
-                                 HorizontalAlignment="Center" />
+                                 HorizontalAlignment="Center" VerticalAlignment="Bottom" TextAlignment="Center" TextWrapping="Wrap" />
                       <TextBlock Grid.Column="2" Text="ASKS FOR PASSWORD" Style="{StaticResource ColumnLabel}"
-                                 HorizontalAlignment="Center" />
+                                 HorizontalAlignment="Center" VerticalAlignment="Bottom" TextAlignment="Center" TextWrapping="Wrap" />
                     </Grid>
 
                     <ItemsControl ItemsSource="{Binding Commands}">
@@ -2063,18 +2115,18 @@
                             <Grid>
                               <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="96" />
-                                <ColumnDefinition Width="140" />
+                                <ColumnDefinition Width="76" />
+                                <ColumnDefinition Width="124" />
                               </Grid.ColumnDefinitions>
 
-                              <StackPanel Orientation="Horizontal">
+                              <DockPanel Grid.Column="0" Margin="0,0,8,0">
                                 <Path Data="{Binding IconKey, Converter={StaticResource IconKey}}"
-                                      Fill="{StaticResource Ink}"
+                                      Fill="{StaticResource Ink}" DockPanel.Dock="Left"
                                       Width="18" Height="18" Stretch="Uniform" VerticalAlignment="Center" />
                                 <TextBlock Text="{Binding Name}" Style="{StaticResource Subtle}"
                                            FontWeight="Medium" Margin="10,0,0,0" VerticalAlignment="Center"
-                                           Foreground="{StaticResource Ink}" />
-                              </StackPanel>
+                                           Foreground="{StaticResource Ink}" TextWrapping="Wrap" />
+                              </DockPanel>
 
                               <Button Grid.Column="1" HorizontalAlignment="Center" BorderThickness="0"
                                       Background="Transparent" Padding="4"
@@ -2161,7 +2213,7 @@
                                          Foreground="{StaticResource InkFaint}" />
                             </Border>
                           </StackPanel>
-                          <TextBlock Style="{StaticResource Caption}" Margin="0,2,0,0"
+                          <TextBlock Style="{StaticResource Caption}" Margin="0,2,0,0" TextWrapping="Wrap"
                                      Text="Commands this account sent, and what happened. Nothing secret is recorded." />
                         </StackPanel>
                       </DockPanel>
@@ -2229,6 +2281,7 @@
                                      Margin="0,16,0,12"
                                      Visibility="{Binding HasActivity, Converter={StaticResource NotBoolToVis}}" />
                           <ItemsControl ItemsSource="{Binding Activity}"
+                                        Padding="0,0,6,0"
                                         ItemTemplate="{StaticResource ActivityRowTemplate}"
                                         Visibility="{Binding HasActivity, Converter={StaticResource BoolToVis}}" />
                         </StackPanel>
@@ -2237,6 +2290,7 @@
                   </DockPanel>
                 </Border>
               </DockPanel>
+              </ScrollViewer>
             </Grid>
           </Grid>
         </Grid>
@@ -2249,7 +2303,7 @@
               PreviewMouseLeftButtonDown="OnEventDetailBackdropMouseDown" />
 
       <!-- Centered Modal Card Container with isolated Drop Shadow -->
-      <Grid x:Name="EventDetailCardContainer" Width="460"
+      <Grid x:Name="EventDetailCardContainer" Width="460" MaxWidth="460" Margin="24"
             HorizontalAlignment="Center" VerticalAlignment="Center"
             RenderTransformOrigin="0.5,0.5">
         <Grid.RenderTransform>
@@ -2548,32 +2602,38 @@
             </StackPanel>
 
             <!-- Action Buttons -->
-            <DockPanel LastChildFill="False">
-              <Button Command="{Binding DataContext.ToggleActiveEventCompleteCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                      Visibility="{Binding IsRecurring, Converter={StaticResource NotBoolToVis}}"
-                      DockPanel.Dock="Left" Padding="14,0" Height="34" Margin="0,0,8,0" Cursor="Hand">
-                <Button.Style>
-                  <Style TargetType="Button" BasedOn="{StaticResource PrimaryButton}">
-                    <Setter Property="Content" Value="Mark as Complete" />
-                    <Style.Triggers>
-                      <DataTrigger Binding="{Binding IsCompleted}" Value="True">
-                        <Setter Property="Content" Value="Reopen Reminder" />
-                      </DataTrigger>
-                    </Style.Triggers>
-                  </Style>
-                </Button.Style>
-              </Button>
+            <Grid>
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+              </Grid.ColumnDefinitions>
+              <WrapPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                <Button Command="{Binding DataContext.ToggleActiveEventCompleteCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                        Visibility="{Binding IsRecurring, Converter={StaticResource NotBoolToVis}}"
+                        Padding="14,0" Height="34" Margin="0,2,8,2" Cursor="Hand">
+                  <Button.Style>
+                    <Style TargetType="Button" BasedOn="{StaticResource PrimaryButton}">
+                      <Setter Property="Content" Value="Mark as Complete" />
+                      <Style.Triggers>
+                        <DataTrigger Binding="{Binding IsCompleted}" Value="True">
+                          <Setter Property="Content" Value="Reopen Reminder" />
+                        </DataTrigger>
+                      </Style.Triggers>
+                    </Style>
+                  </Button.Style>
+                </Button>
 
-              <Button Command="{Binding DataContext.EditActiveEventCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                      Content="Edit" DockPanel.Dock="Left" Padding="14,0" Height="34" Margin="0,0,8,0" Cursor="Hand" />
+                <Button Command="{Binding DataContext.EditActiveEventCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                        Content="Edit" Padding="14,0" Height="34" Margin="0,2,8,2" Cursor="Hand" />
 
-              <Button Command="{Binding DataContext.DeleteActiveEventCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                      Content="Delete" DockPanel.Dock="Left" Padding="14,0" Height="34" Cursor="Hand"
-                      Foreground="{StaticResource DangerInk}" />
+                <Button Command="{Binding DataContext.DeleteActiveEventCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                        Content="Delete" Padding="14,0" Height="34" Margin="0,2,8,2" Cursor="Hand"
+                        Foreground="{StaticResource DangerInk}" />
+              </WrapPanel>
 
-              <Button Click="OnEventDetailCloseClick" Content="Close" DockPanel.Dock="Right"
-                      Padding="14,0" Height="34" Cursor="Hand" />
-            </DockPanel>
+              <Button Grid.Column="1" Click="OnEventDetailCloseClick" Content="Close"
+                      VerticalAlignment="Center" Padding="14,0" Height="34" Margin="0,2,0,2" Cursor="Hand" />
+            </Grid>
           </StackPanel>
         </Border>
       </Grid>
