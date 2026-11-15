@@ -190,9 +190,9 @@ function Get-AdbDevices {
             continue
         }
 
-        if ($line -match '^\s*([^\s]+)\s+([^\s]+)(.*)$') {
-            $serial = $Matches[1]
-            $state = $Matches[2]
+        if ($line -match '^\s*(.+?)\s+(device|offline|unauthorized|authorizing|connecting|bootloader|recovery|sideload)\b(.*)$') {
+            $serial = $Matches[1].Trim()
+            $state = $Matches[2].Trim()
             $extra = $Matches[3]
 
             $model = if ($extra -match '\bmodel:([^\s]+)') { $Matches[1] } else { "" }
@@ -288,9 +288,24 @@ function Select-TargetDevice {
     )
 
     $devices = Get-AdbDevices $Adb
+    if (@($devices | Where-Object { $_.IsPhysical -and $_.State -eq "device" }).Count -eq 0) {
+        # Give mDNS (_adb-tls-connect._tcp) up to 3 seconds to auto-discover wireless debugging devices
+        for ($wait = 0; $wait -lt 6; $wait++) {
+            Start-Sleep -Milliseconds 500
+            $devices = Get-AdbDevices $Adb
+            if (@($devices | Where-Object { $_.IsPhysical -and $_.State -eq "device" }).Count -gt 0) {
+                break
+            }
+        }
+    }
 
     # Case 1: Explicit device requested
     if (-not [string]::IsNullOrWhiteSpace($RequestedDevice)) {
+        if ($RequestedDevice -match '^\d{1,3}(\.\d{1,3}){3}(:\d+)?$') {
+            [void](Invoke-Quiet $Adb @("connect", $RequestedDevice))
+            $devices = Get-AdbDevices $Adb
+        }
+
         $matching = @($devices | Where-Object {
             $_.Serial -eq $RequestedDevice -or
             $_.Model -eq $RequestedDevice -or
@@ -389,6 +404,16 @@ $env:Path = "$(Join-Path $env:JAVA_HOME 'bin');$(Join-Path $androidSdk 'platform
 
 $adbExe = Join-Path $androidSdk "platform-tools\adb.exe"
 $emulatorExe = Join-Path $androidSdk "emulator\emulator.exe"
+
+# Ensure any running adb daemon is the Android SDK's adb.exe (and not another copy on PATH blocked by Windows Firewall)
+$foreignAdb = @(Get-Process adb -ErrorAction SilentlyContinue | Where-Object {
+    $_.Path -and ([string]::Compare($_.Path, $adbExe, $true) -ne 0)
+})
+if ($foreignAdb.Count -gt 0) {
+    Write-Host "Stopping non-SDK adb.exe ($($foreignAdb[0].Path)) and starting SDK adb server..." -ForegroundColor Yellow
+    $foreignAdb | Stop-Process -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Milliseconds 300
+}
 
 [void](Invoke-Quiet $adbExe @("start-server"))
 
